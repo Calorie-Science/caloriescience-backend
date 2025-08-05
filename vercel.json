@@ -2,9 +2,15 @@
   "version": 2,
   "functions": {
     "api/**/*.ts": {
-      "runtime": "@vercel/node"
+      "runtime": "@vercel/node@18.x"
+    },
+    "api/**/*.js": {
+      "runtime": "@vercel/node@18.x"
     }
   },
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
   "rewrites": [
     {
       "source": "/api/(.*)",
