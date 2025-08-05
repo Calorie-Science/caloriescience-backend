@@ -2,12 +2,16 @@
   "name": "caloriescience-backend",
   "version": "1.0.0",
   "description": "CalorieScience CRM Backend API",
-  "main": "api/index.js",
+  "main": "server.js",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "node server-simple.js",
+    "dev:watch": "nodemon server-simple.js",
+    "dev:ts": "npm run build && node server.js",
     "build": "tsc",
-    "start": "vercel --prod",
-    "type-check": "tsc --noEmit"
+    "start": "node server.js",
+    "vercel:dev": "vercel dev",
+    "type-check": "tsc --noEmit",
+    "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
@@ -18,7 +22,9 @@
     "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.1",
     "nodemailer": "^6.9.7",
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -27,7 +33,12 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/uuid": "^9.0.7",
     "@types/nodemailer": "^6.4.14",
-    "typescript": "^5.3.0"
+    "@types/express": "^4.17.21",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "nodemon": "^3.0.2",
+    "@vercel/node": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
