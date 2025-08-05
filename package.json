@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "node server-simple.js",
     "dev:watch": "nodemon server-simple.js",
-    "dev:ts": "npm run build && node server.js",
-    "build": "echo 'Build completed - using JavaScript files directly'",
-    "build:ts": "tsc",
+    "build": "tsc",
     "start": "node server.js",
     "vercel:dev": "vercel dev",
     "type-check": "tsc --noEmit",
