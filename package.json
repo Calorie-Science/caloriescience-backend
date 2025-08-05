@@ -1,0 +1,35 @@
+{
+  "name": "caloriescience-backend",
+  "version": "1.0.0",
+  "description": "CalorieScience CRM Backend API",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "tsc",
+    "start": "vercel --prod",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "openai": "^4.24.0",
+    "cors": "^2.8.5",
+    "joi": "^17.11.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1",
+    "nodemailer": "^6.9.7",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/cors": "^2.8.17",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/uuid": "^9.0.7",
+    "@types/nodemailer": "^6.4.14",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
