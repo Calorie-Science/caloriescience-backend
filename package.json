@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node server-simple.js",
     "dev:watch": "nodemon server-simple.js",
-    "build": "tsc",
+    "build": "echo 'Skipping build - Vercel handles TypeScript compilation'",
+    "build:local": "tsc",
     "start": "node server.js",
     "vercel:dev": "vercel dev",
     "type-check": "tsc --noEmit",

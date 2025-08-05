@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { config } from './config';
@@ -27,9 +27,11 @@ export function generateToken(user: AuthUser): string {
     role: user.role
   };
 
-  return jwt.sign(payload, config.jwt.secret, {
+  const signOptions: SignOptions = {
     expiresIn: config.jwt.expiresIn
-  });
+  };
+
+  return jwt.sign(payload, config.jwt.secret as string, signOptions);
 }
 
 // Verify JWT token
