@@ -41,6 +41,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 OPENAI_API_KEY=sk-your-openai-api-key
 OPENAI_MODEL=gpt-4
 OPENAI_MAX_TOKENS=1000
+OPENAI_ASSISTANT_ID=asst_your_assistant_id_here
 
 # JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-change-in-production

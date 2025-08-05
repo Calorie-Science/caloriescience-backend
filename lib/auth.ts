@@ -27,7 +27,7 @@ export function generateToken(user: AuthUser): string {
     role: user.role
   };
 
-  const signOptions: SignOptions = {
+  const signOptions = {
     expiresIn: config.jwt.expiresIn
   };
 

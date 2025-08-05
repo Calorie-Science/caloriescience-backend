@@ -1,9 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
-import { hashPassword, generateRandomToken, generateToken } from '../../lib/auth';
+import { hashPassword, generateToken, generateRandomToken } from '../../lib/auth';
 import { validateBody, userRegistrationSchema } from '../../lib/validation';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');

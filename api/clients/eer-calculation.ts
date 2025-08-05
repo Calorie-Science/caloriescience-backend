@@ -1,12 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
-import { calculateEER } from '../../lib/openai';
+import { calculateEERWithAssistant } from '../../lib/openai';
 import { validateBody, eerCalculationSchema } from '../../lib/validation';
 
-async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method === 'POST') {
-    // Generate EER calculation using AI
+    // Generate EER calculation using OpenAI Assistant
     try {
       const validation = validateBody(eerCalculationSchema, req.body);
       if (!validation.isValid) {
@@ -33,13 +33,16 @@ async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // Calculate EER using OpenAI
-      const eerResult = await calculateEER({
+      // Calculate EER using OpenAI Assistant
+      const eerResult = await calculateEERWithAssistant({
+        country: data.country,
         age: data.age,
-        gender: data.gender,
+        sex: data.sex,
         weight_kg: data.weight_kg,
         height_cm: data.height_cm,
+        pal: data.pal,
         activity_level: data.activity_level,
+        special_cases: data.special_cases,
         health_goals: data.health_goals,
         medical_conditions: data.medical_conditions
       });

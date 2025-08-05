@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { verifyPassword, generateToken, updateLastLogin } from '../../lib/auth';
 import { validateBody, userLoginSchema } from '../../lib/validation';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');

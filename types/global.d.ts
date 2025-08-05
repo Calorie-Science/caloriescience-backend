@@ -10,6 +10,7 @@ declare global {
       OPENAI_API_KEY: string;
       OPENAI_MODEL?: string;
       OPENAI_MAX_TOKENS?: string;
+      OPENAI_ASSISTANT_ID?: string;
       
       // JWT
       JWT_SECRET?: string;

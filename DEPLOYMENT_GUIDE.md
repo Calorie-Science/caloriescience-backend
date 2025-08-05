@@ -28,6 +28,7 @@ JWT_EXPIRES_IN=7d
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-4
 OPENAI_MAX_TOKENS=2000
+OPENAI_ASSISTANT_ID=asst_your_assistant_id_here
 
 # Application URLs
 APP_BASE_URL=https://your-app.vercel.app

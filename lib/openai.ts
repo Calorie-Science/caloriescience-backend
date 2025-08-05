@@ -5,12 +5,27 @@ export const openai = new OpenAI({
   apiKey: config.openai.apiKey
 });
 
+// Original interface for backward compatibility
 export interface EERCalculationInput {
   age: number;
   gender: 'male' | 'female';
   weight_kg: number;
   height_cm: number;
   activity_level: 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extra_active';
+  health_goals?: string[];
+  medical_conditions?: string[];
+}
+
+// Updated interface for OpenAI Assistant EER calculation
+export interface AssistantEERCalculationInput {
+  country: string;
+  age: number;
+  sex: 'male' | 'female';
+  weight_kg: number;
+  height_cm: number;
+  pal?: number; // Physical Activity Level
+  activity_level?: 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extra_active';
+  special_cases?: string;
   health_goals?: string[];
   medical_conditions?: string[];
 }
@@ -134,6 +149,168 @@ Return ONLY a valid JSON object with this exact structure (no additional text):
   } catch (error) {
     console.error('OpenAI EER calculation error:', error);
     throw new Error('Failed to calculate nutritional requirements. Please try again.');
+  }
+}
+
+// New function using OpenAI Assistant for EER calculation
+export async function calculateEERWithAssistant(input: AssistantEERCalculationInput): Promise<any> {
+  // Make Assistant ID configurable via environment variable
+  const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_KY2OIYshbs9FApI6UmwkRY6j'; // CS Calorie Calculator
+  
+  // Create the user prompt for EER calculation
+  const userPrompt = `
+Please calculate the Estimated Energy Requirements (EER) and complete nutritional needs for this individual:
+
+INDIVIDUAL PROFILE:
+- Country: ${input.country}
+- Age: ${input.age} years
+- Sex: ${input.sex}
+- Weight: ${input.weight_kg} kg
+- Height: ${input.height_cm} cm
+${input.pal ? `- Physical Activity Level (PAL): ${input.pal}` : ''}
+${input.activity_level ? `- Activity Level: ${input.activity_level}` : ''}
+${input.special_cases ? `- Special Cases: ${input.special_cases}` : ''}
+${input.health_goals?.length ? `- Health Goals: ${input.health_goals.join(', ')}` : ''}
+${input.medical_conditions?.length ? `- Medical Conditions: ${input.medical_conditions.join(', ')}` : ''}
+
+Please provide a comprehensive nutritional calculation including:
+1. Total daily energy requirement (EER) in calories
+2. Macronutrient breakdown (protein, carbohydrates, fat, fiber)
+3. Micronutrient requirements (vitamins and minerals)
+4. Daily water intake recommendation
+
+Return the response as a JSON object with the exact structure:
+{
+  "eer_calories": <integer>,
+  "protein_grams": <number>,
+  "carbs_grams": <number>,
+  "fat_grams": <number>,
+  "fiber_grams": <number>,
+  "protein_percentage": <number>,
+  "carbs_percentage": <number>,
+  "fat_percentage": <number>,
+  "vitamin_d_mcg": <number>,
+  "vitamin_b12_mcg": <number>,
+  "vitamin_c_mg": <number>,
+  "iron_mg": <number>,
+  "calcium_mg": <number>,
+  "magnesium_mg": <number>,
+  "zinc_mg": <number>,
+  "folate_mcg": <number>,
+  "water_ml": <integer>
+}
+`;
+
+  try {
+    console.log('Starting OpenAI Assistant EER calculation...');
+    console.log('Assistant ID:', ASSISTANT_ID);
+    
+    // First, verify the assistant exists
+    try {
+      const assistant = await openai.beta.assistants.retrieve(ASSISTANT_ID);
+      console.log('Assistant found:', assistant.name);
+    } catch (assistantError) {
+      console.error('Assistant not found:', assistantError);
+      throw new Error(`Assistant with ID ${ASSISTANT_ID} not found. Please check your OPENAI_ASSISTANT_ID environment variable.`);
+    }
+
+    // Create a thread
+    console.log('Creating thread...');
+    const thread = await openai.beta.threads.create();
+    console.log('Thread created:', thread.id);
+
+    // Add a message to the thread
+    console.log('Adding message to thread...');
+    await openai.beta.threads.messages.create(thread.id, {
+      role: "user",
+      content: userPrompt
+    });
+
+    // Run the assistant
+    console.log('Running assistant...');
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: ASSISTANT_ID
+    });
+    console.log('Run created:', run.id);
+
+    // Wait for the run to complete with timeout
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    let attempts = 0;
+    const maxAttempts = 60; // 60 seconds timeout
+    
+    console.log('Waiting for run to complete...');
+    while ((runStatus.status === 'in_progress' || runStatus.status === 'queued') && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      attempts++;
+      
+      if (attempts % 10 === 0) {
+        console.log(`Still waiting... Status: ${runStatus.status}, Attempt: ${attempts}/${maxAttempts}`);
+      }
+    }
+
+    console.log('Final run status:', runStatus.status);
+
+    if (attempts >= maxAttempts) {
+      throw new Error('Assistant run timed out after 60 seconds');
+    }
+
+    if (runStatus.status === 'failed') {
+      console.error('Run failed:', runStatus.last_error);
+      throw new Error(`Assistant run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
+    }
+
+    if (runStatus.status !== 'completed') {
+      throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+    }
+
+    // Get the messages
+    console.log('Retrieving messages...');
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const assistantMessage = messages.data.find(message => message.role === 'assistant');
+    
+    if (!assistantMessage || !assistantMessage.content || assistantMessage.content.length === 0) {
+      throw new Error('No response from assistant');
+    }
+
+    // Extract the text content
+    const textContent = assistantMessage.content.find(content => content.type === 'text');
+    if (!textContent || !textContent.text) {
+      throw new Error('No text content in assistant response');
+    }
+
+    const responseText = textContent.text.value;
+    console.log('Assistant response received, length:', responseText.length);
+    
+    // Try to extract JSON from the response
+    let jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('No JSON found in response:', responseText);
+      throw new Error('No JSON found in assistant response');
+    }
+
+    console.log('Parsing JSON response...');
+    const result = JSON.parse(jsonMatch[0]);
+    
+    // Just return the reasoning field as-is from CS Calorie Calculator
+    if (result.reasoning) {
+      console.log('Returning reasoning field as-is');
+      return result.reasoning;
+    }
+    
+    // Fallback: if no reasoning field, return the whole result
+    console.log('No reasoning field found, returning full result');
+    return result;
+  } catch (error) {
+    console.error('OpenAI Assistant EER calculation error:', error);
+    
+    // Log the specific error type for debugging
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    
+    throw new Error(`Failed to calculate nutritional requirements using AI assistant: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

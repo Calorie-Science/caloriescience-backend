@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
 import { validateBody, clientSchema } from '../../lib/validation';
 
-async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const { id } = req.query;
 
   if (!id || typeof id !== 'string') {
