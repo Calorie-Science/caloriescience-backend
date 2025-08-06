@@ -4,8 +4,32 @@ import Joi from 'joi';
 export const userRegistrationSchema = Joi.object({
   email: Joi.string().email().required(),
   password: Joi.string().min(8).required(),
-  full_name: Joi.string().min(2).max(255).required(),
-  phone: Joi.string().optional(),
+  first_name: Joi.string().min(1).max(100).required()
+    .messages({
+      'string.min': 'First name must be at least 1 character',
+      'string.max': 'First name cannot exceed 100 characters',
+      'any.required': 'First name is required'
+    }),
+  last_name: Joi.string().max(100).optional().allow('')
+    .messages({
+      'string.max': 'Last name cannot exceed 100 characters'
+    }),
+  phone: Joi.string().pattern(/^[0-9+\-\s\(\)\.]+$/).min(7).max(20).optional()
+    .messages({
+      'string.pattern.base': 'Phone number can only contain numbers, spaces, hyphens, parentheses, plus signs, and dots',
+      'string.min': 'Phone number must be at least 7 characters',
+      'string.max': 'Phone number cannot exceed 20 characters'
+    }),
+  phone_country_code: Joi.string().pattern(/^\+[1-9][0-9]{0,3}$/).optional().default('+1')
+    .messages({
+      'string.pattern.base': 'Country code must start with + followed by 1-4 digits (e.g., +1, +44, +91)'
+    }),
+  // Keep full_name for backward compatibility (will be deprecated)
+  full_name: Joi.string().min(2).max(255).optional()
+    .messages({
+      'string.min': 'Full name must be at least 2 characters',
+      'string.max': 'Full name cannot exceed 255 characters'
+    }),
   qualification: Joi.string().max(500).optional(),
   experience_years: Joi.number().integer().min(0).max(50).optional(),
   specialization: Joi.array().items(Joi.string()).optional()
@@ -19,9 +43,33 @@ export const userLoginSchema = Joi.object({
 
 // Client validation
 export const clientSchema = Joi.object({
-  full_name: Joi.string().min(2).max(255).required(),
+  first_name: Joi.string().min(1).max(100).required()
+    .messages({
+      'string.min': 'First name must be at least 1 character',
+      'string.max': 'First name cannot exceed 100 characters',
+      'any.required': 'First name is required'
+    }),
+  last_name: Joi.string().max(100).optional().allow('')
+    .messages({
+      'string.max': 'Last name cannot exceed 100 characters'
+    }),
   email: Joi.string().email().optional(),
-  phone: Joi.string().optional(),
+  phone: Joi.string().pattern(/^[0-9+\-\s\(\)\.]+$/).min(7).max(20).optional()
+    .messages({
+      'string.pattern.base': 'Phone number can only contain numbers, spaces, hyphens, parentheses, plus signs, and dots',
+      'string.min': 'Phone number must be at least 7 characters',
+      'string.max': 'Phone number cannot exceed 20 characters'
+    }),
+  phone_country_code: Joi.string().pattern(/^\+[1-9][0-9]{0,3}$/).optional().default('+1')
+    .messages({
+      'string.pattern.base': 'Country code must start with + followed by 1-4 digits (e.g., +1, +44, +91)'
+    }),
+  // Keep full_name for backward compatibility (will be deprecated)
+  full_name: Joi.string().min(2).max(255).optional()
+    .messages({
+      'string.min': 'Full name must be at least 2 characters',
+      'string.max': 'Full name cannot exceed 255 characters'
+    }),
   date_of_birth: Joi.date().max('now').optional(),
   gender: Joi.string().valid('male', 'female', 'other').optional(),
   height_cm: Joi.number().min(50).max(300).optional(),

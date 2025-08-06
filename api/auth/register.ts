@@ -54,15 +54,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       .insert({
         email: userData.email.toLowerCase(),
         password_hash: passwordHash,
-        full_name: userData.full_name,
+        first_name: userData.first_name,
+        last_name: userData.last_name,
         phone: userData.phone,
+        phone_country_code: userData.phone_country_code,
         qualification: userData.qualification,
         experience_years: userData.experience_years,
         specialization: userData.specialization,
         email_verification_token: emailVerificationToken,
-        role: 'nutritionist'
+        role: 'nutritionist',
+        // Auto-generate full_name for backward compatibility
+        full_name: userData.full_name || `${userData.first_name} ${userData.last_name || ''}`.trim()
       })
-      .select('id, email, full_name, role, is_email_verified')
+      .select('id, email, first_name, last_name, full_name, role, is_email_verified')
       .single();
 
     if (insertError) {
@@ -77,6 +81,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const token = generateToken({
       id: newUser.id,
       email: newUser.email,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
       full_name: newUser.full_name,
       role: newUser.role
     });

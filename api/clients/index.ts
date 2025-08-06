@@ -30,7 +30,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       if (search) {
-        query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+        query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,full_name.ilike.%${search}%`);
       }
 
       // Apply pagination
@@ -75,7 +75,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       const clientData = {
         ...validation.value,
         nutritionist_id: req.user.id,
-        email: validation.value.email?.toLowerCase()
+        email: validation.value.email?.toLowerCase(),
+        // Auto-generate full_name for backward compatibility
+        full_name: validation.value.full_name || `${validation.value.first_name} ${validation.value.last_name || ''}`.trim()
       };
 
       const { data: client, error } = await supabase

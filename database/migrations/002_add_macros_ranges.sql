@@ -1,65 +1,65 @@
--- Migration: Add min/max ranges for macronutrients
+-- Migration 002: Add min/max ranges for macronutrients
 -- This allows storing both target values and AI-recommended ranges
 
 -- Add min/max columns for protein
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN protein_min_grams DECIMAL(6,2),
-ADD COLUMN protein_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS protein_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS protein_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for carbohydrates  
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN carbs_min_grams DECIMAL(6,2),
-ADD COLUMN carbs_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS carbs_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS carbs_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for fats
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN fat_min_grams DECIMAL(6,2),
-ADD COLUMN fat_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS fat_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS fat_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for fiber
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN fiber_min_grams DECIMAL(6,2),
-ADD COLUMN fiber_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS fiber_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS fiber_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for saturated fat
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN saturated_fat_min_grams DECIMAL(6,2),
-ADD COLUMN saturated_fat_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS saturated_fat_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS saturated_fat_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for monounsaturated fat
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN monounsaturated_fat_min_grams DECIMAL(6,2),
-ADD COLUMN monounsaturated_fat_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS monounsaturated_fat_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS monounsaturated_fat_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for polyunsaturated fat
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN polyunsaturated_fat_min_grams DECIMAL(6,2),
-ADD COLUMN polyunsaturated_fat_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS polyunsaturated_fat_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS polyunsaturated_fat_max_grams DECIMAL(6,2);
 
 -- Add min/max columns for omega-3 fatty acids
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN omega3_min_grams DECIMAL(6,2),
-ADD COLUMN omega3_max_grams DECIMAL(6,2);
+ADD COLUMN IF NOT EXISTS omega3_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS omega3_max_grams DECIMAL(6,2);
 
 -- Add columns for cholesterol (often has notes rather than ranges)
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN cholesterol_min_grams DECIMAL(6,2),
-ADD COLUMN cholesterol_max_grams DECIMAL(6,2),
-ADD COLUMN cholesterol_note TEXT;
+ADD COLUMN IF NOT EXISTS cholesterol_min_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS cholesterol_max_grams DECIMAL(6,2),
+ADD COLUMN IF NOT EXISTS cholesterol_note TEXT;
 
 -- Add columns for additional macro notes
 ALTER TABLE client_nutrition_requirements 
-ADD COLUMN protein_note TEXT,
-ADD COLUMN carbs_note TEXT,
-ADD COLUMN fat_note TEXT,
-ADD COLUMN fiber_note TEXT,
-ADD COLUMN saturated_fat_note TEXT,
-ADD COLUMN monounsaturated_fat_note TEXT,
-ADD COLUMN polyunsaturated_fat_note TEXT,
-ADD COLUMN omega3_note TEXT;
+ADD COLUMN IF NOT EXISTS protein_note TEXT,
+ADD COLUMN IF NOT EXISTS carbs_note TEXT,
+ADD COLUMN IF NOT EXISTS fat_note TEXT,
+ADD COLUMN IF NOT EXISTS fiber_note TEXT,
+ADD COLUMN IF NOT EXISTS saturated_fat_note TEXT,
+ADD COLUMN IF NOT EXISTS monounsaturated_fat_note TEXT,
+ADD COLUMN IF NOT EXISTS polyunsaturated_fat_note TEXT,
+ADD COLUMN IF NOT EXISTS omega3_note TEXT;
 
 -- Add an index for better performance on queries
-CREATE INDEX idx_client_nutrition_macros_active ON client_nutrition_requirements(client_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_client_nutrition_macros_active ON client_nutrition_requirements(client_id, is_active);
 
 -- Comments for documentation
 COMMENT ON COLUMN client_nutrition_requirements.protein_grams IS 'Target protein amount (calculated from min/max or set by nutritionist)';

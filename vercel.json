@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "alias": ["caloriescience-api.vercel.app"],
   "headers": [
     {
       "source": "/api/(.*)",
