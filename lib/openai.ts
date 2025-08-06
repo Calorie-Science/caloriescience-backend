@@ -159,9 +159,24 @@ export async function calculateEERWithAssistant(input: AssistantEERCalculationIn
   
   // Create the user prompt for EER calculation
   const userPrompt = `
-Please calculate the Estimated Energy Requirements (EER) and complete nutritional needs for this individual:
+Given user input for EER calculation (fields: country, age, sex, height_cm, weight_kg, and optionally PAL or special cases), generate an output in the following JSON format:
+{
+  "input": {...},
+  "reasoning": {
+    "region_rule_selected": [string - which region/country rule set is used and why],
+    "bmr_equation_used": [string - which BMR equation is chosen, including citation if available],
+    "bmr_calculation_steps": [list of stepwise calculations, e.g. variables substituted and intermediate results],
+    "pal_explanation": [string - how PAL value is chosen based on input and available guideline],
+    "eer_equation_used": [string - the EER equation selected or constructed, including pregnancy/lactation adjustment if relevant],
+    "eer_calculation_steps": [stepwise calculation showing intermediate values],
+    "special_notes": [string or null - any caveats about region mapping, assumptions (e.g., default PAL, unknowns), pregnancy, lactation, or child equations],
+    "final_eer_kcal": [number - final EER, rounded to the nearest whole number]
+  }
+}
 
-INDIVIDUAL PROFILE:
+Always begin your output reasoning with which country/region equation is being selected and why (e.g., UK, Europe (EU), Global/WHO/FAO, etc.), referencing the given rule set. Walk through every math step and state assumptions, especially for PAL, BMR, adjustments (pregnancy/lactation), and classification of adults, children, or special populations.
+
+USER INPUT:
 - Country: ${input.country}
 - Age: ${input.age} years
 - Sex: ${input.sex}
@@ -173,32 +188,9 @@ ${input.special_cases ? `- Special Cases: ${input.special_cases}` : ''}
 ${input.health_goals?.length ? `- Health Goals: ${input.health_goals.join(', ')}` : ''}
 ${input.medical_conditions?.length ? `- Medical Conditions: ${input.medical_conditions.join(', ')}` : ''}
 
-Please provide a comprehensive nutritional calculation including:
-1. Total daily energy requirement (EER) in calories
-2. Macronutrient breakdown (protein, carbohydrates, fat, fiber)
-3. Micronutrient requirements (vitamins and minerals)
-4. Daily water intake recommendation
+Use the provided EER calculation guidelines table to determine the correct regional equations and PAL values. For countries not explicitly listed, use the appropriate regional defaults (Europe (EU) for European countries, Global (WHO/FAO) for others).
 
-Return the response as a JSON object with the exact structure:
-{
-  "eer_calories": <integer>,
-  "protein_grams": <number>,
-  "carbs_grams": <number>,
-  "fat_grams": <number>,
-  "fiber_grams": <number>,
-  "protein_percentage": <number>,
-  "carbs_percentage": <number>,
-  "fat_percentage": <number>,
-  "vitamin_d_mcg": <number>,
-  "vitamin_b12_mcg": <number>,
-  "vitamin_c_mg": <number>,
-  "iron_mg": <number>,
-  "calcium_mg": <number>,
-  "magnesium_mg": <number>,
-  "zinc_mg": <number>,
-  "folate_mcg": <number>,
-  "water_ml": <integer>
-}
+Output must be a single JSON object with the exact structure shown above. All calculations must show step-by-step work with explicit substitution and intermediate results.
 `;
 
   try {
@@ -292,14 +284,8 @@ Return the response as a JSON object with the exact structure:
     console.log('Parsing JSON response...');
     const result = JSON.parse(jsonMatch[0]);
     
-    // Just return the reasoning field as-is from CS Calorie Calculator
-    if (result.reasoning) {
-      console.log('Returning reasoning field as-is');
-      return result.reasoning;
-    }
-    
-    // Fallback: if no reasoning field, return the whole result
-    console.log('No reasoning field found, returning full result');
+    // Return the complete result with the new structure
+    console.log('EER calculation completed successfully');
     return result;
   } catch (error) {
     console.error('OpenAI Assistant EER calculation error:', error);

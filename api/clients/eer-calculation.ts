@@ -47,6 +47,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         medical_conditions: data.medical_conditions
       });
 
+      // Extract EER value from the new structured response format
+      const finalEERKcal = eerResult?.reasoning?.final_eer_kcal || 
+                          eerResult?.final_eer_kcal || 
+                          2000; // fallback value
+
       // Deactivate any existing nutrition requirements
       await supabase
         .from('client_nutrition_requirements')
@@ -58,13 +63,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .from('client_nutrition_requirements')
         .insert({
           client_id: data.client_id,
-          ...eerResult,
+          eer_calories: finalEERKcal,
+          // Set basic macro estimates (nutritionist can edit these later)
+          protein_grams: Math.round(finalEERKcal * 0.15 / 4), // 15% protein
+          carbs_grams: Math.round(finalEERKcal * 0.50 / 4),   // 50% carbs  
+          fat_grams: Math.round(finalEERKcal * 0.35 / 9),     // 35% fat
+          fiber_grams: Math.round(finalEERKcal / 100),        // ~1g per 100 kcal
+          protein_percentage: 15,
+          carbs_percentage: 50,
+          fat_percentage: 35,
           ai_calculation_data: { 
             input: data, 
             output: eerResult,
             timestamp: new Date().toISOString()
           },
-          calculation_method: 'mifflin_st_jeor',
+          calculation_method: 'ai_assistant',
           is_ai_generated: true,
           is_active: true
         })

@@ -29,7 +29,7 @@ export function generateToken(user: AuthUser): string {
 
   const signOptions = {
     expiresIn: config.jwt.expiresIn
-  };
+  } as SignOptions;
 
   return jwt.sign(payload, config.jwt.secret as string, signOptions);
 }
