@@ -360,3 +360,234 @@ Return ONLY a valid JSON object with this structure:
     throw new Error('Failed to analyze blood report. Please try again.');
   }
 } 
+
+// Interface for macros calculation input
+export interface MacrosCalculationInput {
+  eer: number; // Estimated Energy Requirement in kcal
+  country: string; // USA, EU, AU/NZ, UK
+  age: number;
+  gender: 'male' | 'female';
+  pal: number; // Physical Activity Level
+}
+
+// Interface for macros calculation result
+export interface MacrosCalculationResult {
+  [nutrient: string]: {
+    min_grams: number | null;
+    max_grams: number | null;
+    note: string;
+  };
+}
+
+export async function calculateMacrosWithAssistant(data: MacrosCalculationInput): Promise<MacrosCalculationResult> {
+  try {
+    console.log('Starting macros calculation with OpenAI Assistant:', data);
+
+    // Make Assistant ID configurable via environment variable
+    const ASSISTANT_ID = process.env.OPENAI_ASSISTANT_ID || 'asst_KY2OIYshbs9FApI6UmwkRY6j'; // CS Calorie Calculator
+
+    // Create a thread
+    const thread = await openai.beta.threads.create();
+
+    const userPrompt = `
+Given a user's Estimated Energy Requirement (EER in kcal), country, age, gender, and Physical Activity Level (PAL), generate a detailed JSON representing that individual's recommended daily macronutrient intake based on that country's official macronutrient distribution guidelines. Use the macronutrient energy distribution data provided for the USA (IOM), EU (EFSA), Australia/New Zealand (NHMRC), and the UK (SACN/COMA).
+
+For each macronutrient, apply the recommended percentage range (or specific target) from the specified country's guidance to the user's EER to calculate the minimum and maximum recommended intakes in grams per day. When a guideline provides a single value (not a range), use it for both min and max. If the guideline refers to "as low as possible" or "minimize," reflect this as a descriptive note in the JSON rather than a numerical value.
+
+For macronutrients expressed per kcal (e.g., fiber: 14g/1000 kcal), convert the guideline to grams per day according to the user's EER. If there are different recommendations for age/gender, make logical assumptions based on standard public health practice unless data are totally missing (in which case, add a "not specified" label). If a nutrient lacks a recommendation for the chosen country, omit it from the JSON or add a note such as "not specified."
+
+# Steps
+
+1. Parse the user's input: EER (kcal), country (USA, EU, AU/NZ, UK), age, gender, PAL.
+2. For each relevant macronutrient, retrieve the recommended range or value for the selected country.
+3. For each macronutrient:
+   - If the guideline is a percentage of energy, convert that percentage (min/max) to grams using the appropriate Atwater factor:
+       - Carbohydrate: 4 kcal/g
+       - Protein: 4 kcal/g
+       - Fat (total): 9 kcal/g
+       - Polyunsaturated Fat: 9 kcal/g
+       - Monounsaturated Fat: 9 kcal/g
+       - Saturated Fat: 9 kcal/g
+       - Omega-3: 9 kcal/g
+   - If the recommendation is "as low as possible" or similar, insert a "note" field.
+   - If the item is in grams per day (e.g., fiber), calculate as needed.
+   - If intake is "encourage" or "minimize", reflect this textually.
+4. Present results as a JSON object, one entry per nutrient, showing min/max (or single value), plus notes where applicable.
+5. If demographic factors (age, gender, PAL) are not specified in the guideline, only consider them if the country-specific recommendations require it.
+6. Provide a descriptive note if values are not available for the specific country for a given nutrient.
+
+# Output Format
+
+Return a single JSON object mapping each nutrient to a sub-object with fields:
+- "min_grams": minimum recommended grams per day (where applicable, otherwise null)
+- "max_grams": maximum recommended grams per day (where applicable, otherwise null)
+- "note": additional explanatory text if guideline is not quantitative, or further instructions, or if the nutrient is not specified for this country
+
+Keep the output concise and only include nutrients specified in the guideline for that country.
+
+# Example
+
+User Input:
+EER: 2200
+Country: USA
+Age: 30
+Gender: Male
+PAL: 1.6
+
+Expected JSON Output Example:
+{
+  "Carbohydrates": {
+    "min_grams": 248,
+    "max_grams": 358,
+    "note": ""
+  },
+  "Protein": {
+    "min_grams": 55,
+    "max_grams": 193,
+    "note": ""
+  },
+  "Total Fat": {
+    "min_grams": 49,
+    "max_grams": 86,
+    "note": ""
+  },
+  "Saturated Fat": {
+    "min_grams": null,
+    "max_grams": 24,
+    "note": "Keep as low as possible below the upper limit"
+  },
+  "Monounsaturated Fat": {
+    "min_grams": 37,
+    "max_grams": 49,
+    "note": "Suggested range"
+  },
+  "Polyunsaturated Fat": {
+    "min_grams": 12,
+    "max_grams": 24,
+    "note": "Suggested range"
+  },
+  "Omega-3 Fatty Acids": {
+    "min_grams": 1.5,
+    "max_grams": 2.9,
+    "note": ""
+  },
+  "Fiber": {
+    "min_grams": 30.8,
+    "max_grams": 30.8,
+    "note": "Calculated as 14g/1000kcal"
+  },
+  "Cholesterol": {
+    "min_grams": null,
+    "max_grams": null,
+    "note": "As low as possible"
+  }
+}
+
+(Note: Only include nutrients for which there is a guideline in the selected country. Replace values above with precise calculations for the user's input.)
+
+# Notes
+
+- Use the Atwater factors for energy conversion: 4 kcal/g for carb/protein, 9 kcal/g for fat types.
+- Show min and max values where a range is present, or fill both with a singular value when only that is given.
+- If nutrient isn't listed for the chosen country, omit it or add a note: "not specified for this country."
+- Handle ambiguous/qualitative recommendations (e.g., "encourage oily fish intake") with a "note" field.
+
+Remember: Analyze the user's EER, country, age, gender, and PAL before computing each nutrient's intake. Carefully cite where values are non-numeric, and only output relevant fields per the chosen country's actual guidelines. 
+
+,,,,
+Macronutrient Energy Distribution (% of total daily energy intake),,,,
+,,,,
+Nutrient,USA (IOM),EU (EFSA),AU/NZ (NHMRC),UK (SACN/COMA)
+Carbohydrates,45–65%,45–60%,45–65%,~50% (no defined range)
+Protein,10–35%,10–20% (adults),15–25%,~15%
+Total Fat,20–35%,20–35%,20–35%,No specific target
+Saturated Fat,<10%,<10%,<10%,As low as possible
+Monounsaturated Fat,15–20% (suggested)*,—,—,—
+Polyunsaturated Fat,5–10% (suggested)*,6–11% (omega-6),6–10% (combined),—
+Omega-3 Fatty Acids,0.6–1.2%,0.50%,~0.4–1%,Encourage oily fish intake
+Fiber (Total),14 g/1000 kcal,25–30 g/day,30 g/day,30 g/day (non-starch polysaccharides)
+Soluble Fiber,—,—,—,—
+Oligosaccharides,—,—,—,—
+Cholesterol,As low as possible,—,<300 mg/day†,Minimize intake 
+Repeat these instructions/reminders at the end of detailed prompts to ensure compliance.
+
+User data:
+EER: ${data.eer} kcal
+Country: ${data.country}
+Age: ${data.age}
+Gender: ${data.gender}
+PAL: ${data.pal}
+
+Please calculate the macronutrient recommendations and return ONLY the JSON object as specified above.
+    `;
+
+    // Add the message to the thread
+    await openai.beta.threads.messages.create(thread.id, {
+      role: 'user',
+      content: userPrompt
+    });
+
+    // Run the assistant using the same pattern as EER calculation
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: ASSISTANT_ID
+    });
+
+    // Poll for completion
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    
+    let attempts = 0;
+    const maxAttempts = 60; // 60 attempts * 2 seconds = 2 minutes max wait
+    
+    while (runStatus.status === 'in_progress' || runStatus.status === 'queued') {
+      if (attempts >= maxAttempts) {
+        throw new Error('Macros calculation timeout after 2 minutes');
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      attempts++;
+      console.log(`Macros calculation attempt ${attempts}, status: ${runStatus.status}`);
+    }
+
+    if (runStatus.status === 'failed') {
+      console.error('Macros calculation failed:', runStatus.last_error);
+      throw new Error('Macros calculation failed');
+    }
+
+    if (runStatus.status !== 'completed') {
+      console.error('Unexpected run status:', runStatus.status);
+      throw new Error(`Unexpected macros calculation status: ${runStatus.status}`);
+    }
+
+    // Get the messages
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    const lastMessage = messages.data[0];
+
+    if (!lastMessage || !lastMessage.content || lastMessage.content.length === 0) {
+      throw new Error('No response from macros calculation');
+    }
+
+    const messageContent = lastMessage.content[0];
+    if (messageContent.type !== 'text') {
+      throw new Error('Unexpected message type from macros calculation');
+    }
+
+    const response = messageContent.text.value;
+    console.log('Raw macros calculation response:', response);
+
+    // Extract JSON from the response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('No JSON found in response:', response);
+      throw new Error('Invalid macros calculation response format');
+    }
+
+    const result = JSON.parse(jsonMatch[0]);
+    console.log('Macros calculation completed successfully');
+    return result;
+
+  } catch (error) {
+    console.error('Error in macros calculation:', error);
+    throw error;
+  }
+} 
