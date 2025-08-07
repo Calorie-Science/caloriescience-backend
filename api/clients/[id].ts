@@ -301,9 +301,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         };
 
         // If macros_data is provided (from macros-calculate API), extract and calculate macros
-        if (macrosData && macrosData.macros) {
-          const macros = macrosData.macros;
-          const eerValue = eerCalories || macrosData.input?.eer || 2000;
+        if (macrosData) {
+          const macros = macrosData; // Changed: Use macrosData directly instead of macrosData.macros
+          const eerValue = eerCalories || 2000; // Simplified: removed macrosData.input?.eer fallback
 
           // Calculate average values for macros with ranges (for target values)
           const calculateAverage = (min: number | null, max: number | null): number => {
@@ -410,30 +410,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             message: 'An error occurred while saving nutrition information',
             details: nutritionError.message
           });
-        }
-
-        // If we have macros data with BMR, update client BMR
-        if (macrosData && macrosData.bmr) {
-          const healthMetrics = calculateHealthMetrics(undefined, undefined, macrosData.bmr);
-          const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
-          
-          await supabase
-            .from('clients')
-            .update(transformedHealthMetrics)
-            .eq('id', id)
-            .eq('nutritionist_id', req.user.id);
-        }
-
-        // Alternative: If EER calculation was done and we have BMR from macrosData
-        if (macrosData && macrosData.bmr) {
-          const healthMetrics = calculateHealthMetrics(undefined, undefined, macrosData.bmr);
-          const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
-          
-          await supabase
-            .from('clients')
-            .update(transformedHealthMetrics)
-            .eq('id', id)
-            .eq('nutritionist_id', req.user.id);
         }
       }
 

@@ -193,8 +193,8 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
 export async function calculateMacros(input: MacrosCalculationInput): Promise<MacrosCalculationResult> {
   const { eer, country, age, gender, weight_kg } = input;
 
-  // Get macro guidelines
-  const { data: guidelinesArray, error: guidelinesError } = await supabase
+  // Try to get macro guidelines for the requested country first
+  let { data: guidelinesArray, error: guidelinesError } = await supabase
     .from('macro_guidelines')
     .select('*')
     .eq('country', country)
@@ -204,8 +204,28 @@ export async function calculateMacros(input: MacrosCalculationInput): Promise<Ma
     .order('age_min', { ascending: false })  // Prefer more specific age ranges
     .limit(1);
 
+  // If no guidelines found for the requested country, fallback to USA
+  let effectiveCountry = country;
   if (guidelinesError || !guidelinesArray || guidelinesArray.length === 0) {
-    throw new Error(`No macro guidelines found for ${country}, ${gender}, age ${age}`);
+    console.log(`No macro guidelines found for ${country}, falling back to USA`);
+    effectiveCountry = 'USA';
+    
+    const fallbackResult = await supabase
+      .from('macro_guidelines')
+      .select('*')
+      .eq('country', 'USA')
+      .eq('gender', gender)
+      .lte('age_min', age)
+      .gte('age_max', age)
+      .order('age_min', { ascending: false })
+      .limit(1);
+    
+    guidelinesArray = fallbackResult.data;
+    guidelinesError = fallbackResult.error;
+  }
+
+  if (guidelinesError || !guidelinesArray || guidelinesArray.length === 0) {
+    throw new Error(`No macro guidelines found for ${effectiveCountry}, ${gender}, age ${age}`);
   }
 
   const guidelines = guidelinesArray[0];

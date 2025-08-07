@@ -78,6 +78,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
+      // Extract micronutrients data before creating client
+      const micronutrientsData = validation.value.micronutrients_data;
+      const macrosData = validation.value.macros_data;
+      
       const clientData = {
         ...validation.value,
         nutritionist_id: req.user.id,
@@ -88,8 +92,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         eer_guideline: getEERGuidelineFromLocation(validation.value.location)
       };
 
-      // Remove eer_calories from client data as it belongs in nutrition_requirements table
+      // Remove eer_calories, macros_data, and micronutrients_data from client data as they belong in separate tables
       delete clientData.eer_calories;
+      delete clientData.macros_data;
+      delete clientData.micronutrients_data;
 
       // Calculate BMI if height and weight are provided AND BMI is not already provided
       if (validation.value.height_cm && validation.value.weight_kg && !validation.value.bmi) {
@@ -151,6 +157,118 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
         if (nutritionError) {
           console.warn('Failed to create nutrition requirements:', nutritionError);
+          // Don't fail the client creation, just log the warning
+        }
+      }
+
+      // If macros data is provided, update the nutrition requirements record with macros
+      if (macrosData && validation.value.eer_calories) {
+        // Extract macros from the provided data
+        const macros = macrosData;
+        
+        const macroUpdateData = {
+          // Protein
+          protein_min_grams: macros.Protein?.min_grams || null,
+          protein_max_grams: macros.Protein?.max_grams || null,
+          protein_note: macros.Protein?.note || null,
+          
+          // Carbohydrates
+          carbs_min_grams: macros.Carbohydrates?.min_grams || null,
+          carbs_max_grams: macros.Carbohydrates?.max_grams || null,
+          carbs_note: macros.Carbohydrates?.note || null,
+          
+          // Total Fat
+          fat_min_grams: macros['Total Fat']?.min_grams || null,
+          fat_max_grams: macros['Total Fat']?.max_grams || null,
+          fat_note: macros['Total Fat']?.note || null,
+          
+          // Fiber
+          fiber_min_grams: macros.Fiber?.min_grams || null,
+          fiber_max_grams: macros.Fiber?.max_grams || null,
+          fiber_note: macros.Fiber?.note || null,
+          
+          // Saturated Fat
+          saturated_fat_min_grams: macros['Saturated Fat']?.min_grams || null,
+          saturated_fat_max_grams: macros['Saturated Fat']?.max_grams || null,
+          saturated_fat_note: macros['Saturated Fat']?.note || null,
+          
+          // Monounsaturated Fat
+          monounsaturated_fat_min_grams: macros['Monounsaturated Fat']?.min_grams || null,
+          monounsaturated_fat_max_grams: macros['Monounsaturated Fat']?.max_grams || null,
+          monounsaturated_fat_note: macros['Monounsaturated Fat']?.note || null,
+          
+          // Polyunsaturated Fat
+          polyunsaturated_fat_min_grams: macros['Polyunsaturated Fat']?.min_grams || null,
+          polyunsaturated_fat_max_grams: macros['Polyunsaturated Fat']?.max_grams || null,
+          polyunsaturated_fat_note: macros['Polyunsaturated Fat']?.note || null,
+          
+          // Omega-3 Fatty Acids
+          omega3_min_grams: macros['Omega-3 Fatty Acids']?.min_grams || null,
+          omega3_max_grams: macros['Omega-3 Fatty Acids']?.max_grams || null,
+          omega3_note: macros['Omega-3 Fatty Acids']?.note || null,
+          
+          // Cholesterol
+          cholesterol_min_grams: macros.Cholesterol?.min_grams || null,
+          cholesterol_max_grams: macros.Cholesterol?.max_grams || null,
+          cholesterol_note: macros.Cholesterol?.note || null,
+          
+          calculation_method: 'formula_based',
+          is_ai_generated: false,
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: macroError } = await supabase
+          .from('client_nutrition_requirements')
+          .update(macroUpdateData)
+          .eq('client_id', client.id)
+          .eq('is_active', true);
+
+        if (macroError) {
+          console.warn('Failed to update nutrition requirements with macros:', macroError);
+        }
+      }
+
+      // If micronutrient data is provided, create micronutrient requirements record
+      if (micronutrientsData && micronutrientsData.micronutrients) {
+        const micronutrients = micronutrientsData.micronutrients;
+        const micronutrientInsertData = {
+          client_id: client.id,
+          vitamin_a_mcg: micronutrients.vitaminA?.amount || null,
+          thiamin_mg: micronutrients.thiamin?.amount || null,
+          riboflavin_mg: micronutrients.riboflavin?.amount || null,
+          niacin_equivalent_mg: micronutrients.niacinEquivalent?.amount || null,
+          pantothenic_acid_mg: micronutrients.pantothenicAcid?.amount || null,
+          vitamin_b6_mg: micronutrients.vitaminB6?.amount || null,
+          biotin_mcg: micronutrients.biotin?.amount || null,
+          vitamin_b12_mcg: micronutrients.vitaminB12?.amount || null,
+          folate_mcg: micronutrients.folate?.amount || null,
+          vitamin_c_mg: micronutrients.vitaminC?.amount || null,
+          vitamin_d_mcg: micronutrients.vitaminD?.amount || null,
+          iron_mg: micronutrients.iron?.amount || null,
+          calcium_mg: micronutrients.calcium?.amount || null,
+          magnesium_mg: micronutrients.magnesium?.amount || null,
+          potassium_mg: micronutrients.potassium?.amount || null,
+          zinc_mg: micronutrients.zinc?.amount || null,
+          copper_mg: micronutrients.copper?.amount || null,
+          iodine_mcg: micronutrients.iodine?.amount || null,
+          selenium_mcg: micronutrients.selenium?.amount || null,
+          phosphorus_mg: micronutrients.phosphorus?.amount || null,
+          chloride_mg: micronutrients.chloride?.amount || null,
+          sodium_g: micronutrients.sodium?.amount || null,
+          guideline_used: micronutrientsData.guidelineUsed || 'UK',
+          calculation_method: 'formula_based',
+          is_ai_generated: false,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: micronutrientError } = await supabase
+          .from('client_micronutrient_requirements')
+          .insert(micronutrientInsertData);
+
+        if (micronutrientError) {
+          console.warn('Failed to create micronutrient requirements:', micronutrientError);
           // Don't fail the client creation, just log the warning
         }
       }

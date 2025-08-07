@@ -124,7 +124,9 @@ export const FIELD_MAPPINGS = {
     migrationName: 'migration_name',
     bmiCategory: 'bmi_category',
     bmiLastCalculated: 'bmi_last_calculated',
-    bmrLastCalculated: 'bmr_last_calculated'
+    bmrLastCalculated: 'bmr_last_calculated',
+    micronutrientsData: 'micronutrients_data',
+    guidelineUsed: 'guideline_used'
   },
   // Database (snake_case) -> API (camelCase)
   snakeToCamel: {} as Record<string, string>

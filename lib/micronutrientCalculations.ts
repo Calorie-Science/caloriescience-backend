@@ -59,6 +59,7 @@ export async function calculateMicronutrients(
     const effectiveGuideline = guideline === 'UK' ? 'UK' : 'UK';
     
     // Find the appropriate guideline entry for the age/gender combination
+    // Prioritize records with complete vitamin A data over incomplete records
     const { data: guidelines, error } = await supabase
       .from('micronutrient_guidelines')
       .select('*')
@@ -66,6 +67,7 @@ export async function calculateMicronutrients(
       .eq('gender', input.gender)
       .lte('age_min', input.age)
       .gte('age_max', input.age)
+      .not('vitamin_a_mcg', 'is', null)  // Prioritize complete records with vitamin A data
       .order('age_min', { ascending: false })
       .limit(1);
 

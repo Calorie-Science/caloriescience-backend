@@ -104,7 +104,86 @@ export const clientSchema = Joi.object({
       'any.only': 'Status must be one of: prospective, active, inactive, archived'
     }),
   source: Joi.string().max(100).optional(),
-  notes: Joi.string().max(2000).optional()
+  notes: Joi.string().max(2000).optional(),
+  // Macros data - optional for client creation
+  macrosData: Joi.object({
+    Protein: Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    Carbohydrates: Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    'Total Fat': Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    Fiber: Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    'Saturated Fat': Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    'Monounsaturated Fat': Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    'Polyunsaturated Fat': Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    'Omega-3 Fatty Acids': Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional(),
+    Cholesterol: Joi.object({
+      min_grams: Joi.number().allow(null).optional(),
+      max_grams: Joi.number().allow(null).optional(),
+      note: Joi.string().optional()
+    }).optional()
+  }).optional(),
+  // Micronutrients data - optional for client creation
+  micronutrientsData: Joi.object({
+    micronutrients: Joi.object({
+      vitaminA: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      thiamin: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      riboflavin: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      niacinEquivalent: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      pantothenicAcid: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      vitaminB6: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      biotin: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      vitaminB12: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      folate: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      vitaminC: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      vitaminD: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      iron: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      calcium: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      magnesium: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      potassium: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      zinc: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      copper: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      iodine: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      selenium: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      phosphorus: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      chloride: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional(),
+      sodium: Joi.object({ amount: Joi.number(), unit: Joi.string(), name: Joi.string() }).optional()
+    }).optional(),
+    guidelineUsed: Joi.string().optional(),
+    source: Joi.string().optional(),
+    notes: Joi.string().optional(),
+    ageGroup: Joi.string().optional()
+  }).optional()
 });
 
 // EER calculation validation - Updated for OpenAI Assistant
