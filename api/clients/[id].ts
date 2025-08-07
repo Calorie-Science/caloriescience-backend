@@ -184,39 +184,55 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Only validate if we actually have client data (not just empty object from destructuring)
         const hasClientData = Object.keys(clientData).some(key => 
           !['eer_calories', 'nutritionist_notes', 'original_ai_calculation', 'macros_data', 
-            'protein_grams', 'carbs_grams', 'fat_grams', 'fiber_grams'].includes(key)
+            'protein_grams', 'carbs_grams', 'fat_grams', 'fiber_grams', 'status'].includes(key)
         );
         
         if (hasClientData) {
           const validation = validateBody(clientSchema, clientData);
-          if (!validation.isValid) {
-            return res.status(400).json({
-              error: 'Validation failed',
-              details: validation.errors
-            });
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validation.errors
+        });
+      }
+
+      const updateData = {
+        ...validation.value,
+        email: validation.value.email?.toLowerCase(),
+        updated_at: new Date().toISOString()
+      };
+
+          // Handle status conversion to active
+          if (validation.value.status === 'active') {
+            // Get current client status to check if this is a conversion
+            const { data: currentClient } = await supabase
+              .from('clients')
+              .select('status')
+              .eq('id', id)
+              .eq('nutritionist_id', req.user.id)
+              .single();
+
+            // If converting from non-active to active, set the conversion timestamp
+            if (currentClient && currentClient.status !== 'active') {
+              updateData.converted_to_active_at = new Date().toISOString();
+            }
           }
 
-          const updateData = {
-            ...validation.value,
-            email: validation.value.email?.toLowerCase(),
-            updated_at: new Date().toISOString()
-          };
-
           const { error } = await supabase
-            .from('clients')
-            .update(updateData)
-            .eq('id', id)
+        .from('clients')
+        .update(updateData)
+        .eq('id', id)
             .eq('nutritionist_id', req.user.id);
 
-          if (error) {
-            console.error('Update client error:', error);
-            if (error.code === 'PGRST116') {
-              return res.status(404).json({
-                error: 'Client not found',
-                message: 'The requested client does not exist or you do not have access to it'
-              });
-            }
-            throw error;
+      if (error) {
+        console.error('Update client error:', error);
+        if (error.code === 'PGRST116') {
+          return res.status(404).json({
+            error: 'Client not found',
+            message: 'The requested client does not exist or you do not have access to it'
+          });
+        }
+        throw error;
           }
         }
       }
