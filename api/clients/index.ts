@@ -155,8 +155,26 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       }
 
-      // Transform response to camelCase
-      const transformedClient = transformWithMapping(client, FIELD_MAPPINGS.snakeToCamel);
+      // Get the created client
+      const { data: createdClient, error: fetchError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('id', client.id)
+        .single();
+
+      if (fetchError) {
+        console.error('Fetch created client error:', fetchError);
+        return res.status(500).json({
+          error: 'Client created but failed to fetch details',
+          message: 'The client was created successfully but there was an issue retrieving the details'
+        });
+      }
+
+      // Remove system fields that shouldn't be in response
+      const { eer_guideline, ...clientWithoutSystemFields } = createdClient;
+
+      // Transform to camelCase for response
+      const transformedClient = transformWithMapping(clientWithoutSystemFields, FIELD_MAPPINGS.snakeToCamel);
 
       res.status(201).json({
         message: 'Client created successfully',

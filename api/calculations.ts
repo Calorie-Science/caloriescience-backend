@@ -1,5 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { calculateEER, calculateMacros, EERCalculationInput, MacrosCalculationInput } from '../lib/calculations';
+import { calculateMicronutrients, MicronutrientCalculationInput } from '../lib/micronutrientCalculations';
 import { transformWithMapping, FIELD_MAPPINGS } from '../lib/caseTransform';
 import { calculateBMI } from '../lib/healthMetrics';
 import { getEERGuidelineFromLocation } from '../lib/locationMapping';
@@ -33,6 +34,16 @@ const macrosSchema = Joi.object({
   weightKg: Joi.number().min(1).max(500).required()
 });
 
+const micronutrientSchema = Joi.object({
+  location: Joi.string().max(255).required()
+    .messages({
+      'string.max': 'Location cannot exceed 255 characters',
+      'any.required': 'Location is required to determine micronutrient guideline'
+    }),
+  age: Joi.number().integer().min(1).max(120).required(),
+  gender: Joi.string().valid('male', 'female').required()
+});
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -57,10 +68,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return await handleEERCalculation(req, res);
       case 'calculateMacros':
         return await handleMacrosCalculation(req, res);
+      case 'calculateMicronutrients':
+        return await handleMicronutrientCalculation(req, res);
       default:
         return res.status(400).json({
           error: 'Invalid action',
-          message: 'Action must be either "calculateEer" or "calculateMacros"'
+          message: 'Action must be one of: "calculateEer", "calculateMacros", or "calculateMicronutrients"'
         });
     }
   } catch (error) {
@@ -158,5 +171,45 @@ async function handleMacrosCalculation(req: VercelRequest, res: VercelResponse):
     macros: macrosResult,
     timestamp: new Date().toISOString(),
     message: 'Macronutrient recommendations calculated successfully'
+  });
+}
+
+async function handleMicronutrientCalculation(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
+  // Extract action field and validate the rest
+  const { action, ...micronutrientRequestData } = req.body;
+  const { error, value } = micronutrientSchema.validate(micronutrientRequestData, { abortEarly: false });
+  
+  if (error) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message
+      }))
+    });
+  }
+
+  // Automatically determine micronutrient guideline from location
+  const micronutrientGuideline = getEERGuidelineFromLocation(value.location);
+
+  const micronutrientData: MicronutrientCalculationInput = {
+    location: value.location,
+    age: value.age,
+    gender: value.gender
+  };
+
+  const micronutrientResult = await calculateMicronutrients(micronutrientData);
+
+  return res.status(200).json({
+    success: true,
+    input: value,
+    micronutrientGuideline: micronutrientGuideline, // Include the determined guideline in response
+    micronutrients: micronutrientResult.micronutrients,
+    ageGroup: micronutrientResult.age_group,
+    guidelineUsed: micronutrientResult.guideline_used,
+    source: micronutrientResult.source,
+    notes: micronutrientResult.notes,
+    timestamp: new Date().toISOString(),
+    message: 'Micronutrient recommendations calculated successfully'
   });
 } 
