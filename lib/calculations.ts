@@ -8,6 +8,8 @@ export interface EERCalculationInput {
   height_cm: number;
   weight_kg: number;
   activity_level: 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extra_active';
+  pregnancy_status?: 'not_pregnant' | 'first_trimester' | 'second_trimester' | 'third_trimester';
+  lactation_status?: 'not_lactating' | 'lactating_0_6_months' | 'lactating_7_12_months';
 }
 
 export interface MacrosCalculationInput {
@@ -77,7 +79,7 @@ export interface MacrosCalculationResult {
 
 // Calculate EER using database formulas
 export async function calculateEER(input: EERCalculationInput): Promise<EERCalculationResult> {
-  const { country, age, gender, height_cm, weight_kg, activity_level } = input;
+  const { country, age, gender, height_cm, weight_kg, activity_level, pregnancy_status, lactation_status } = input;
 
   // 1. Get EER formula
   const { data: formulas, error: formulaError } = await supabase
@@ -130,11 +132,59 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
     eer = bmr * pal;
   }
 
+  // 5. Apply pregnancy and lactation adjustments (for females only) based on database values
+  let adjustments: string[] = [];
+  let totalAdjustment = 0;
+
+  if (gender === 'female') {
+    // Pregnancy adjustments (from database per country)
+    if (pregnancy_status && pregnancy_status !== 'not_pregnant') {
+      switch (pregnancy_status) {
+        case 'first_trimester':
+          // CSV shows no additional calories needed in first trimester
+          break;
+        case 'second_trimester':
+          if (formula.pregnancy_second_trimester_kcal) {
+            totalAdjustment += formula.pregnancy_second_trimester_kcal;
+            adjustments.push(`+${formula.pregnancy_second_trimester_kcal} kcal (2nd trimester pregnancy)`);
+          }
+          break;
+        case 'third_trimester':
+          if (formula.pregnancy_third_trimester_kcal) {
+            totalAdjustment += formula.pregnancy_third_trimester_kcal;
+            adjustments.push(`+${formula.pregnancy_third_trimester_kcal} kcal (3rd trimester pregnancy)`);
+          }
+          break;
+      }
+    }
+
+    // Lactation adjustments (from database per country)
+    if (lactation_status && lactation_status !== 'not_lactating') {
+      switch (lactation_status) {
+        case 'lactating_0_6_months':
+          if (formula.lactation_0_6_months_kcal) {
+            totalAdjustment += formula.lactation_0_6_months_kcal;
+            adjustments.push(`+${formula.lactation_0_6_months_kcal} kcal (lactation 0-6 months)`);
+          }
+          break;
+        case 'lactating_7_12_months':
+          if (formula.lactation_7_12_months_kcal) {
+            totalAdjustment += formula.lactation_7_12_months_kcal;
+            adjustments.push(`+${formula.lactation_7_12_months_kcal} kcal (lactation 7-12 months)`);
+          }
+          break;
+      }
+    }
+  }
+
+  const finalEER = eer + totalAdjustment;
+  const adjustmentString = adjustments.length > 0 ? ` ${adjustments.join(', ')}` : '';
+
   return {
     bmr: Math.round(bmr),
     pal: pal,
-    eer: Math.round(eer),
-    formula_used: formula.bmr_formula,
+    eer: Math.round(finalEER),
+    formula_used: formula.bmr_formula + adjustmentString,
     input: input
   };
 }
@@ -159,9 +209,6 @@ export async function calculateMacros(input: MacrosCalculationInput): Promise<Ma
   }
 
   const guidelines = guidelinesArray[0];
-
-  // Debug: Log the guidelines data to see what we're getting
-  console.log('Guidelines found:', JSON.stringify(guidelines, null, 2));
 
   // Calculate protein ranges from percentages only
   let proteinMinGrams: number | null = null;

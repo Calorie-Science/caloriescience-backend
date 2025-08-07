@@ -72,6 +72,18 @@ export const clientSchema = Joi.object({
     }),
   date_of_birth: Joi.date().max('now').optional(),
   gender: Joi.string().valid('male', 'female', 'other').optional(),
+  location: Joi.string().max(255).optional()
+    .messages({
+      'string.max': 'Location cannot exceed 255 characters'
+    }),
+  pregnancy_status: Joi.string().valid('not_pregnant', 'first_trimester', 'second_trimester', 'third_trimester').optional().default('not_pregnant')
+    .messages({
+      'any.only': 'Pregnancy status must be one of: not_pregnant, first_trimester, second_trimester, third_trimester'
+    }),
+  lactation_status: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating')
+    .messages({
+      'any.only': 'Lactation status must be one of: not_lactating, lactating_0_6_months, lactating_7_12_months'
+    }),
   height_cm: Joi.number().min(50).max(300).optional(),
   weight_kg: Joi.number().min(20).max(500).optional(),
   activity_level: Joi.string().valid('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active').optional(),
@@ -81,6 +93,10 @@ export const clientSchema = Joi.object({
   dietary_preferences: Joi.array().items(Joi.string()).optional(),
   health_goals: Joi.array().items(Joi.string()).optional(),
   target_weight_kg: Joi.number().min(20).max(500).optional(),
+  status: Joi.string().valid('prospective', 'active', 'inactive', 'archived').optional().default('prospective')
+    .messages({
+      'any.only': 'Status must be one of: prospective, active, inactive, archived'
+    }),
   source: Joi.string().max(100).optional(),
   notes: Joi.string().max(2000).optional()
 });

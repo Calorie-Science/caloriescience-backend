@@ -14,7 +14,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .from('clients')
         .select(`
           *,
-          client_nutrition_requirements!inner(
+          client_nutrition_requirements(
             id,
             eer_calories,
             created_at,
