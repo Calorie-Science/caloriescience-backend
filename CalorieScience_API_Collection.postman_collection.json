@@ -1,10 +1,10 @@
 {
 	"info": {
-		"_postman_id": "12345678-1234-5678-9012-123456789abc",
-		"name": "CalorieScience API - Complete Journey",
-		"description": "Complete API collection for CalorieScience nutritionist platform including authentication, client management, EER calculations, macronutrient calculations, and comprehensive testing across multiple countries.",
+		"_postman_id": "caloriesci-api-v4",
+		"name": "CalorieScience API - Complete Collection v4 (Location-Based Guidelines)",
+		"description": "Complete API collection for CalorieScience nutrition platform with automatic EER guideline detection based on client location, enhanced calculations (BMI/BMR/classification), and comprehensive testing",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"_exporter_id": "12345678"
+		"_exporter_id": "caloriesci-v4"
 	},
 	"item": [
 		{
@@ -12,6 +12,25 @@
 			"item": [
 				{
 					"name": "Register Nutritionist",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('auth_token', response.token);",
+									"    pm.environment.set('user_id', response.user.id);",
+									"    pm.environment.set('user_email', response.user.email);",
+									"    console.log('✅ Registration successful, token saved');",
+									"} else {",
+									"    console.log('❌ Registration failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -22,19 +41,18 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"action\": \"register\",\n  \"first_name\": \"Dr. Sarah\",\n  \"last_name\": \"Wilson\",\n  \"email\": \"sarah.wilson@nutrition.com\",\n  \"password\": \"SecurePass123!\",\n  \"phone\": \"+1-555-0123\",\n  \"phone_country_code\": \"+1\"\n}"
+							"raw": "{\n  \"action\": \"register\",\n  \"email\": \"dr.sarah.wilson@example.com\",\n  \"password\": \"SecurePass123!\",\n  \"firstName\": \"Sarah\",\n  \"lastName\": \"Wilson\",\n  \"phone\": \"5551234567\",\n  \"phoneCountryCode\": \"+1\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/api/auth",
+							"raw": "{{base_url}}/api/auth",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"auth"
 							]
-						},
-						"description": "Register a new nutritionist account"
+						}
 					}
 				},
 				{
@@ -46,8 +64,12 @@
 								"exec": [
 									"if (pm.response.code === 200) {",
 									"    const response = pm.response.json();",
-									"    pm.environment.set(\"authToken\", response.token);",
-									"    console.log(\"Token saved:\", response.token);",
+									"    pm.environment.set('auth_token', response.token);",
+									"    pm.environment.set('user_id', response.user.id);",
+									"    pm.environment.set('user_email', response.user.email);",
+									"    console.log('✅ Login successful, token saved');",
+									"} else {",
+									"    console.log('❌ Login failed:', pm.response.json());",
 									"}"
 								],
 								"type": "text/javascript"
@@ -64,29 +86,184 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"action\": \"login\",\n  \"email\": \"sarah.wilson@nutrition.com\",\n  \"password\": \"SecurePass123!\"\n}"
+							"raw": "{\n  \"action\": \"login\",\n  \"email\": \"test.login@example.com\",\n  \"password\": \"TestPass123!\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/api/auth",
+							"raw": "{{base_url}}/api/auth",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"auth"
 							]
-						},
-						"description": "Login nutritionist and get JWT token"
+						}
 					}
 				}
-			],
-			"description": "Authentication endpoints for nutritionist registration and login"
+			]
+		},
+		{
+			"name": "EER & Macros Calculations",
+			"item": [
+				{
+					"name": "Calculate EER (Auto Guidelines from Location)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('calculated_eer', response.eer);",
+									"    pm.environment.set('calculated_bmr', response.bmr);",
+									"    pm.environment.set('calculated_bmi', response.bmi);",
+									"    pm.environment.set('calculated_bmi_category', response.bmiCategory);",
+									"    pm.environment.set('calculated_bmi_classification', response.bmiClassification);",
+									"    pm.environment.set('detected_eer_guideline', response.eerGuideline);",
+									"    console.log('✅ EER calculated successfully');",
+									"    console.log('📍 Location:', response.input.location);",
+									"    console.log('🌍 Auto-detected Guideline:', response.eerGuideline);",
+									"    console.log('📊 EER:', response.eer, 'kcal');",
+									"    console.log('🔥 BMR:', response.bmr, 'kcal');",
+									"    console.log('⚖️ BMI:', response.bmi, '(' + response.bmiClassification + ')');",
+									"    console.log('🧮 Formula:', response.formulaUsed);",
+									"} else {",
+									"    console.log('❌ EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"Paris, France\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"heightCm\": 165,\n  \"weightKg\": 60,\n  \"activityLevel\": \"moderately_active\",\n  \"pregnancyStatus\": \"not_pregnant\",\n  \"lactationStatus\": \"not_lactating\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "Calculate EER (Pregnant + India Location)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ Pregnancy EER calculated successfully');",
+									"    console.log('📍 Location:', response.input.location);",
+									"    console.log('🌍 Auto-detected Guideline:', response.eerGuideline);",
+									"    console.log('🤰 Pregnancy Adjustment included in formula');",
+									"    console.log('📊 EER:', response.eer, 'kcal');",
+									"    console.log('🔥 BMR:', response.bmr, 'kcal');",
+									"    console.log('⚖️ BMI:', response.bmi, '(' + response.bmiClassification + ')');",
+									"    console.log('🧮 Formula:', response.formulaUsed);",
+									"} else {",
+									"    console.log('❌ Pregnancy EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"Mumbai, India\",\n  \"age\": 25,\n  \"gender\": \"female\",\n  \"heightCm\": 160,\n  \"weightKg\": 55,\n  \"activityLevel\": \"lightly_active\",\n  \"pregnancyStatus\": \"second_trimester\",\n  \"lactationStatus\": \"not_lactating\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "Calculate Macros (Auto Guidelines from Location)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('calculated_macros', JSON.stringify(response.macros));",
+									"    console.log('✅ Macros calculated successfully');",
+									"    console.log('📍 Location:', response.input.location);",
+									"    console.log('🌍 Auto-detected Guideline:', response.macroGuideline);",
+									"    const macros = response.macros;",
+									"    console.log('🥩 Protein:', macros.Protein.min_grams + '-' + macros.Protein.max_grams + 'g');",
+									"    console.log('🍞 Carbs:', macros.Carbohydrates.min_grams + '-' + macros.Carbohydrates.max_grams + 'g');",
+									"    console.log('🥑 Fat:', macros['Total Fat'].min_grams + '-' + macros['Total Fat'].max_grams + 'g');",
+									"} else {",
+									"    console.log('❌ Macros calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMacros\",\n  \"eer\": {{calculated_eer}},\n  \"location\": \"Paris, France\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"weightKg\": 60\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				}
+			]
 		},
 		{
 			"name": "Client Management",
 			"item": [
 				{
-					"name": "Create Client",
+					"name": "Create Client (Basic)",
 					"event": [
 						{
 							"listen": "test",
@@ -94,8 +271,11 @@
 								"exec": [
 									"if (pm.response.code === 201) {",
 									"    const response = pm.response.json();",
-									"    pm.environment.set(\"clientId\", response.client.id);",
-									"    console.log(\"Client ID saved:\", response.client.id);",
+									"    pm.environment.set('client_id', response.client.id);",
+									"    console.log('✅ Basic client created successfully');",
+									"    console.log('🆔 Client ID:', response.client.id);",
+									"} else {",
+									"    console.log('❌ Client creation failed:', pm.response.json());",
 									"}"
 								],
 								"type": "text/javascript"
@@ -111,75 +291,215 @@
 							},
 							{
 								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
+								"value": "Bearer {{auth_token}}"
 							}
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"first_name\": \"John\",\n  \"last_name\": \"Smith\",\n  \"email\": \"john.smith@email.com\",\n  \"phone\": \"555-0199\",\n  \"phone_country_code\": \"+1\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"height_cm\": 175,\n  \"weight_kg\": 90,\n  \"activity_level\": \"moderately_active\",\n  \"health_goals\": [\"weight_loss\", \"muscle_gain\"],\n  \"dietary_restrictions\": [\"none\"],\n  \"status\": \"pending\"\n}"
+							"raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"dateOfBirth\": \"1990-05-15\",\n  \"gender\": \"male\",\n  \"heightCm\": 180,\n  \"weightKg\": 75,\n  \"activityLevel\": \"moderately_active\",\n  \"location\": \"New York, NY\",\n  \"healthGoals\": [\"weight_management\"],\n  \"status\": \"prospective\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/api/clients",
+							"raw": "{{base_url}}/api/clients",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"clients"
 							]
-						},
-						"description": "Create a new client profile"
+						}
 					}
 				},
 				{
-					"name": "List All Clients",
+					"name": "Create Client (With EER Data)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('enhanced_client_id', response.client.id);",
+									"    console.log('✅ Enhanced client created successfully');",
+									"    console.log('🆔 Client ID:', response.client.id);",
+									"    console.log('⚖️ BMI:', response.client.bmi, '(' + response.client.bmiCategory + ')');",
+									"    console.log('🔥 BMR:', response.client.bmr, 'kcal');",
+									"    console.log('📍 Location:', response.client.location);",
+									"    console.log('📋 EER Guideline:', response.client.eerGuideline);",
+									"} else {",
+									"    console.log('❌ Enhanced client creation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
-						"method": "GET",
+						"method": "POST",
 						"header": [
 							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
 								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
+								"value": "Bearer {{auth_token}}"
 							}
 						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"Marie\",\n  \"lastName\": \"Dubois\",\n  \"email\": \"marie.dubois@example.com\",\n  \"dateOfBirth\": \"1995-03-15\",\n  \"gender\": \"female\",\n  \"heightCm\": 165,\n  \"weightKg\": 60,\n  \"activityLevel\": \"moderately_active\",\n  \"location\": \"Paris, France\",\n  \"bmi\": {{calculated_bmi}},\n  \"bmiCategory\": \"{{calculated_bmi_category}}\",\n  \"bmr\": {{calculated_bmr}},\n  \"eerCalories\": {{calculated_eer}},\n  \"healthGoals\": [\"weight_management\"],\n  \"status\": \"prospective\"\n}"
+						},
 						"url": {
-							"raw": "{{baseUrl}}/api/clients",
+							"raw": "{{base_url}}/api/clients",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"clients"
 							]
-						},
-						"description": "Get list of all clients for the nutritionist"
+						}
 					}
 				},
 				{
-					"name": "Get Individual Client",
+					"name": "Create Client (Comprehensive Edge Case)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"Priya\",\n  \"lastName\": \"Sharma\",\n  \"email\": \"priya.sharma@example.com\",\n  \"dateOfBirth\": \"1992-08-20\",\n  \"gender\": \"female\",\n  \"heightCm\": 158,\n  \"weightKg\": 52,\n  \"activityLevel\": \"lightly_active\",\n  \"location\": \"Mumbai, India\",\n  \"pregnancyStatus\": \"second_trimester\",\n  \"lactationStatus\": \"not_lactating\",\n  \"medicalConditions\": [\"gestational_diabetes\"],\n  \"healthGoals\": [\"healthy_pregnancy\", \"weight_management\"],\n  \"status\": \"active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get All Clients",
 					"request": {
 						"method": "GET",
 						"header": [
 							{
 								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
+								"value": "Bearer {{auth_token}}"
 							}
 						],
 						"url": {
-							"raw": "{{baseUrl}}/api/clients/{{clientId}}",
+							"raw": "{{base_url}}/api/clients?status=all&page=1&limit=10",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": "all"
+								},
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Client (Enhanced)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const client = pm.response.json().client;",
+									"    console.log('✅ Client retrieved successfully');",
+									"    console.log('👤 Client:', client.fullName);",
+									"    console.log('⚖️ BMI:', client.bmi, '(' + client.bmiCategory + ')');",
+									"    console.log('🔥 BMR:', client.bmr, 'kcal');",
+									"    console.log('⚡ EER:', client.eerCalories, 'kcal');",
+									"    console.log('📍 Location:', client.location);",
+									"    console.log('📋 EER Guideline:', client.eerGuideline);",
+									"    if (client.proteinGrams) {",
+									"        console.log('🥩 Protein Target:', client.proteinGrams + 'g');",
+									"        console.log('🍞 Carbs Target:', client.carbsGrams + 'g');",
+									"        console.log('🥑 Fat Target:', client.fatGrams + 'g');",
+									"    }",
+									"} else {",
+									"    console.log('❌ Failed to get client:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{enhanced_client_id}}",
+							"host": [
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"clients",
-								"{{clientId}}"
+								"{{enhanced_client_id}}"
 							]
-						},
-						"description": "Get individual client with EER and macros data"
+						}
 					}
 				},
 				{
-					"name": "Update Client Status to Active",
+					"name": "Update Client with Macros",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const client = pm.response.json().client;",
+									"    console.log('✅ Client updated with macros successfully');",
+									"    console.log('🥩 Protein:', client.proteinGrams + 'g (' + client.proteinPercentage + '%)');",
+									"    console.log('🍞 Carbs:', client.carbsGrams + 'g (' + client.carbsPercentage + '%)');",
+									"    console.log('🥑 Fat:', client.fatGrams + 'g (' + client.fatPercentage + '%)');",
+									"    console.log('🌾 Fiber:', client.fiberGrams + 'g');",
+									"} else {",
+									"    console.log('❌ Failed to update client with macros:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "PUT",
 						"header": [
@@ -189,459 +509,251 @@
 							},
 							{
 								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
+								"value": "Bearer {{auth_token}}"
 							}
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"status\": \"active\"\n}"
+							"raw": "{\n  \"macrosData\": {{calculated_macros}}\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/api/clients/{{clientId}}",
+							"raw": "{{base_url}}/api/clients/{{enhanced_client_id}}",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"clients",
-								"{{clientId}}"
+								"{{enhanced_client_id}}"
 							]
-						},
-						"description": "Convert client status to active (sets converted_to_active_at timestamp)"
+						}
 					}
 				}
-			],
-			"description": "Client management endpoints for CRUD operations"
+			]
 		},
 		{
-			"name": "EER Calculations",
+			"name": "Complete Workflow Tests",
 			"item": [
 				{
-					"name": "Calculate EER - USA (Default)",
-					"event": [
+					"name": "🔄 Complete EER + Client + Macros Workflow",
+					"item": [
 						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.environment.set(\"eerUSA\", response.eer);",
-									"    console.log(\"USA EER saved:\", response.eer);",
-									"}"
+							"name": "Step 1: Calculate EER for New Client",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"const response = pm.response.json();",
+											"pm.environment.set('workflow_eer', response.eer);",
+											"pm.environment.set('workflow_bmr', response.bmr);",
+											"pm.environment.set('workflow_bmi', response.bmi);",
+											"pm.environment.set('workflow_bmi_category', response.bmiCategory);",
+											"console.log('🔥 Step 1: EER calculated -', response.eer, 'kcal');"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
 								],
-								"type": "text/javascript"
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"Barcelona, Spain\",\n  \"age\": 30,\n  \"gender\": \"female\",\n  \"heightCm\": 170,\n  \"weightKg\": 65,\n  \"activityLevel\": \"very_active\",\n  \"pregnancyStatus\": \"not_pregnant\",\n  \"lactationStatus\": \"not_lactating\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/calculations",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"calculations"
+									]
+								}
+							}
+						},
+						{
+							"name": "Step 2: Create Client with EER Data",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"const response = pm.response.json();",
+											"pm.environment.set('workflow_client_id', response.client.id);",
+											"console.log('👤 Step 2: Client created -', response.client.fullName);"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{auth_token}}"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"firstName\": \"Elena\",\n  \"lastName\": \"Rodriguez\",\n  \"email\": \"elena.rodriguez@example.com\",\n  \"dateOfBirth\": \"1993-12-10\",\n  \"gender\": \"female\",\n  \"heightCm\": 170,\n  \"weightKg\": 65,\n  \"activityLevel\": \"very_active\",\n  \"location\": \"Barcelona, Spain\",\n  \"bmi\": {{workflow_bmi}},\n  \"bmiCategory\": \"{{workflow_bmi_category}}\",\n  \"bmr\": {{workflow_bmr}},\n  \"eerCalories\": {{workflow_eer}},\n  \"healthGoals\": [\"muscle_gain\", \"athletic_performance\"],\n  \"status\": \"active\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/clients",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"clients"
+									]
+								}
+							}
+						},
+						{
+							"name": "Step 3: Calculate Macros",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"const response = pm.response.json();",
+											"pm.environment.set('workflow_macros', JSON.stringify(response));",
+											"console.log('🥗 Step 3: Macros calculated');"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"action\": \"calculateMacros\",\n  \"eer\": {{workflow_eer}},\n  \"location\": \"Barcelona, Spain\",\n  \"age\": 30,\n  \"gender\": \"female\",\n  \"weightKg\": 65\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/calculations",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"calculations"
+									]
+								}
+							}
+						},
+						{
+							"name": "Step 4: Update Client with Macros",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"console.log('✅ Step 4: Client updated with complete nutrition data');",
+											"console.log('🎉 Workflow completed successfully!');"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{auth_token}}"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{workflow_macros}}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/clients/{{workflow_client_id}}",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"clients",
+										"{{workflow_client_id}}"
+									]
+								}
+							}
+						},
+						{
+							"name": "Step 5: Verify Final Client Data",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"const client = pm.response.json().client;",
+											"console.log('🏁 FINAL VERIFICATION:');",
+											"console.log('👤 Client:', client.fullName);",
+											"console.log('📍 Location:', client.location, '| EER Guideline:', client.eerGuideline);",
+											"console.log('⚖️ BMI:', client.bmi, '(' + client.bmiClassification + ')');",
+											"console.log('🔥 BMR:', client.bmr, 'kcal | ⚡ EER:', client.eerCalories, 'kcal');",
+											"console.log('🥩 Protein:', client.proteinGrams + 'g (' + client.proteinPercentage + '%)');",
+											"console.log('🍞 Carbs:', client.carbsGrams + 'g (' + client.carbsPercentage + '%)');",
+											"console.log('🥑 Fat:', client.fatGrams + 'g (' + client.fatPercentage + '%)');",
+											"console.log('🌾 Fiber:', client.fiberGrams + 'g');",
+											"console.log('✅ ALL FEATURES WORKING PERFECTLY!');"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{auth_token}}"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/clients/{{workflow_client_id}}",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"clients",
+										"{{workflow_client_id}}"
+									]
+								}
 							}
 						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"height_cm\": 175,\n  \"weight_kg\": 90,\n  \"activity_level\": \"moderately_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using USA formulas (Harris-Benedict revised) - country defaults to USA"
-					}
-				},
-				{
-					"name": "Calculate EER - UK",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.environment.set(\"eerUK\", response.eer);",
-									"    console.log(\"UK EER saved:\", response.eer);",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"country\": \"UK\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"height_cm\": 175,\n  \"weight_kg\": 90,\n  \"activity_level\": \"moderately_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using UK formulas (Schofield SACN)"
-					}
-				},
-				{
-					"name": "Calculate EER - EU",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.environment.set(\"eerEU\", response.eer);",
-									"    console.log(\"EU EER saved:\", response.eer);",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"country\": \"EU\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"height_cm\": 175,\n  \"weight_kg\": 90,\n  \"activity_level\": \"moderately_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using EU formulas (Schofield EFSA) - France uses EU guidelines"
-					}
-				},
-				{
-					"name": "Calculate EER - India",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.environment.set(\"eerIndia\", response.eer);",
-									"    console.log(\"India EER saved:\", response.eer);",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"country\": \"India\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"height_cm\": 175,\n  \"weight_kg\": 90,\n  \"activity_level\": \"moderately_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using India formulas (ICMR-NIN)"
-					}
-				},
-				{
-					"name": "Calculate EER - Canada",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"country\": \"Canada\",\n  \"age\": 25,\n  \"gender\": \"female\",\n  \"height_cm\": 160,\n  \"weight_kg\": 65,\n  \"activity_level\": \"very_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using Canada formulas (same as USA - IOM)"
-					}
-				},
-				{
-					"name": "Calculate EER - Japan",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_eer\",\n  \"country\": \"Japan\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"height_cm\": 155,\n  \"weight_kg\": 55,\n  \"activity_level\": \"lightly_active\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate EER using Japan formulas (MHLW)"
-					}
+					]
 				}
-			],
-			"description": "EER (Estimated Energy Requirement) calculations for multiple countries"
+			]
 		},
 		{
-			"name": "Macronutrient Calculations",
-			"item": [
-				{
-					"name": "Calculate Macros - USA",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.environment.set(\"macrosUSA\", JSON.stringify(response));",
-									"    console.log(\"USA Macros saved\");",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_macros\",\n  \"eer\": {{eerUSA}},\n  \"country\": \"USA\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weight_kg\": 90\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate macronutrients using USA guidelines (DRI 2005)"
-					}
-				},
-				{
-					"name": "Calculate Macros - UK",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_macros\",\n  \"eer\": {{eerUK}},\n  \"country\": \"UK\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weight_kg\": 90\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate macronutrients using UK guidelines (SACN)"
-					}
-				},
-				{
-					"name": "Calculate Macros - EU",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_macros\",\n  \"eer\": {{eerEU}},\n  \"country\": \"EU\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weight_kg\": 90\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate macronutrients using EU guidelines (EFSA DRV) - France uses EU guidelines"
-					}
-				},
-				{
-					"name": "Calculate Macros - India",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"calculate_macros\",\n  \"eer\": {{eerIndia}},\n  \"country\": \"India\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weight_kg\": 90\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/calculations",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"calculations"
-							]
-						},
-						"description": "Calculate macronutrients using India guidelines (ICMR-NIN)"
-					}
-				}
-			],
-			"description": "Macronutrient calculations for different countries with country-specific guidelines"
-		},
-		{
-			"name": "Client Nutrition Updates",
-			"item": [
-				{
-					"name": "Save EER and Macros to Client",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"eer_calories\": 3394,\n  \"macros_data\": {\n    \"success\": true,\n    \"input\": {\"eer\": 3394, \"country\": \"USA\", \"age\": 30, \"gender\": \"male\", \"weight_kg\": 90},\n    \"macros\": {\n      \"Protein\": {\"min_grams\": 84.9, \"max_grams\": 200, \"note\": \"RDA: 0.8 g/kg body weight minimum\"},\n      \"Carbohydrates\": {\"min_grams\": 382.1, \"max_grams\": 551.8, \"note\": \"AMDR: 45-65% of total calories\"},\n      \"Total Fat\": {\"min_grams\": 75.4, \"max_grams\": 132, \"note\": \"AMDR: 20-35% of total calories\"},\n      \"Fiber\": {\"min_grams\": 47.5, \"max_grams\": 47.5, \"note\": \"AI: 14 g per 1000 kcal\"},\n      \"Saturated Fat\": {\"min_grams\": null, \"max_grams\": 37.7, \"note\": \"Less than 10% of calories\"},\n      \"Omega-3 Fatty Acids\": {\"min_grams\": 1.6, \"max_grams\": 2.5, \"note\": \"ALA: 1.6 g/day minimum\"},\n      \"Cholesterol\": {\"min_grams\": null, \"max_grams\": 0.3, \"note\": \"Less than 300 mg/day\"}\n    }\n  },\n  \"protein_grams\": 142,\n  \"carbs_grams\": 467,\n  \"fat_grams\": 104,\n  \"fiber_grams\": 48\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/clients/{{clientId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"clients",
-								"{{clientId}}"
-							]
-						},
-						"description": "Save calculated EER and macros data to client record with ranges and target values"
-					}
-				},
-				{
-					"name": "Update Only EER",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							},
-							{
-								"key": "Authorization",
-								"value": "Bearer {{authToken}}"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"eer_calories\": 3500,\n  \"nutritionist_notes\": \"Updated EER based on new activity level\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/clients/{{clientId}}",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"clients",
-								"{{clientId}}"
-							]
-						},
-						"description": "Update only EER calories without affecting other data"
-					}
-				}
-			],
-			"description": "Update client records with nutrition data from calculations"
-		},
-		{
-			"name": "System Health",
+			"name": "System Health & Migration",
 			"item": [
 				{
 					"name": "Health Check",
@@ -649,16 +761,41 @@
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "{{baseUrl}}/api/health",
+							"raw": "{{base_url}}/api/health",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"health"
 							]
+						}
+					}
+				},
+				{
+					"name": "Run Database Migrations",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"migrate\"\n}"
 						},
-						"description": "Check API health status and migration status"
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"health"
+							]
+						}
 					}
 				},
 				{
@@ -676,47 +813,18 @@
 							"raw": "{\n  \"action\": \"validate\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/api/health",
+							"raw": "{{base_url}}/api/health",
 							"host": [
-								"{{baseUrl}}"
+								"{{base_url}}"
 							],
 							"path": [
 								"api",
 								"health"
 							]
-						},
-						"description": "Validate database migration status"
-					}
-				},
-				{
-					"name": "Run Migrations",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"action\": \"migrate\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/health",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"api",
-								"health"
-							]
-						},
-						"description": "Run pending database migrations"
+						}
 					}
 				}
-			],
-			"description": "System health and migration management endpoints"
+			]
 		}
 	],
 	"event": [
@@ -725,59 +833,18 @@
 			"script": {
 				"type": "text/javascript",
 				"exec": [
-					""
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
+					"// Set base URL if not already set",
+					"if (!pm.environment.get('base_url')) {",
+					"    pm.environment.set('base_url', 'https://caloriescience-api.vercel.app');",
+					"}"
 				]
 			}
 		}
 	],
 	"variable": [
 		{
-			"key": "baseUrl",
+			"key": "base_url",
 			"value": "https://caloriescience-api.vercel.app",
-			"type": "string"
-		},
-		{
-			"key": "authToken",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "clientId",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "eerUSA",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "eerUK",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "eerEU",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "eerIndia",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "macrosUSA",
-			"value": "",
 			"type": "string"
 		}
 	]

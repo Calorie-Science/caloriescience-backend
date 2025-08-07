@@ -1,7 +1,10 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
-import { validateBody, clientSchema } from '../../lib/validation';
+import { validateAndTransformClient } from '../../lib/validation';
+import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
+import { calculateHealthMetrics } from '../../lib/healthMetrics';
+import { getEERGuidelineFromLocation } from '../../lib/locationMapping';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method === 'GET') {
@@ -43,8 +46,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         throw error;
       }
 
+      // Transform database response to camelCase
+      const transformedClients = transformWithMapping(clients || [], FIELD_MAPPINGS.snakeToCamel);
+
       res.status(200).json({
-        clients: clients || [],
+        clients: transformedClients,
         pagination: {
           page: Number(page),
           limit: Number(limit),
@@ -64,7 +70,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   else if (req.method === 'POST') {
     // Create new client
     try {
-      const validation = validateBody(clientSchema, req.body);
+      const validation = validateAndTransformClient(req.body);
       if (!validation.isValid) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -77,8 +83,35 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         nutritionist_id: req.user.id,
         email: validation.value.email?.toLowerCase(),
         // Auto-generate full_name for backward compatibility
-        full_name: validation.value.full_name || `${validation.value.first_name} ${validation.value.last_name || ''}`.trim()
+        full_name: validation.value.full_name || `${validation.value.first_name} ${validation.value.last_name || ''}`.trim(),
+        // Auto-determine EER guideline from location
+        eer_guideline: getEERGuidelineFromLocation(validation.value.location)
       };
+
+      // Remove eer_calories from client data as it belongs in nutrition_requirements table
+      delete clientData.eer_calories;
+
+      // Calculate BMI if height and weight are provided AND BMI is not already provided
+      if (validation.value.height_cm && validation.value.weight_kg && !validation.value.bmi) {
+        const healthMetrics = calculateHealthMetrics(
+          validation.value.height_cm,
+          validation.value.weight_kg,
+          validation.value.bmr // Pass BMR if provided from EER calculation
+        );
+        
+        // Transform health metrics to snake_case for database
+        const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
+        Object.assign(clientData, transformedHealthMetrics);
+      } else if (validation.value.bmi || validation.value.bmr) {
+        // If BMI/BMR are provided from EER calculation, set the last calculated timestamps
+        const now = new Date().toISOString();
+        if (validation.value.bmi) {
+          clientData.bmi_last_calculated = now;
+        }
+        if (validation.value.bmr) {
+          clientData.bmr_last_calculated = now;
+        }
+      }
 
       const { data: client, error } = await supabase
         .from('clients')
@@ -88,12 +121,46 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       if (error) {
         console.error('Create client error:', error);
-        throw error;
+        console.error('Client data that failed:', JSON.stringify(clientData, null, 2));
+        
+        // Return specific error details for debugging
+        return res.status(500).json({
+          error: 'Failed to create client',
+          message: 'An error occurred while creating the client',
+          details: error.message,
+          code: error.code,
+          hint: error.hint
+        });
       }
+
+      // If EER data is provided, create nutrition requirements record
+      if (validation.value.eer_calories) {
+        const nutritionData = {
+          client_id: client.id,
+          eer_calories: validation.value.eer_calories,
+          calculation_method: 'formula_based',
+          is_ai_generated: false,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const { error: nutritionError } = await supabase
+          .from('client_nutrition_requirements')
+          .insert(nutritionData);
+
+        if (nutritionError) {
+          console.warn('Failed to create nutrition requirements:', nutritionError);
+          // Don't fail the client creation, just log the warning
+        }
+      }
+
+      // Transform response to camelCase
+      const transformedClient = transformWithMapping(client, FIELD_MAPPINGS.snakeToCamel);
 
       res.status(201).json({
         message: 'Client created successfully',
-        client
+        client: transformedClient
       });
     } catch (error) {
       console.error('Create client error:', error);

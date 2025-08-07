@@ -1,25 +1,36 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { calculateEER, calculateMacros, EERCalculationInput, MacrosCalculationInput } from '../lib/calculations';
+import { transformWithMapping, FIELD_MAPPINGS } from '../lib/caseTransform';
+import { calculateBMI } from '../lib/healthMetrics';
+import { getEERGuidelineFromLocation } from '../lib/locationMapping';
 import Joi from 'joi';
 
-// Validation schemas
+// Validation schemas - Updated to use location instead of country
 const eerSchema = Joi.object({
-  country: Joi.string().valid('USA', 'Canada', 'EU', 'AU/NZ', 'UK', 'Singapore', 'UAE', 'India', 'Japan', 'WHO', 'ZA', 'Brazil').default('USA'),
+  location: Joi.string().max(255).required()
+    .messages({
+      'string.max': 'Location cannot exceed 255 characters',
+      'any.required': 'Location is required to determine EER guideline'
+    }),
   age: Joi.number().integer().min(1).max(120).required(),
   gender: Joi.string().valid('male', 'female').required(),
-  height_cm: Joi.number().min(50).max(300).required(),
-  weight_kg: Joi.number().min(1).max(500).required(),
-  activity_level: Joi.string().valid('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active').required(),
-  pregnancy_status: Joi.string().valid('not_pregnant', 'first_trimester', 'second_trimester', 'third_trimester').optional().default('not_pregnant'),
-  lactation_status: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating')
+  heightCm: Joi.number().min(50).max(300).required(),
+  weightKg: Joi.number().min(1).max(500).required(),
+  activityLevel: Joi.string().valid('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active').required(),
+  pregnancyStatus: Joi.string().valid('not_pregnant', 'first_trimester', 'second_trimester', 'third_trimester').optional().default('not_pregnant'),
+  lactationStatus: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating')
 });
 
 const macrosSchema = Joi.object({
   eer: Joi.number().min(500).max(10000).required(),
-  country: Joi.string().valid('USA', 'Canada', 'EU', 'AU/NZ', 'UK', 'Singapore', 'UAE', 'India', 'Japan', 'WHO', 'ZA', 'Brazil').required(),
+  location: Joi.string().max(255).required()
+    .messages({
+      'string.max': 'Location cannot exceed 255 characters',
+      'any.required': 'Location is required to determine macro guideline'
+    }),
   age: Joi.number().integer().min(1).max(120).required(),
   gender: Joi.string().valid('male', 'female').required(),
-  weight_kg: Joi.number().min(1).max(500).required()
+  weightKg: Joi.number().min(1).max(500).required()
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
@@ -42,14 +53,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   try {
     switch (action) {
-      case 'calculate_eer':
+      case 'calculateEer':
         return await handleEERCalculation(req, res);
-      case 'calculate_macros':
+      case 'calculateMacros':
         return await handleMacrosCalculation(req, res);
       default:
         return res.status(400).json({
           error: 'Invalid action',
-          message: 'Action must be either "calculate_eer" or "calculate_macros"'
+          message: 'Action must be either "calculateEer" or "calculateMacros"'
         });
     }
   } catch (error) {
@@ -76,25 +87,36 @@ async function handleEERCalculation(req: VercelRequest, res: VercelResponse): Pr
     });
   }
 
+  // Automatically determine EER guideline from location
+  const eerGuideline = getEERGuidelineFromLocation(value.location);
+
   const eerData: EERCalculationInput = {
-    country: value.country,
+    country: eerGuideline, // Use the determined guideline as country
     age: value.age,
     gender: value.gender,
-    height_cm: value.height_cm,
-    weight_kg: value.weight_kg,
-    activity_level: value.activity_level,
-    pregnancy_status: value.pregnancy_status,
-    lactation_status: value.lactation_status
+    height_cm: value.heightCm,
+    weight_kg: value.weightKg,
+    activity_level: value.activityLevel,
+    pregnancy_status: value.pregnancyStatus,
+    lactation_status: value.lactationStatus
   };
 
   const eerResult = await calculateEER(eerData);
+
+  // Calculate BMI and classification
+  const bmiResult = calculateBMI(value.heightCm, value.weightKg);
 
   return res.status(200).json({
     success: true,
     bmr: eerResult.bmr,
     pal: eerResult.pal,
     eer: eerResult.eer,
-    formula_used: eerResult.formula_used,
+    formulaUsed: eerResult.formula_used,
+    eerGuideline: eerGuideline, // Include the determined guideline in response
+    // Add BMI information
+    bmi: parseFloat(bmiResult.bmi.toFixed(2)),
+    bmiCategory: bmiResult.category,
+    bmiClassification: bmiResult.classification,
     input: value,
     timestamp: new Date().toISOString(),
     message: 'EER calculation completed successfully'
@@ -116,12 +138,15 @@ async function handleMacrosCalculation(req: VercelRequest, res: VercelResponse):
     });
   }
 
+  // Automatically determine macro guideline from location
+  const macroGuideline = getEERGuidelineFromLocation(value.location);
+
   const macrosData: MacrosCalculationInput = {
     eer: value.eer,
-    country: value.country,
+    country: macroGuideline, // Use the determined guideline as country
     age: value.age,
     gender: value.gender,
-    weight_kg: value.weight_kg
+    weight_kg: value.weightKg
   };
 
   const macrosResult = await calculateMacros(macrosData);
@@ -129,6 +154,7 @@ async function handleMacrosCalculation(req: VercelRequest, res: VercelResponse):
   return res.status(200).json({
     success: true,
     input: value,
+    macroGuideline: macroGuideline, // Include the determined guideline in response
     macros: macrosResult,
     timestamp: new Date().toISOString(),
     message: 'Macronutrient recommendations calculated successfully'

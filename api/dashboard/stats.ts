@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
+import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method !== 'GET') {
@@ -20,11 +21,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     const stats = {
-      total_clients: clientStats.length,
+      totalClients: clientStats.length,
       prospective: clientStats.filter(c => c.status === 'prospective').length,
       active: clientStats.filter(c => c.status === 'active').length,
       inactive: clientStats.filter(c => c.status === 'inactive').length,
-      new_this_month: clientStats.filter(c => {
+      newThisMonth: clientStats.filter(c => {
         const createdDate = new Date(c.created_at);
         const now = new Date();
         return createdDate.getMonth() === now.getMonth() && 
@@ -85,11 +86,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       throw interactionsError;
     }
 
+    // Transform all responses to camelCase
+    const transformedRecentClients = transformWithMapping(recentClients || [], FIELD_MAPPINGS.snakeToCamel);
+    const transformedClientsNeedingEER = transformWithMapping(clientsNeedingEER || [], FIELD_MAPPINGS.snakeToCamel);
+    const transformedUpcomingInteractions = transformWithMapping(upcomingInteractions || [], FIELD_MAPPINGS.snakeToCamel);
+
     res.status(200).json({
       stats,
-      recent_clients: recentClients,
-      clients_needing_eer: clientsNeedingEER,
-      upcoming_interactions: upcomingInteractions || []
+      recentClients: transformedRecentClients,
+      clientsNeedingEer: transformedClientsNeedingEER,
+      upcomingInteractions: transformedUpcomingInteractions
     });
   } catch (error) {
     console.error('Dashboard stats error:', error);

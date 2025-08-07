@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     // Handle manual migration actions (for authenticated users)
     if (req.method === 'POST') {
-      const { action, migration_name } = req.body;
+      const { action, migrationName } = req.body;
 
       switch (action) {
         case 'migrate':
@@ -36,14 +36,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           });
 
         case 'rerun':
-          if (!migration_name) {
+          if (!migrationName) {
             return res.status(400).json({
               error: 'Migration name required for rerun action'
             });
           }
-          const rerunSuccess = await rerunMigration(migration_name);
+          const rerunSuccess = await rerunMigration(migrationName);
           return res.status(200).json({
-            message: `Migration ${migration_name} ${rerunSuccess ? 'completed' : 'failed'}`,
+            message: `Migration ${migrationName} ${rerunSuccess ? 'completed' : 'failed'}`,
             success: rerunSuccess
           });
 
@@ -97,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       message: 'CalorieScience API is running',
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version || '1.0.0',
-      migrations_run: migrationsRun
+      migrationsRun: migrationsRun
     });
 
   } catch (error) {

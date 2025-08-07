@@ -1,7 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../lib/supabase';
-import { hashPassword, generateToken, generateRandomToken, verifyPassword, updateLastLogin } from '../lib/auth';
+import { generateToken } from '../lib/auth';
 import { validateBody, userRegistrationSchema, userLoginSchema } from '../lib/validation';
+import { transformWithMapping, FIELD_MAPPINGS } from '../lib/caseTransform';
+import bcrypt from 'bcryptjs';
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Handle CORS preflight
@@ -24,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     switch (action) {
       case 'register':
-        return await handleRegister(req, res);
+        return await handleRegistration(req, res);
       case 'login':
         return await handleLogin(req, res);
       default:
@@ -42,148 +44,160 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 }
 
-async function handleRegister(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
-  // Validate request body
-  const validation = validateBody(userRegistrationSchema, req.body);
-  if (!validation.isValid) {
-    return res.status(400).json({
-      error: 'Validation failed',
-      details: validation.errors
-    });
-  }
+async function handleRegistration(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
+  try {
+    const validation = validateBody(userRegistrationSchema, req.body);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: validation.errors
+      });
+    }
 
-  const userData = validation.value;
+    // Transform camelCase to snake_case for database
+    const userData = transformWithMapping(validation.value, FIELD_MAPPINGS.camelToSnake);
 
-  // Check if user already exists
-  const { data: existingUser } = await supabase
-    .from('users')
-    .select('email')
-    .eq('email', userData.email.toLowerCase())
-    .single();
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', userData.email.toLowerCase())
+      .single();
 
-  if (existingUser) {
-    return res.status(409).json({
-      error: 'User already exists',
-      message: 'An account with this email already exists'
-    });
-  }
+    if (existingUser) {
+      return res.status(409).json({
+        error: 'User already exists',
+        message: 'A user with this email address already exists'
+      });
+    }
 
-  // Hash password
-  const passwordHash = await hashPassword(userData.password);
+    // Hash password
+    const passwordHash = await bcrypt.hash(userData.password, 10);
 
-  // Generate email verification token
-  const emailVerificationToken = generateRandomToken();
+    // Auto-generate full_name for backward compatibility
+    const fullName = userData.full_name || `${userData.first_name} ${userData.last_name || ''}`.trim();
 
-  // Insert new user
-  const { data: newUser, error: insertError } = await supabase
-    .from('users')
-    .insert({
-      email: userData.email.toLowerCase(),
-      password_hash: passwordHash,
-      first_name: userData.first_name,
-      last_name: userData.last_name,
-      phone: userData.phone,
-      phone_country_code: userData.phone_country_code,
-      qualification: userData.qualification,
-      experience_years: userData.experience_years,
-      specialization: userData.specialization,
-      email_verification_token: emailVerificationToken,
-      role: 'nutritionist',
-      full_name: userData.full_name || `${userData.first_name} ${userData.last_name || ''}`.trim()
-    })
-    .select('id, email, first_name, last_name, full_name, role, is_email_verified')
-    .single();
+    // Insert new user
+    const { data: newUser, error } = await supabase
+      .from('users')
+      .insert({
+        email: userData.email.toLowerCase(),
+        password_hash: passwordHash,
+        first_name: userData.first_name,
+        last_name: userData.last_name || '',
+        phone: userData.phone || null,
+        phone_country_code: userData.phone_country_code || '+1',
+        qualification: userData.qualification || null,
+        experience_years: userData.experience_years || null,
+        specialization: userData.specialization || null,
+        full_name: fullName,
+        role: 'nutritionist',
+        is_email_verified: false
+      })
+      .select('id, email, first_name, last_name, full_name, role, created_at')
+      .single();
 
-  if (insertError) {
-    console.error('Registration error:', insertError);
-    return res.status(500).json({
-      error: 'Registration failed',
-      message: 'Unable to create user account'
-    });
-  }
+    if (error) {
+      console.error('Registration error:', error);
+      return res.status(500).json({
+        error: 'Registration failed',
+        message: 'An error occurred during registration'
+      });
+    }
 
-  // Generate JWT token
-  const token = generateToken({
-    id: newUser.id,
-    email: newUser.email,
-    first_name: newUser.first_name,
-    last_name: newUser.last_name,
-    full_name: newUser.full_name,
-    role: newUser.role
-  });
-
-  return res.status(201).json({
-    message: 'Registration successful',
-    token,
-    user: {
+    // Generate JWT token
+    const token = generateToken({
       id: newUser.id,
       email: newUser.email,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
       full_name: newUser.full_name,
-      role: newUser.role,
-      is_email_verified: newUser.is_email_verified
-    },
-    next_step: 'Please check your email to verify your account'
-  });
+      role: newUser.role
+    });
+
+    // Transform response to camelCase
+    const transformedUser = transformWithMapping(newUser, FIELD_MAPPINGS.snakeToCamel);
+
+    return res.status(201).json({
+      message: 'Registration successful',
+      user: transformedUser,
+      token
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    return res.status(500).json({
+      error: 'Registration failed',
+      message: 'An unexpected error occurred during registration'
+    });
+  }
 }
 
 async function handleLogin(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
-  // Validate request body
-  const validation = validateBody(userLoginSchema, req.body);
-  if (!validation.isValid) {
-    return res.status(400).json({
-      error: 'Validation failed',
-      details: validation.errors
-    });
-  }
+  try {
+    const validation = validateBody(userLoginSchema, req.body);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: validation.errors
+      });
+    }
 
-  const { email, password } = validation.value;
+    const { email, password } = validation.value;
 
-  // Get user from database
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', email.toLowerCase())
-    .single();
+    // Get user by email
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, email, password_hash, first_name, last_name, full_name, role')
+      .eq('email', email.toLowerCase())
+      .eq('role', 'nutritionist')
+      .single();
 
-  if (error || !user) {
-    return res.status(401).json({
-      error: 'Invalid credentials',
-      message: 'Email or password is incorrect'
-    });
-  }
+    if (error || !user) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Email or password is incorrect'
+      });
+    }
 
-  // Verify password
-  const isValidPassword = await verifyPassword(password, user.password_hash);
-  if (!isValidPassword) {
-    return res.status(401).json({
-      error: 'Invalid credentials',
-      message: 'Email or password is incorrect'
-    });
-  }
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    if (!isValidPassword) {
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        message: 'Email or password is incorrect'
+      });
+    }
 
-  // Update last login timestamp
-  await updateLastLogin(user.id);
-
-  // Generate JWT token
-  const token = generateToken({
-    id: user.id,
-    email: user.email,
-    full_name: user.full_name,
-    role: user.role
-  });
-
-  return res.status(200).json({
-    message: 'Login successful',
-    token,
-    user: {
+    // Generate JWT token
+    const token = generateToken({
       id: user.id,
       email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
       full_name: user.full_name,
-      role: user.role,
-      is_email_verified: user.is_email_verified,
-      qualification: user.qualification,
-      experience_years: user.experience_years,
-      specialization: user.specialization
-    }
-  });
+      role: user.role
+    });
+
+    // Transform response to camelCase
+    const transformedUser = transformWithMapping({
+      id: user.id,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      full_name: user.full_name,
+      role: user.role
+    }, FIELD_MAPPINGS.snakeToCamel);
+
+    return res.status(200).json({
+      message: 'Login successful',
+      user: transformedUser,
+      token
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(500).json({
+      error: 'Login failed',
+      message: 'An unexpected error occurred during login'
+    });
+  }
 } 

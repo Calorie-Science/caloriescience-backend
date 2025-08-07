@@ -1,7 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
-import { validateBody, clientSchema } from '../../lib/validation';
+import { validateAndTransformClient } from '../../lib/validation';
+import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
+import { calculateHealthMetrics, shouldRecalculateHealthMetrics } from '../../lib/healthMetrics';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const { id } = req.query;
@@ -20,7 +22,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .from('clients')
         .select(`
           *,
-          nutrition_requirements:client_nutrition_requirements!inner(
+          nutrition_requirements:client_nutrition_requirements(
             id,
             eer_calories,
             protein_grams,
@@ -68,7 +70,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         `)
         .eq('id', id)
         .eq('nutritionist_id', req.user.id)
-        .eq('client_nutrition_requirements.is_active', true)
+        .eq('nutrition_requirements.is_active', true)
         .single();
 
       if (error || !client) {
@@ -83,78 +85,81 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       const response = {
         ...client,
         // EER data
-        eer_calories: nutritionReq?.eer_calories || null,
-        nutritionist_notes: nutritionReq?.nutritionist_notes || null,
-        eer_last_updated: nutritionReq?.updated_at || null,
+        eerCalories: nutritionReq?.eer_calories || null,
+        nutritionistNotes: nutritionReq?.nutritionist_notes || null,
+        eerLastUpdated: nutritionReq?.updated_at || null,
         
         // Target Macros data (calculated values)
-        protein_grams: nutritionReq?.protein_grams || null,
-        carbs_grams: nutritionReq?.carbs_grams || null,
-        fat_grams: nutritionReq?.fat_grams || null,
-        fiber_grams: nutritionReq?.fiber_grams || null,
-        protein_percentage: nutritionReq?.protein_percentage || null,
-        carbs_percentage: nutritionReq?.carbs_percentage || null,
-        fat_percentage: nutritionReq?.fat_percentage || null,
+        proteinGrams: nutritionReq?.protein_grams || null,
+        carbsGrams: nutritionReq?.carbs_grams || null,
+        fatGrams: nutritionReq?.fat_grams || null,
+        fiberGrams: nutritionReq?.fiber_grams || null,
+        proteinPercentage: nutritionReq?.protein_percentage || null,
+        carbsPercentage: nutritionReq?.carbs_percentage || null,
+        fatPercentage: nutritionReq?.fat_percentage || null,
         
         // Macros Ranges (from AI recommendations)
-        macros_ranges: {
+        macrosRanges: {
           protein: {
-            min_grams: nutritionReq?.protein_min_grams || null,
-            max_grams: nutritionReq?.protein_max_grams || null,
+            minGrams: nutritionReq?.protein_min_grams || null,
+            maxGrams: nutritionReq?.protein_max_grams || null,
             note: nutritionReq?.protein_note || null
           },
           carbohydrates: {
-            min_grams: nutritionReq?.carbs_min_grams || null,
-            max_grams: nutritionReq?.carbs_max_grams || null,
+            minGrams: nutritionReq?.carbs_min_grams || null,
+            maxGrams: nutritionReq?.carbs_max_grams || null,
             note: nutritionReq?.carbs_note || null
           },
-          total_fat: {
-            min_grams: nutritionReq?.fat_min_grams || null,
-            max_grams: nutritionReq?.fat_max_grams || null,
+          totalFat: {
+            minGrams: nutritionReq?.fat_min_grams || null,
+            maxGrams: nutritionReq?.fat_max_grams || null,
             note: nutritionReq?.fat_note || null
           },
           fiber: {
-            min_grams: nutritionReq?.fiber_min_grams || null,
-            max_grams: nutritionReq?.fiber_max_grams || null,
+            minGrams: nutritionReq?.fiber_min_grams || null,
+            maxGrams: nutritionReq?.fiber_max_grams || null,
             note: nutritionReq?.fiber_note || null
           },
-          saturated_fat: {
-            min_grams: nutritionReq?.saturated_fat_min_grams || null,
-            max_grams: nutritionReq?.saturated_fat_max_grams || null,
+          saturatedFat: {
+            minGrams: nutritionReq?.saturated_fat_min_grams || null,
+            maxGrams: nutritionReq?.saturated_fat_max_grams || null,
             note: nutritionReq?.saturated_fat_note || null
           },
-          monounsaturated_fat: {
-            min_grams: nutritionReq?.monounsaturated_fat_min_grams || null,
-            max_grams: nutritionReq?.monounsaturated_fat_max_grams || null,
+          monounsaturatedFat: {
+            minGrams: nutritionReq?.monounsaturated_fat_min_grams || null,
+            maxGrams: nutritionReq?.monounsaturated_fat_max_grams || null,
             note: nutritionReq?.monounsaturated_fat_note || null
           },
-          polyunsaturated_fat: {
-            min_grams: nutritionReq?.polyunsaturated_fat_min_grams || null,
-            max_grams: nutritionReq?.polyunsaturated_fat_max_grams || null,
+          polyunsaturatedFat: {
+            minGrams: nutritionReq?.polyunsaturated_fat_min_grams || null,
+            maxGrams: nutritionReq?.polyunsaturated_fat_max_grams || null,
             note: nutritionReq?.polyunsaturated_fat_note || null
           },
-          omega3_fatty_acids: {
-            min_grams: nutritionReq?.omega3_min_grams || null,
-            max_grams: nutritionReq?.omega3_max_grams || null,
+          omega3FattyAcids: {
+            minGrams: nutritionReq?.omega3_min_grams || null,
+            maxGrams: nutritionReq?.omega3_max_grams || null,
             note: nutritionReq?.omega3_note || null
           },
           cholesterol: {
-            min_grams: nutritionReq?.cholesterol_min_grams || null,
-            max_grams: nutritionReq?.cholesterol_max_grams || null,
+            minGrams: nutritionReq?.cholesterol_min_grams || null,
+            maxGrams: nutritionReq?.cholesterol_max_grams || null,
             note: nutritionReq?.cholesterol_note || null
           }
         },
         
         // AI calculation metadata
-        calculation_method: nutritionReq?.calculation_method || null,
-        is_ai_generated: nutritionReq?.is_ai_generated || false,
-        original_ai_calculation: nutritionReq?.ai_calculation_data || null
+        calculationMethod: nutritionReq?.calculation_method || null,
+        isAiGenerated: nutritionReq?.is_ai_generated || false,
+        originalAiCalculation: nutritionReq?.ai_calculation_data || null
       };
 
       // Remove the nested nutrition_requirements array
       delete response.nutrition_requirements;
 
-      res.status(200).json({ client: response });
+      // Transform response to camelCase
+      const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+
+      res.status(200).json({ client: transformedResponse });
     } catch (error) {
       console.error('Get client error:', error);
       res.status(500).json({
@@ -168,14 +173,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   else if (req.method === 'PUT') {
     try {
       const { 
-        eer_calories, 
-        nutritionist_notes, 
-        original_ai_calculation,
-        macros_data, // New field for macros from macros-calculate API
-        protein_grams,
-        carbs_grams,
-        fat_grams,
-        fiber_grams,
+        eerCalories, 
+        nutritionistNotes, 
+        originalAiCalculation,
+        macrosData, // New field for macros from macros-calculate API
+        proteinGrams,
+        carbsGrams,
+        fatGrams,
+        fiberGrams,
         ...clientData 
       } = req.body;
 
@@ -183,12 +188,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       if (Object.keys(clientData).length > 0) {
         // Only validate if we actually have client data (not just empty object from destructuring)
         const hasClientData = Object.keys(clientData).some(key => 
-          !['eer_calories', 'nutritionist_notes', 'original_ai_calculation', 'macros_data', 
-            'protein_grams', 'carbs_grams', 'fat_grams', 'fiber_grams', 'status'].includes(key)
+          !['eerCalories', 'nutritionistNotes', 'originalAiCalculation', 'macrosData', 
+            'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams', 'status'].includes(key)
         );
         
         if (hasClientData) {
-          const validation = validateBody(clientSchema, clientData);
+          const validation = validateAndTransformClient(clientData);
       if (!validation.isValid) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -201,6 +206,28 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         email: validation.value.email?.toLowerCase(),
         updated_at: new Date().toISOString()
       };
+
+          // Calculate BMI if height or weight changed
+          if (validation.value.height_cm || validation.value.weight_kg) {
+            // Get current client data to check for changes
+            const { data: currentClient } = await supabase
+              .from('clients')
+              .select('height_cm, weight_kg, bmi, bmi_category')
+              .eq('id', id)
+              .eq('nutritionist_id', req.user.id)
+              .single();
+
+            if (currentClient) {
+              const finalHeight = validation.value.height_cm || currentClient.height_cm;
+              const finalWeight = validation.value.weight_kg || currentClient.weight_kg;
+              
+              if (finalHeight && finalWeight) {
+                const healthMetrics = calculateHealthMetrics(finalHeight, finalWeight);
+                const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
+                Object.assign(updateData, transformedHealthMetrics);
+              }
+            }
+          }
 
           // Handle status conversion to active
           if (validation.value.status === 'active') {
@@ -238,9 +265,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       // Handle EER and Macros data if provided
-      if (eer_calories !== undefined || macros_data !== undefined) {
+      if (eerCalories !== undefined || macrosData !== undefined) {
         // Validate EER data if provided
-        if (eer_calories !== undefined && (eer_calories < 500 || eer_calories > 8000)) {
+        if (eerCalories !== undefined && (eerCalories < 500 || eerCalories > 8000)) {
           return res.status(400).json({
             error: 'Invalid EER calories',
             message: 'EER calories must be between 500 and 8000'
@@ -256,21 +283,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Prepare nutrition data for insertion
         let nutritionData: any = {
           client_id: id,
-          eer_calories: eer_calories || 2000, // Default if not provided
-          nutritionist_notes: nutritionist_notes || null,
-          ai_calculation_data: original_ai_calculation || macros_data || null,
-          calculation_method: macros_data ? 'ai_macros_assistant' : 'nutritionist_approved',
-          is_ai_generated: !!macros_data,
-          is_edited_by_nutritionist: !macros_data,
+          eer_calories: eerCalories || 2000, // Default if not provided
+          nutritionist_notes: nutritionistNotes || null,
+          ai_calculation_data: originalAiCalculation || macrosData || null,
+          calculation_method: macrosData ? 'ai_macros_assistant' : 'nutritionist_approved',
+          is_ai_generated: !!macrosData,
+          is_edited_by_nutritionist: !macrosData,
           is_active: true,
           approved_at: new Date().toISOString(),
           approved_by: req.user.id
         };
 
         // If macros_data is provided (from macros-calculate API), extract and calculate macros
-        if (macros_data && macros_data.macros) {
-          const macros = macros_data.macros;
-          const eerValue = eer_calories || macros_data.input?.eer || 2000;
+        if (macrosData && macrosData.macros) {
+          const macros = macrosData.macros;
+          const eerValue = eerCalories || macrosData.input?.eer || 2000;
 
           // Calculate average values for macros with ranges (for target values)
           const calculateAverage = (min: number | null, max: number | null): number => {
@@ -353,10 +380,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // Use provided individual macro values or defaults
           nutritionData = {
             ...nutritionData,
-            protein_grams: protein_grams || 0,
-            carbs_grams: carbs_grams || 0,
-            fat_grams: fat_grams || 0,
-            fiber_grams: fiber_grams || 0,
+            protein_grams: proteinGrams || 0,
+            carbs_grams: carbsGrams || 0,
+            fat_grams: fatGrams || 0,
+            fiber_grams: fiberGrams || 0,
             protein_percentage: 0,
             carbs_percentage: 0,
             fat_percentage: 0
@@ -375,6 +402,30 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             message: 'An error occurred while saving nutrition information'
           });
         }
+
+        // If we have macros data with BMR, update client BMR
+        if (macrosData && macrosData.bmr) {
+          const healthMetrics = calculateHealthMetrics(undefined, undefined, macrosData.bmr);
+          const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
+          
+          await supabase
+            .from('clients')
+            .update(transformedHealthMetrics)
+            .eq('id', id)
+            .eq('nutritionist_id', req.user.id);
+        }
+
+        // Alternative: If EER calculation was done and we have BMR from originalAiCalculation
+        if (originalAiCalculation && originalAiCalculation.bmr) {
+          const healthMetrics = calculateHealthMetrics(undefined, undefined, originalAiCalculation.bmr);
+          const transformedHealthMetrics = transformWithMapping(healthMetrics, FIELD_MAPPINGS.camelToSnake);
+          
+          await supabase
+            .from('clients')
+            .update(transformedHealthMetrics)
+            .eq('id', id)
+            .eq('nutritionist_id', req.user.id);
+        }
       }
 
       // Get updated client data
@@ -382,7 +433,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .from('clients')
         .select(`
           *,
-          nutrition_requirements:client_nutrition_requirements!inner(
+          nutrition_requirements:client_nutrition_requirements(
             eer_calories,
             protein_grams,
             carbs_grams,
@@ -426,7 +477,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         `)
         .eq('id', id)
         .eq('nutritionist_id', req.user.id)
-        .eq('client_nutrition_requirements.is_active', true)
+        .eq('nutrition_requirements.is_active', true)
         .single();
 
       if (fetchError) {
@@ -438,77 +489,85 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       const updatedNutritionReq = updatedClient.nutrition_requirements?.[0];
+      const clientResponse = {
+        ...updatedClient,
+        // EER data
+        eerCalories: updatedNutritionReq?.eer_calories || null,
+        nutritionistNotes: updatedNutritionReq?.nutritionist_notes || null,
+        eerLastUpdated: updatedNutritionReq?.updated_at || null,
+        
+        // Target Macros data
+        proteinGrams: updatedNutritionReq?.protein_grams || null,
+        carbsGrams: updatedNutritionReq?.carbs_grams || null,
+        fatGrams: updatedNutritionReq?.fat_grams || null,
+        fiberGrams: updatedNutritionReq?.fiber_grams || null,
+        proteinPercentage: updatedNutritionReq?.protein_percentage || null,
+        carbsPercentage: updatedNutritionReq?.carbs_percentage || null,
+        fatPercentage: updatedNutritionReq?.fat_percentage || null,
+        
+        // Macros Ranges (from AI recommendations)
+        macrosRanges: {
+          protein: {
+            minGrams: updatedNutritionReq?.protein_min_grams || null,
+            maxGrams: updatedNutritionReq?.protein_max_grams || null,
+            note: updatedNutritionReq?.protein_note || null
+          },
+          carbohydrates: {
+            minGrams: updatedNutritionReq?.carbs_min_grams || null,
+            maxGrams: updatedNutritionReq?.carbs_max_grams || null,
+            note: updatedNutritionReq?.carbs_note || null
+          },
+          totalFat: {
+            minGrams: updatedNutritionReq?.fat_min_grams || null,
+            maxGrams: updatedNutritionReq?.fat_max_grams || null,
+            note: updatedNutritionReq?.fat_note || null
+          },
+          fiber: {
+            minGrams: updatedNutritionReq?.fiber_min_grams || null,
+            maxGrams: updatedNutritionReq?.fiber_max_grams || null,
+            note: updatedNutritionReq?.fiber_note || null
+          },
+          saturatedFat: {
+            minGrams: updatedNutritionReq?.saturated_fat_min_grams || null,
+            maxGrams: updatedNutritionReq?.saturated_fat_max_grams || null,
+            note: updatedNutritionReq?.saturated_fat_note || null
+          },
+          monounsaturatedFat: {
+            minGrams: updatedNutritionReq?.monounsaturated_fat_min_grams || null,
+            maxGrams: updatedNutritionReq?.monounsaturated_fat_max_grams || null,
+            note: updatedNutritionReq?.monounsaturated_fat_note || null
+          },
+          polyunsaturatedFat: {
+            minGrams: updatedNutritionReq?.polyunsaturated_fat_min_grams || null,
+            maxGrams: updatedNutritionReq?.polyunsaturated_fat_max_grams || null,
+            note: updatedNutritionReq?.polyunsaturated_fat_note || null
+          },
+          omega3FattyAcids: {
+            minGrams: updatedNutritionReq?.omega3_min_grams || null,
+            maxGrams: updatedNutritionReq?.omega3_max_grams || null,
+            note: updatedNutritionReq?.omega3_note || null
+          },
+          cholesterol: {
+            minGrams: updatedNutritionReq?.cholesterol_min_grams || null,
+            maxGrams: updatedNutritionReq?.cholesterol_max_grams || null,
+            note: updatedNutritionReq?.cholesterol_note || null
+          }
+        },
+        
+        // AI calculation metadata
+        calculationMethod: updatedNutritionReq?.calculation_method || null,
+        isAiGenerated: updatedNutritionReq?.is_ai_generated || false
+      };
+      
+      // Remove nested nutrition_requirements array
+      delete clientResponse.nutrition_requirements;
+      
+      // Transform response to camelCase
+      const transformedResponse = transformWithMapping(clientResponse, FIELD_MAPPINGS.snakeToCamel);
+      
       res.status(200).json({
         message: 'Client updated successfully',
-        client: {
-          ...updatedClient,
-          // EER data
-          eer_calories: updatedNutritionReq?.eer_calories || null,
-          nutritionist_notes: updatedNutritionReq?.nutritionist_notes || null,
-          eer_last_updated: updatedNutritionReq?.updated_at || null,
-          
-          // Target Macros data
-          protein_grams: updatedNutritionReq?.protein_grams || null,
-          carbs_grams: updatedNutritionReq?.carbs_grams || null,
-          fat_grams: updatedNutritionReq?.fat_grams || null,
-          fiber_grams: updatedNutritionReq?.fiber_grams || null,
-          protein_percentage: updatedNutritionReq?.protein_percentage || null,
-          carbs_percentage: updatedNutritionReq?.carbs_percentage || null,
-          fat_percentage: updatedNutritionReq?.fat_percentage || null,
-          
-          // Macros Ranges (from AI recommendations)
-          macros_ranges: {
-            protein: {
-              min_grams: updatedNutritionReq?.protein_min_grams || null,
-              max_grams: updatedNutritionReq?.protein_max_grams || null,
-              note: updatedNutritionReq?.protein_note || null
-            },
-            carbohydrates: {
-              min_grams: updatedNutritionReq?.carbs_min_grams || null,
-              max_grams: updatedNutritionReq?.carbs_max_grams || null,
-              note: updatedNutritionReq?.carbs_note || null
-            },
-            total_fat: {
-              min_grams: updatedNutritionReq?.fat_min_grams || null,
-              max_grams: updatedNutritionReq?.fat_max_grams || null,
-              note: updatedNutritionReq?.fat_note || null
-            },
-            fiber: {
-              min_grams: updatedNutritionReq?.fiber_min_grams || null,
-              max_grams: updatedNutritionReq?.fiber_max_grams || null,
-              note: updatedNutritionReq?.fiber_note || null
-            },
-            saturated_fat: {
-              min_grams: updatedNutritionReq?.saturated_fat_min_grams || null,
-              max_grams: updatedNutritionReq?.saturated_fat_max_grams || null,
-              note: updatedNutritionReq?.saturated_fat_note || null
-            },
-            monounsaturated_fat: {
-              min_grams: updatedNutritionReq?.monounsaturated_fat_min_grams || null,
-              max_grams: updatedNutritionReq?.monounsaturated_fat_max_grams || null,
-              note: updatedNutritionReq?.monounsaturated_fat_note || null
-            },
-            polyunsaturated_fat: {
-              min_grams: updatedNutritionReq?.polyunsaturated_fat_min_grams || null,
-              max_grams: updatedNutritionReq?.polyunsaturated_fat_max_grams || null,
-              note: updatedNutritionReq?.polyunsaturated_fat_note || null
-            },
-            omega3_fatty_acids: {
-              min_grams: updatedNutritionReq?.omega3_min_grams || null,
-              max_grams: updatedNutritionReq?.omega3_max_grams || null,
-              note: updatedNutritionReq?.omega3_note || null
-            },
-            cholesterol: {
-              min_grams: updatedNutritionReq?.cholesterol_min_grams || null,
-              max_grams: updatedNutritionReq?.cholesterol_max_grams || null,
-              note: updatedNutritionReq?.cholesterol_note || null
-            }
-          },
-          
-          // AI calculation metadata
-          calculation_method: updatedNutritionReq?.calculation_method || null,
-          is_ai_generated: updatedNutritionReq?.is_ai_generated || false
-        }
+        client: transformedResponse
       });
 
     } catch (error) {
