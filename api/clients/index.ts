@@ -5,6 +5,9 @@ import { validateAndTransformClient } from '../../lib/validation';
 import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
 import { calculateHealthMetrics } from '../../lib/healthMetrics';
 import { getEERGuidelineFromLocation } from '../../lib/locationMapping';
+import { calculateEER, calculateMacros } from '../../lib/calculations';
+import { calculateMicronutrients } from '../../lib/micronutrientCalculations';
+import { FlexibleMicronutrientService } from '../../lib/micronutrients-flexible';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method === 'GET') {
@@ -68,9 +71,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   else if (req.method === 'POST') {
-    // Create new client
+    // POST - Create new client
     try {
-      const validation = validateAndTransformClient(req.body);
+      console.log('Creating new client with data:', req.body);
+      
+      // Extract EER and macros data before validation
+      const { eerCalories, proteinGrams, carbsGrams, fatGrams, fiberGrams, status, ...extractedClientData } = req.body;
+      const macrosData = req.body.macrosData;
+      const micronutrientsData = req.body.micronutrientsData;
+      
+      // Remove macrosData from client data if present
+      delete extractedClientData.macrosData;
+      delete extractedClientData.micronutrientsData;
+      
+      const validation = validateAndTransformClient(extractedClientData);
       if (!validation.isValid) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -78,23 +92,55 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Extract micronutrients data before creating client
-      const micronutrientsData = validation.value.micronutrients_data;
-      const macrosData = validation.value.macros_data;
-      
-      const clientData = {
+      const createData = {
         ...validation.value,
         nutritionist_id: req.user.id,
         email: validation.value.email?.toLowerCase(),
-        // Auto-generate full_name for backward compatibility
-        full_name: validation.value.full_name || `${validation.value.first_name} ${validation.value.last_name || ''}`.trim(),
-        // Auto-determine EER guideline from location
-        eer_guideline: getEERGuidelineFromLocation(validation.value.location)
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
-      // Remove eer_calories, macros_data, and micronutrients_data from client data as they belong in separate tables
+      // Construct full_name from firstName and lastName if not provided
+      if (!createData.fullName && (createData.firstName || createData.lastName)) {
+        createData.fullName = `${createData.firstName || ''} ${createData.lastName || ''}`.trim();
+      }
+
+      // Ensure dates_of_birth is null if empty
+      if (!createData.date_of_birth) {
+        createData.date_of_birth = null;
+      }
+
+      // Add EER and macros data back to createData if provided
+      if (eerCalories) {
+        createData.eer_calories = eerCalories;
+      }
+      if (proteinGrams) createData.protein_grams = proteinGrams;
+      if (carbsGrams) createData.carbs_grams = carbsGrams;
+      if (fatGrams) createData.fat_grams = fatGrams;
+      if (fiberGrams) createData.fiber_grams = fiberGrams;
+      if (status) createData.status = status;
+
+      // Always use snake_case for database fields  
+      const transformedData = transformWithMapping(createData, FIELD_MAPPINGS.camelToSnake);
+      const clientData = transformedData;
+      
+      // Ensure full_name is set (required field in database)
+      if (!clientData.full_name && (clientData.first_name || clientData.last_name)) {
+        clientData.full_name = `${clientData.first_name || ''} ${clientData.last_name || ''}`.trim();
+      }
+      
+      // If still no full_name, use email or a default
+      if (!clientData.full_name) {
+        clientData.full_name = clientData.email || 'Unknown Client';
+      }
+      
+      // Remove macro fields from client data as they belong to nutrition requirements
       delete clientData.eer_calories;
-      delete clientData.macros_data;
+      delete clientData.protein_grams;
+      delete clientData.carbs_grams;
+      delete clientData.fat_grams;
+      delete clientData.fiber_grams;
+
       delete clientData.micronutrients_data;
 
       // Calculate BMI if height and weight are provided AND BMI is not already provided
@@ -139,8 +185,174 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // If EER data is provided, create nutrition requirements record
-      if (validation.value.eer_calories) {
+      // Auto-calculate nutrition requirements if we have the necessary data
+      let nutritionRequirements = null;
+      let micronutrientRequirements: any = null;
+
+      // Check if we have required data for calculations
+      const hasRequiredDataForCalculations = 
+        validation.value.height_cm && 
+        validation.value.weight_kg && 
+        validation.value.date_of_birth &&
+        validation.value.gender &&
+        validation.value.activity_level &&
+        validation.value.location;
+
+      if (hasRequiredDataForCalculations && !eerCalories) {
+        // Calculate age from date of birth
+        const birthDate = new Date(validation.value.date_of_birth);
+        const today = new Date();
+        const age = today.getFullYear() - birthDate.getFullYear() - 
+          (today.getMonth() < birthDate.getMonth() || 
+          (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+
+        // Determine EER guideline from location
+        const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
+
+        try {
+          // 1. Calculate EER
+          const eerData = {
+            country: eerGuideline,
+            age,
+            gender: validation.value.gender,
+            height_cm: validation.value.height_cm,
+            weight_kg: validation.value.weight_kg,
+            activity_level: validation.value.activity_level,
+            pregnancy_status: validation.value.pregnancy_status,
+            lactation_status: validation.value.lactation_status
+          };
+
+          const eerResult = await calculateEER(eerData);
+          
+          // 2. Calculate Macros
+          const macrosData = {
+            eer: eerResult.eer,
+            country: eerGuideline,
+            age,
+            gender: validation.value.gender,
+            weight_kg: validation.value.weight_kg
+          };
+
+          const macrosResult = await calculateMacros(macrosData);
+
+          // 3. Calculate Micronutrients using flexible system
+          const flexibleMicroService = new FlexibleMicronutrientService(supabase);
+          
+          // Determine country for micronutrients (same as EER guideline)
+          const micronutrientCountry = eerGuideline === 'USA' ? 'US' : eerGuideline as 'UK' | 'US' | 'India';
+          
+          // Prepare adjustment factors based on client data
+          const adjustmentFactors = {
+            pregnancy: validation.value.pregnancy_status !== 'not_pregnant',
+            lactation: validation.value.lactation_status !== 'not_lactating',
+            activityLevel: validation.value.activity_level,
+            healthConditions: validation.value.medical_conditions
+          };
+
+          micronutrientRequirements = await flexibleMicroService.calculateClientRequirements(
+            client.id,
+            micronutrientCountry,
+            validation.value.gender,
+            age,
+            adjustmentFactors
+          );
+
+          // Save nutrition requirements
+          const nutritionData = {
+            client_id: client.id,
+            eer_calories: Math.round(eerResult.eer),
+            calculation_method: 'formula_based',
+            is_ai_generated: false,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            // Add guideline tracking
+            eer_guideline_country: eerResult.guideline_country,
+            macro_guideline_country: macrosResult.guideline_country,
+            guideline_notes: macrosResult.guideline_notes || null,
+            // Add macro ranges
+            protein_min_grams: macrosResult.Protein?.min_grams || null,
+            protein_max_grams: macrosResult.Protein?.max_grams || null,
+            protein_note: macrosResult.Protein?.note || null,
+            carbs_min_grams: macrosResult.Carbohydrates?.min_grams || null,
+            carbs_max_grams: macrosResult.Carbohydrates?.max_grams || null,
+            carbs_note: macrosResult.Carbohydrates?.note || null,
+            fat_min_grams: macrosResult['Total Fat']?.min_grams || null,
+            fat_max_grams: macrosResult['Total Fat']?.max_grams || null,
+            fat_note: macrosResult['Total Fat']?.note || null,
+            fiber_min_grams: macrosResult.Fiber?.min_grams || null,
+            fiber_max_grams: macrosResult.Fiber?.max_grams || null,
+            fiber_note: macrosResult.Fiber?.note || null,
+            saturated_fat_min_grams: macrosResult['Saturated Fat']?.min_grams || null,
+            saturated_fat_max_grams: macrosResult['Saturated Fat']?.max_grams || null,
+            saturated_fat_note: macrosResult['Saturated Fat']?.note || null,
+            monounsaturated_fat_min_grams: null,
+            monounsaturated_fat_max_grams: null,
+            monounsaturated_fat_note: null,
+            polyunsaturated_fat_min_grams: null,
+            polyunsaturated_fat_max_grams: null,
+            polyunsaturated_fat_note: null,
+            omega3_min_grams: null,
+            omega3_max_grams: null,
+            omega3_note: null,
+            cholesterol_min_grams: null,
+            cholesterol_max_grams: null,
+            cholesterol_note: null
+          };
+
+          const { data: nutritionReq, error: nutritionError } = await supabase
+            .from('client_nutrition_requirements')
+            .insert(nutritionData)
+            .select()
+            .single();
+
+          if (!nutritionError) {
+            nutritionRequirements = nutritionReq;
+          }
+
+          // Save flexible micronutrient requirements
+          if (micronutrientRequirements) {
+            const savedMicroReq = await flexibleMicroService.saveClientRequirements(micronutrientRequirements);
+            
+            if (savedMicroReq) {
+              micronutrientRequirements = savedMicroReq;
+              console.log(`Flexible micronutrient requirements saved for client ${client.id}`);
+            } else {
+              console.error(`Failed to save flexible micronutrient requirements for client ${client.id}`);
+            }
+          }
+
+          // Update BMI if calculated
+          if (eerResult.bmr) {
+            const healthMetrics = calculateHealthMetrics(
+              validation.value.height_cm,
+              validation.value.weight_kg,
+              eerResult.bmr
+            );
+
+            await supabase
+              .from('clients')
+              .update({
+                bmi: healthMetrics.bmi,
+                bmi_category: healthMetrics.bmiCategory,
+                bmr: eerResult.bmr,
+                bmi_last_calculated: new Date().toISOString(),
+                bmr_last_calculated: new Date().toISOString()
+              })
+              .eq('id', client.id);
+
+            // Update client object with calculated values
+            client.bmi = healthMetrics.bmi;
+            client.bmi_category = healthMetrics.bmiCategory;
+            client.bmr = eerResult.bmr;
+          }
+
+        } catch (calcError) {
+          console.error('Auto-calculation error:', calcError);
+          // Don't fail client creation if calculations fail
+        }
+      } else if (validation.value.eer_calories) {
+        // If EER data is provided manually, create nutrition requirements record
         const nutritionData = {
           client_id: client.id,
           eer_calories: validation.value.eer_calories,
@@ -193,24 +405,24 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           saturated_fat_note: macros['Saturated Fat']?.note || null,
           
           // Monounsaturated Fat
-          monounsaturated_fat_min_grams: macros['Monounsaturated Fat']?.min_grams || null,
-          monounsaturated_fat_max_grams: macros['Monounsaturated Fat']?.max_grams || null,
-          monounsaturated_fat_note: macros['Monounsaturated Fat']?.note || null,
+          monounsaturated_fat_min_grams: null,
+          monounsaturated_fat_max_grams: null,
+          monounsaturated_fat_note: null,
           
           // Polyunsaturated Fat
-          polyunsaturated_fat_min_grams: macros['Polyunsaturated Fat']?.min_grams || null,
-          polyunsaturated_fat_max_grams: macros['Polyunsaturated Fat']?.max_grams || null,
-          polyunsaturated_fat_note: macros['Polyunsaturated Fat']?.note || null,
+          polyunsaturated_fat_min_grams: null,
+          polyunsaturated_fat_max_grams: null,
+          polyunsaturated_fat_note: null,
           
           // Omega-3 Fatty Acids
-          omega3_min_grams: macros['Omega-3 Fatty Acids']?.min_grams || null,
-          omega3_max_grams: macros['Omega-3 Fatty Acids']?.max_grams || null,
-          omega3_note: macros['Omega-3 Fatty Acids']?.note || null,
+          omega3_min_grams: null,
+          omega3_max_grams: null,
+          omega3_note: null,
           
           // Cholesterol
-          cholesterol_min_grams: macros.Cholesterol?.min_grams || null,
-          cholesterol_max_grams: macros.Cholesterol?.max_grams || null,
-          cholesterol_note: macros.Cholesterol?.note || null,
+          cholesterol_min_grams: null,
+          cholesterol_max_grams: null,
+          cholesterol_note: null,
           
           calculation_method: 'formula_based',
           is_ai_generated: false,
@@ -230,46 +442,44 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // If micronutrient data is provided, create micronutrient requirements record
       if (micronutrientsData && micronutrientsData.micronutrients) {
-        const micronutrients = micronutrientsData.micronutrients;
-        const micronutrientInsertData = {
-          client_id: client.id,
-          vitamin_a_mcg: micronutrients.vitaminA?.amount || null,
-          thiamin_mg: micronutrients.thiamin?.amount || null,
-          riboflavin_mg: micronutrients.riboflavin?.amount || null,
-          niacin_equivalent_mg: micronutrients.niacinEquivalent?.amount || null,
-          pantothenic_acid_mg: micronutrients.pantothenicAcid?.amount || null,
-          vitamin_b6_mg: micronutrients.vitaminB6?.amount || null,
-          biotin_mcg: micronutrients.biotin?.amount || null,
-          vitamin_b12_mcg: micronutrients.vitaminB12?.amount || null,
-          folate_mcg: micronutrients.folate?.amount || null,
-          vitamin_c_mg: micronutrients.vitaminC?.amount || null,
-          vitamin_d_mcg: micronutrients.vitaminD?.amount || null,
-          iron_mg: micronutrients.iron?.amount || null,
-          calcium_mg: micronutrients.calcium?.amount || null,
-          magnesium_mg: micronutrients.magnesium?.amount || null,
-          potassium_mg: micronutrients.potassium?.amount || null,
-          zinc_mg: micronutrients.zinc?.amount || null,
-          copper_mg: micronutrients.copper?.amount || null,
-          iodine_mcg: micronutrients.iodine?.amount || null,
-          selenium_mcg: micronutrients.selenium?.amount || null,
-          phosphorus_mg: micronutrients.phosphorus?.amount || null,
-          chloride_mg: micronutrients.chloride?.amount || null,
-          sodium_g: micronutrients.sodium?.amount || null,
-          guideline_used: micronutrientsData.guidelineUsed || 'UK',
-          calculation_method: 'formula_based',
-          is_ai_generated: false,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+        // Use flexible micronutrient service for manual micronutrient data
+        const flexibleMicroService = new FlexibleMicronutrientService(supabase);
+        
+        // Determine country based on location
+        const country = validation.value.location?.includes('UK') ? 'UK' : 
+                       validation.value.location?.includes('India') ? 'India' : 'US';
+        
+        // Calculate age if not already calculated
+        let age = 30; // Default age if date of birth not provided
+        if (validation.value.date_of_birth) {
+          const birthDate = new Date(validation.value.date_of_birth);
+          const today = new Date();
+          age = today.getFullYear() - birthDate.getFullYear() - 
+            (today.getMonth() < birthDate.getMonth() || 
+            (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+        }
+        
+        // Prepare adjustment factors
+        const adjustmentFactors = {
+          pregnancy: validation.value.pregnancy_status !== 'not_pregnant',
+          lactation: validation.value.lactation_status !== 'not_lactating',
+          activityLevel: validation.value.activity_level,
+          healthConditions: validation.value.medical_conditions
         };
-
-        const { error: micronutrientError } = await supabase
-          .from('client_micronutrient_requirements')
-          .insert(micronutrientInsertData);
-
-        if (micronutrientError) {
-          console.warn('Failed to create micronutrient requirements:', micronutrientError);
-          // Don't fail the client creation, just log the warning
+        
+        const flexibleMicroReq = await flexibleMicroService.calculateClientRequirements(
+          client.id,
+          country as 'UK' | 'US' | 'India',
+          validation.value.gender || 'male',
+          age,
+          adjustmentFactors
+        );
+        
+        if (flexibleMicroReq) {
+          const savedMicroReq = await flexibleMicroService.saveClientRequirements(flexibleMicroReq);
+          if (!savedMicroReq) {
+            console.warn('Failed to save flexible micronutrient requirements');
+          }
         }
       }
 
@@ -294,10 +504,171 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Transform to camelCase for response
       const transformedClient = transformWithMapping(clientWithoutSystemFields, FIELD_MAPPINGS.snakeToCamel);
 
+      // Return response immediately
       res.status(201).json({
         message: 'Client created successfully',
         client: transformedClient
       });
+
+      // Perform calculations in the background after response is sent
+      if (hasRequiredDataForCalculations && !eerCalories) {
+        // Run calculations asynchronously without blocking the response
+        (async () => {
+          try {
+            // Calculate age from date of birth
+            const birthDate = new Date(validation.value.date_of_birth);
+            const today = new Date();
+            const age = today.getFullYear() - birthDate.getFullYear() - 
+              (today.getMonth() < birthDate.getMonth() || 
+              (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+
+            // Determine EER guideline from location
+            const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
+
+            console.log(`Background: Starting calculations for client ${client.id}`);
+
+            // 1. Calculate EER
+            const eerData = {
+              country: eerGuideline,
+              age,
+              gender: validation.value.gender,
+              height_cm: validation.value.height_cm,
+              weight_kg: validation.value.weight_kg,
+              activity_level: validation.value.activity_level,
+              pregnancy_status: validation.value.pregnancy_status,
+              lactation_status: validation.value.lactation_status
+            };
+
+            const eerResult = await calculateEER(eerData);
+            
+            // 2. Calculate Macros
+            const macrosData = {
+              eer: eerResult.eer,
+              country: eerGuideline,
+              age,
+              gender: validation.value.gender,
+              weight_kg: validation.value.weight_kg
+            };
+
+            const macrosResult = await calculateMacros(macrosData);
+
+            // 3. Calculate Micronutrients using flexible system
+            const flexibleMicroService = new FlexibleMicronutrientService(supabase);
+            
+            // Determine country for micronutrients (same as EER guideline)
+            const micronutrientCountry = eerGuideline === 'USA' ? 'US' : eerGuideline as 'UK' | 'US' | 'India';
+            
+            // Prepare adjustment factors based on client data
+            const adjustmentFactors = {
+              pregnancy: validation.value.pregnancy_status !== 'not_pregnant',
+              lactation: validation.value.lactation_status !== 'not_lactating',
+              activityLevel: validation.value.activity_level,
+              healthConditions: validation.value.medical_conditions
+            };
+
+            micronutrientRequirements = await flexibleMicroService.calculateClientRequirements(
+              client.id,
+              micronutrientCountry,
+              validation.value.gender,
+              age,
+              adjustmentFactors
+            );
+
+            // Save nutrition requirements
+            const nutritionData = {
+              client_id: client.id,
+              eer_calories: Math.round(eerResult.eer),
+              calculation_method: 'formula_based',
+              is_ai_generated: false,
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              // Add guideline tracking
+              eer_guideline_country: eerResult.guideline_country,
+              macro_guideline_country: macrosResult.guideline_country,
+              guideline_notes: macrosResult.guideline_notes || null,
+              // Add macro ranges
+              protein_min_grams: macrosResult.Protein?.min_grams || null,
+              protein_max_grams: macrosResult.Protein?.max_grams || null,
+              protein_note: macrosResult.Protein?.note || null,
+              carbs_min_grams: macrosResult.Carbohydrates?.min_grams || null,
+              carbs_max_grams: macrosResult.Carbohydrates?.max_grams || null,
+              carbs_note: macrosResult.Carbohydrates?.note || null,
+              fat_min_grams: macrosResult['Total Fat']?.min_grams || null,
+              fat_max_grams: macrosResult['Total Fat']?.max_grams || null,
+              fat_note: macrosResult['Total Fat']?.note || null,
+              fiber_min_grams: macrosResult.Fiber?.min_grams || null,
+              fiber_max_grams: macrosResult.Fiber?.max_grams || null,
+              fiber_note: macrosResult.Fiber?.note || null,
+              saturated_fat_min_grams: macrosResult['Saturated Fat']?.min_grams || null,
+              saturated_fat_max_grams: macrosResult['Saturated Fat']?.max_grams || null,
+              saturated_fat_note: macrosResult['Saturated Fat']?.note || null,
+              monounsaturated_fat_min_grams: null,
+              monounsaturated_fat_max_grams: null,
+              monounsaturated_fat_note: null,
+              polyunsaturated_fat_min_grams: null,
+              polyunsaturated_fat_max_grams: null,
+              polyunsaturated_fat_note: null,
+              omega3_min_grams: null,
+              omega3_max_grams: null,
+              omega3_note: null,
+              cholesterol_min_grams: null,
+              cholesterol_max_grams: null,
+              cholesterol_note: null
+            };
+
+            const { error: nutritionError } = await supabase
+              .from('client_nutrition_requirements')
+              .insert(nutritionData);
+
+            if (nutritionError) {
+              console.error(`Background: Failed to save nutrition requirements for client ${client.id}:`, nutritionError);
+            } else {
+              console.log(`Background: Nutrition requirements saved for client ${client.id}`);
+            }
+
+            // Save flexible micronutrient requirements
+            if (micronutrientRequirements) {
+              const savedMicroReq = await flexibleMicroService.saveClientRequirements(micronutrientRequirements);
+              
+              if (savedMicroReq) {
+                micronutrientRequirements = savedMicroReq;
+                console.log(`Background: Flexible micronutrient requirements saved for client ${client.id}`);
+              } else {
+                console.error(`Background: Failed to save flexible micronutrient requirements for client ${client.id}`);
+              }
+            }
+
+            // Update BMI if calculated
+            if (eerResult.bmr) {
+              const healthMetrics = calculateHealthMetrics(
+                validation.value.height_cm,
+                validation.value.weight_kg,
+                eerResult.bmr
+              );
+
+              await supabase
+                .from('clients')
+                .update({
+                  bmi: healthMetrics.bmi,
+                  bmi_category: healthMetrics.bmiCategory,
+                  bmr: eerResult.bmr,
+                  bmi_last_calculated: new Date().toISOString(),
+                  bmr_last_calculated: new Date().toISOString()
+                })
+                .eq('id', client.id);
+
+              console.log(`Background: BMI/BMR updated for client ${client.id}`);
+            }
+
+            console.log(`Background: All calculations completed for client ${client.id}`);
+
+          } catch (calcError) {
+            console.error(`Background: Auto-calculation error for client ${client.id}:`, calcError);
+          }
+        })();
+      }
+
     } catch (error) {
       console.error('Create client error:', error);
       res.status(500).json({

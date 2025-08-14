@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
 import { validateAndTransformClient } from '../../lib/validation';
 import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
-import { calculateHealthMetrics, shouldRecalculateHealthMetrics } from '../../lib/healthMetrics';
+import { calculateHealthMetrics } from '../../lib/healthMetrics';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const { id } = req.query;
@@ -45,7 +45,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // Fetch micronutrient requirements separately
       const { data: micronutrientRequirements } = await supabase
-        .from('client_micronutrient_requirements')
+        .from('client_micronutrient_requirements_flexible')
         .select('*')
         .eq('client_id', id)
         .eq('is_active', true)
@@ -65,6 +65,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         eerCalories: nutritionReq?.eer_calories || null,
         nutritionistNotes: nutritionReq?.nutritionist_notes || null,
         eerLastUpdated: nutritionReq?.updated_at || null,
+        
+        // Guideline tracking
+        eerGuidelineCountry: nutritionReq?.eer_guideline_country || null,
+        macroGuidelineCountry: nutritionReq?.macro_guideline_country || null,
+        guidelineNotes: nutritionReq?.guideline_notes || null,
         
         // Target Macros data
         proteinGrams: nutritionReq?.protein_grams || null,
@@ -125,34 +130,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null,
         
         // Micronutrient data
-        micronutrients: {
-          vitaminA: micronutrientReq?.vitamin_a_mcg || null,
-          thiamin: micronutrientReq?.thiamin_mg || null,
-          riboflavin: micronutrientReq?.riboflavin_mg || null,
-          niacin: micronutrientReq?.niacin_equivalent_mg || null,
-          pantothenicAcid: micronutrientReq?.pantothenic_acid_mg || null,
-          vitaminB6: micronutrientReq?.vitamin_b6_mg || null,
-          biotin: micronutrientReq?.biotin_mcg || null,
-          vitaminB12: micronutrientReq?.vitamin_b12_mcg || null,
-          folate: micronutrientReq?.folate_mcg || null,
-          vitaminC: micronutrientReq?.vitamin_c_mg || null,
-          vitaminD: micronutrientReq?.vitamin_d_mcg || null,
-          iron: micronutrientReq?.iron_mg || null,
-          calcium: micronutrientReq?.calcium_mg || null,
-          magnesium: micronutrientReq?.magnesium_mg || null,
-          potassium: micronutrientReq?.potassium_mg || null,
-          zinc: micronutrientReq?.zinc_mg || null,
-          copper: micronutrientReq?.copper_mg || null,
-          iodine: micronutrientReq?.iodine_mcg || null,
-          selenium: micronutrientReq?.selenium_mcg || null,
-          phosphorus: micronutrientReq?.phosphorus_mg || null,
-          chloride: micronutrientReq?.chloride_mg || null,
-          sodium: micronutrientReq?.sodium_g || null,
-          guidelineUsed: micronutrientReq?.guideline_used || null,
-          isActive: micronutrientReq?.is_active || false,
-          createdAt: micronutrientReq?.created_at || null,
-          updatedAt: micronutrientReq?.updated_at || null
-        },
+        micronutrients: micronutrientReq ? micronutrientReq.micronutrient_recommendations : {},
+        guidelineUsed: micronutrientReq?.country_guideline || null,
+        micronutrientNotes: micronutrientReq?.nutritionist_notes || null,
+        micronutrientGuidelineType: micronutrientReq?.guideline_type || null,
+        micronutrientCalculationFactors: micronutrientReq?.calculation_factors || null,
         
         // AI calculation metadata
         calculationMethod: nutritionReq?.calculation_method || null
@@ -304,6 +286,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         if (macrosData) {
           const macros = macrosData; // Changed: Use macrosData directly instead of macrosData.macros
           const eerValue = eerCalories || 2000; // Simplified: removed macrosData.input?.eer fallback
+
+          // Add guideline tracking if available
+          if (macros.guideline_country) {
+            nutritionData.macro_guideline_country = macros.guideline_country;
+            nutritionData.guideline_notes = macros.guideline_notes || null;
+          }
 
           // Calculate average values for macros with ranges (for target values)
           const calculateAverage = (min: number | null, max: number | null): number => {
@@ -511,7 +499,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // Fetch micronutrient requirements separately
       const { data: micronutrientRequirements } = await supabase
-        .from('client_micronutrient_requirements')
+        .from('client_micronutrient_requirements_flexible')
         .select('*')
         .eq('client_id', id)
         .eq('is_active', true)
@@ -531,6 +519,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         eerCalories: nutritionReq?.eer_calories || null,
         nutritionistNotes: nutritionReq?.nutritionist_notes || null,
         eerLastUpdated: nutritionReq?.updated_at || null,
+        
+        // Guideline tracking
+        eerGuidelineCountry: nutritionReq?.eer_guideline_country || null,
+        macroGuidelineCountry: nutritionReq?.macro_guideline_country || null,
+        guidelineNotes: nutritionReq?.guideline_notes || null,
         
         // Target Macros data
         proteinGrams: nutritionReq?.protein_grams || null,
@@ -591,34 +584,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null,
         
         // Micronutrient data
-        micronutrients: {
-          vitaminA: micronutrientReq?.vitamin_a_mcg || null,
-          thiamin: micronutrientReq?.thiamin_mg || null,
-          riboflavin: micronutrientReq?.riboflavin_mg || null,
-          niacin: micronutrientReq?.niacin_equivalent_mg || null,
-          pantothenicAcid: micronutrientReq?.pantothenic_acid_mg || null,
-          vitaminB6: micronutrientReq?.vitamin_b6_mg || null,
-          biotin: micronutrientReq?.biotin_mcg || null,
-          vitaminB12: micronutrientReq?.vitamin_b12_mcg || null,
-          folate: micronutrientReq?.folate_mcg || null,
-          vitaminC: micronutrientReq?.vitamin_c_mg || null,
-          vitaminD: micronutrientReq?.vitamin_d_mcg || null,
-          iron: micronutrientReq?.iron_mg || null,
-          calcium: micronutrientReq?.calcium_mg || null,
-          magnesium: micronutrientReq?.magnesium_mg || null,
-          potassium: micronutrientReq?.potassium_mg || null,
-          zinc: micronutrientReq?.zinc_mg || null,
-          copper: micronutrientReq?.copper_mg || null,
-          iodine: micronutrientReq?.iodine_mcg || null,
-          selenium: micronutrientReq?.selenium_mcg || null,
-          phosphorus: micronutrientReq?.phosphorus_mg || null,
-          chloride: micronutrientReq?.chloride_mg || null,
-          sodium: micronutrientReq?.sodium_g || null,
-          guidelineUsed: micronutrientReq?.guideline_used || null,
-          isActive: micronutrientReq?.is_active || false,
-          createdAt: micronutrientReq?.created_at || null,
-          updatedAt: micronutrientReq?.updated_at || null
-        },
+        micronutrients: micronutrientReq ? micronutrientReq.micronutrient_recommendations : {},
+        guidelineUsed: micronutrientReq?.country_guideline || null,
+        micronutrientNotes: micronutrientReq?.nutritionist_notes || null,
+        micronutrientGuidelineType: micronutrientReq?.guideline_type || null,
+        micronutrientCalculationFactors: micronutrientReq?.calculation_factors || null,
         
         // AI calculation metadata
         calculationMethod: nutritionReq?.calculation_method || null

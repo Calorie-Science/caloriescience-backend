@@ -27,6 +27,7 @@ export interface EERCalculationResult {
   eer: number;
   formula_used: string;
   input: EERCalculationInput;
+  guideline_country: string; // Added to track which country's guideline was used
 }
 
 export interface MacrosCalculationResult {
@@ -55,26 +56,23 @@ export interface MacrosCalculationResult {
     max_grams: number | null;
     note: string;
   };
-  'Monounsaturated Fat': {
+  'Linoleic Acid': {
     min_grams: number | null;
     max_grams: number | null;
     note: string;
   };
-  'Polyunsaturated Fat': {
+  'Alpha-Linolenic Acid': {
     min_grams: number | null;
     max_grams: number | null;
     note: string;
   };
-  'Omega-3 Fatty Acids': {
-    min_grams: number | null;
-    max_grams: number | null;
+  Water: {
+    min_ml: number | null;
+    max_ml: number | null;
     note: string;
   };
-  Cholesterol: {
-    min_grams: number | null;
-    max_grams: number | null;
-    note: string;
-  };
+  guideline_country: string; // Added to track which country's guideline was used
+  guideline_notes?: string; // Added to track any notes about guideline selection
 }
 
 // Calculate EER using database formulas
@@ -185,7 +183,8 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
     pal: pal,
     eer: Math.round(finalEER),
     formula_used: formula.bmr_formula + adjustmentString,
-    input: input
+    input: input,
+    guideline_country: country // Assuming the input country is the guideline country for EER
   };
 }
 
@@ -332,25 +331,22 @@ export async function calculateMacros(input: MacrosCalculationInput): Promise<Ma
       max_grams: saturatedFatMaxGrams !== null ? Math.round(saturatedFatMaxGrams * 10) / 10 : null,
       note: guidelines.saturated_fat_note || ''
     },
-    'Monounsaturated Fat': {
-      min_grams: monoMinGrams !== null ? Math.round(monoMinGrams * 10) / 10 : null,
-      max_grams: monoMaxGrams !== null ? Math.round(monoMaxGrams * 10) / 10 : null,
-      note: guidelines.monounsaturated_fat_note || 'No specific recommendations'
-    },
-    'Polyunsaturated Fat': {
-      min_grams: polyMinGrams !== null ? Math.round(polyMinGrams * 10) / 10 : null,
-      max_grams: polyMaxGrams !== null ? Math.round(polyMaxGrams * 10) / 10 : null,
-      note: guidelines.polyunsaturated_fat_note || 'No specific recommendations'
-    },
-    'Omega-3 Fatty Acids': {
-      min_grams: omega3MinGrams !== null ? Math.round(omega3MinGrams * 10) / 10 : null,
-      max_grams: omega3MaxGrams !== null ? Math.round(omega3MaxGrams * 10) / 10 : null,
-      note: guidelines.omega3_note || ''
-    },
-    Cholesterol: {
+    'Linoleic Acid': {
       min_grams: null,
-      max_grams: cholesterolMaxGrams !== null ? Math.round(cholesterolMaxGrams * 1000) / 1000 : null,
-      note: guidelines.cholesterol_note || ''
-    }
+      max_grams: null, // No specific recommendations for Linoleic Acid
+      note: 'No specific recommendations'
+    },
+    'Alpha-Linolenic Acid': {
+      min_grams: null,
+      max_grams: null, // No specific recommendations for Alpha-Linolenic Acid
+      note: 'No specific recommendations'
+    },
+    Water: {
+      min_ml: null,
+      max_ml: null, // No specific recommendations for Water
+      note: 'No specific recommendations'
+    },
+    guideline_country: effectiveCountry, // Assuming the effective country is the guideline country for macros
+    guideline_notes: guidelines.notes || undefined
   };
 } 

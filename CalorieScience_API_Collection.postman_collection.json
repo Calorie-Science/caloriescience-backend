@@ -616,6 +616,598 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "🇺🇸 USA Complete Journey",
+			"item": [
+				{
+					"name": "1. Calculate EER (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_eer', response.eer);",
+									"    pm.environment.set('usa_bmr', response.bmr);",
+									"    pm.environment.set('usa_bmi', response.bmi);",
+									"    console.log('✅ USA EER calculated:', response.eer);",
+									"    console.log('Formula used:', response.formulaUsed);",
+									"    console.log('Guideline:', response.eerGuideline);",
+									"} else {",
+									"    console.log('❌ EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"USA\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"heightCm\": 175,\n  \"weightKg\": 70,\n  \"activityLevel\": \"moderately_active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Calculate Macros (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_macros', JSON.stringify(response.macros));",
+									"    console.log('✅ USA Macros calculated');",
+									"    console.log('Guideline:', response.macroGuideline);",
+									"    console.log('Protein:', response.macros.Protein.min_grams + '-' + response.macros.Protein.max_grams + 'g');",
+									"} else {",
+									"    console.log('❌ Macros calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMacros\",\n  \"location\": \"USA\",\n  \"eer\": {{usa_eer}},\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weightKg\": 70\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Calculate Micronutrients (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_micronutrients', JSON.stringify(response.micronutrients));",
+									"    pm.environment.set('usa_guideline_used', response.guidelineUsed);",
+									"    console.log('✅ USA Micronutrients calculated');",
+									"    console.log('Guideline used:', response.guidelineUsed);",
+									"    console.log('Pantothenic Acid:', response.micronutrients.pantothenicAcid.amount + ' mg');",
+									"    console.log('Biotin:', response.micronutrients.biotin.amount + ' mcg');",
+									"} else {",
+									"    console.log('❌ Micronutrients calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMicronutrients\",\n  \"location\": \"USA\",\n  \"age\": 30,\n  \"gender\": \"male\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "4. Create Client with All Data (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_client_id', response.client.id);",
+									"    console.log('✅ USA Client created successfully');",
+									"    console.log('Client ID:', response.client.id);",
+									"    console.log('EER:', response.client.eerCalories || 'Not set');",
+									"} else {",
+									"    console.log('❌ Client creation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"USA\",\n  \"lastName\": \"TestClient\",\n  \"email\": \"usa.journey@example.com\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"heightCm\": 175,\n  \"weightKg\": 70,\n  \"activityLevel\": \"moderately_active\",\n  \"location\": \"USA\",\n  \"eerCalories\": {{usa_eer}},\n  \"bmi\": {{usa_bmi}},\n  \"bmr\": {{usa_bmr}},\n  \"macrosData\": {{usa_macros}},\n  \"micronutrientsData\": {\n    \"micronutrients\": {{usa_micronutrients}},\n    \"guidelineUsed\": \"{{usa_guideline_used}}\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						}
+					}
+				},
+				{
+					"name": "5. Get USA Client (Verify)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ USA Client retrieved successfully');",
+									"    console.log('Name:', response.client.firstName + ' ' + response.client.lastName);",
+									"    console.log('EER:', response.client.eerCalories);",
+									"    console.log('Biotin:', response.client.micronutrients.biotin);",
+									"    console.log('Pantothenic Acid:', response.client.micronutrients.pantothenicAcid);",
+									"} else {",
+									"    console.log('❌ Failed to get client:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{usa_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{usa_client_id}}"
+							]
+						}
+					}
+				},
+				{
+					"name": "6. Update USA Client",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ USA Client updated successfully');",
+									"    console.log('Updated EER:', response.client.eerCalories);",
+									"} else {",
+									"    console.log('❌ Client update failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"eerCalories\": 3100,\n  \"macrosData\": {\n    \"Protein\": {\n      \"min_grams\": 77.5,\n      \"max_grams\": 271.3,\n      \"note\": \"IOM: 10-35% (Updated)\"\n    },\n    \"Carbohydrates\": {\n      \"min_grams\": 348.8,\n      \"max_grams\": 503.8,\n      \"note\": \"IOM: 45-65% (Updated)\"\n    },\n    \"Total Fat\": {\n      \"min_grams\": 68.9,\n      \"max_grams\": 120.6,\n      \"note\": \"IOM: 20-35% (Updated)\"\n    }\n  },\n  \"nutritionistNotes\": \"Updated nutrition plan for increased activity level\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{usa_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{usa_client_id}}"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🇮🇳 India Complete Journey",
+			"item": [
+				{
+					"name": "1. Calculate EER (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_eer', response.eer);",
+									"    pm.environment.set('india_bmr', response.bmr);",
+									"    pm.environment.set('india_bmi', response.bmi);",
+									"    console.log('✅ India EER calculated:', response.eer);",
+									"    console.log('Formula used:', response.formulaUsed);",
+									"    console.log('Guideline:', response.eerGuideline);",
+									"} else {",
+									"    console.log('❌ EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"India\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"heightCm\": 162,\n  \"weightKg\": 58,\n  \"activityLevel\": \"lightly_active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Calculate Macros (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_macros', JSON.stringify(response.macros));",
+									"    console.log('✅ India Macros calculated');",
+									"    console.log('Guideline:', response.macroGuideline);",
+									"    console.log('Protein:', response.macros.Protein.min_grams + '-' + response.macros.Protein.max_grams + 'g');",
+									"} else {",
+									"    console.log('❌ Macros calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMacros\",\n  \"location\": \"India\",\n  \"eer\": {{india_eer}},\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"weightKg\": 58\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Calculate Micronutrients (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_micronutrients', JSON.stringify(response.micronutrients));",
+									"    pm.environment.set('india_guideline_used', response.guidelineUsed);",
+									"    console.log('✅ India Micronutrients calculated');",
+									"    console.log('Guideline used:', response.guidelineUsed);",
+									"    console.log('Pantothenic Acid:', response.micronutrients.pantothenicAcid.amount + ' mg');",
+									"    console.log('Biotin:', response.micronutrients.biotin.amount + ' mcg');",
+									"} else {",
+									"    console.log('❌ Micronutrients calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMicronutrients\",\n  \"location\": \"India\",\n  \"age\": 28,\n  \"gender\": \"female\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "4. Create Client with All Data (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_client_id', response.client.id);",
+									"    console.log('✅ India Client created successfully');",
+									"    console.log('Client ID:', response.client.id);",
+									"    console.log('EER:', response.client.eerCalories || 'Not set');",
+									"} else {",
+									"    console.log('❌ Client creation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"Priya\",\n  \"lastName\": \"Sharma\",\n  \"email\": \"priya.journey@example.com\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"heightCm\": 162,\n  \"weightKg\": 58,\n  \"activityLevel\": \"lightly_active\",\n  \"location\": \"India\",\n  \"eerCalories\": {{india_eer}},\n  \"bmi\": {{india_bmi}},\n  \"bmr\": {{india_bmr}},\n  \"macrosData\": {{india_macros}},\n  \"micronutrientsData\": {\n    \"micronutrients\": {{india_micronutrients}},\n    \"guidelineUsed\": \"{{india_guideline_used}}\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						}
+					}
+				},
+				{
+					"name": "5. Get India Client (Verify)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ India Client retrieved successfully');",
+									"    console.log('Name:', response.client.firstName + ' ' + response.client.lastName);",
+									"    console.log('EER:', response.client.eerCalories);",
+									"    console.log('Biotin:', response.client.micronutrients.biotin);",
+									"    console.log('Pantothenic Acid:', response.client.micronutrients.pantothenicAcid);",
+									"} else {",
+									"    console.log('❌ Failed to get client:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{india_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{india_client_id}}"
+							]
+						}
+					}
+				},
+				{
+					"name": "6. Update India Client",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ India Client updated successfully');",
+									"    console.log('Updated EER:', response.client.eerCalories);",
+									"} else {",
+									"    console.log('❌ Client update failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"eerCalories\": 2300,\n  \"macrosData\": {\n    \"Protein\": {\n      \"min_grams\": 57.5,\n      \"max_grams\": 115.0,\n      \"note\": \"ICMR-NIN: Adequate protein intake (Updated)\"\n    },\n    \"Carbohydrates\": {\n      \"min_grams\": 287.5,\n      \"max_grams\": 402.5,\n      \"note\": \"ICMR-NIN: 50-70% of total energy (Updated)\"\n    },\n    \"Total Fat\": {\n      \"min_grams\": 38.3,\n      \"max_grams\": 76.7,\n      \"note\": \"ICMR-NIN: 15-30% of total energy (Updated)\"\n    }\n  },\n  \"nutritionistNotes\": \"Adjusted for weight management goals\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{india_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{india_client_id}}"
+							]
+						}
+					}
+				}
+			]
 		}
 	],
 	"event": [
@@ -625,12 +1217,12 @@
 				"type": "text/javascript",
 				"exec": [
 					"// Global pre-request script",
-					"console.log('🚀 Starting API request...');",
-					"",
-					"// Check if base_url is set",
-					"if (!pm.environment.get('base_url')) {",
-					"    console.log('⚠️  Please set base_url in environment variables');",
-					"    console.log('Example: https://your-app.vercel.app');",
+					"console.log('Making request to:', pm.request.url);",
+					"console.log('Method:', pm.request.method);",
+					"if (pm.environment.get('auth_token')) {",
+					"    console.log('Auth token present ✅');",
+					"} else {",
+					"    console.log('⚠️ No auth token - make sure to register/login first');",
 					"}"
 				]
 			}
@@ -651,8 +1243,602 @@
 	"variable": [
 		{
 			"key": "base_url",
-			"value": "https://caloriescience-f1tbogyz4-mrinals-projects-b39127c8.vercel.app",
+			"value": "https://caloriescience-api.vercel.app",
 			"type": "string"
+		}
+	],
+	"journey": [
+		{
+			"name": "🇺🇸 USA Complete Journey",
+			"item": [
+				{
+					"name": "1. Calculate EER (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_eer', response.eer);",
+									"    pm.environment.set('usa_bmr', response.bmr);",
+									"    pm.environment.set('usa_bmi', response.bmi);",
+									"    console.log('✅ USA EER calculated:', response.eer);",
+									"    console.log('Formula used:', response.formulaUsed);",
+									"    console.log('Guideline:', response.eerGuideline);",
+									"} else {",
+									"    console.log('❌ EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"USA\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"heightCm\": 175,\n  \"weightKg\": 70,\n  \"activityLevel\": \"moderately_active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Calculate Macros (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_macros', JSON.stringify(response.macros));",
+									"    console.log('✅ USA Macros calculated');",
+									"    console.log('Guideline:', response.macroGuideline);",
+									"    console.log('Protein:', response.macros.Protein.min_grams + '-' + response.macros.Protein.max_grams + 'g');",
+									"} else {",
+									"    console.log('❌ Macros calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMacros\",\n  \"location\": \"USA\",\n  \"eer\": {{usa_eer}},\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"weightKg\": 70\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Calculate Micronutrients (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_micronutrients', JSON.stringify(response.micronutrients));",
+									"    pm.environment.set('usa_guideline_used', response.guidelineUsed);",
+									"    console.log('✅ USA Micronutrients calculated');",
+									"    console.log('Guideline used:', response.guidelineUsed);",
+									"    console.log('Pantothenic Acid:', response.micronutrients.pantothenicAcid.amount + ' mg');",
+									"    console.log('Biotin:', response.micronutrients.biotin.amount + ' mcg');",
+									"} else {",
+									"    console.log('❌ Micronutrients calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMicronutrients\",\n  \"location\": \"USA\",\n  \"age\": 30,\n  \"gender\": \"male\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "4. Create Client with All Data (USA)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('usa_client_id', response.client.id);",
+									"    console.log('✅ USA Client created successfully');",
+									"    console.log('Client ID:', response.client.id);",
+									"    console.log('EER:', response.client.eerCalories || 'Not set');",
+									"} else {",
+									"    console.log('❌ Client creation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"USA\",\n  \"lastName\": \"TestClient\",\n  \"email\": \"usa.journey@example.com\",\n  \"age\": 30,\n  \"gender\": \"male\",\n  \"heightCm\": 175,\n  \"weightKg\": 70,\n  \"activityLevel\": \"moderately_active\",\n  \"location\": \"USA\",\n  \"eerCalories\": {{usa_eer}},\n  \"bmi\": {{usa_bmi}},\n  \"bmr\": {{usa_bmr}},\n  \"macrosData\": {{usa_macros}},\n  \"micronutrientsData\": {\n    \"micronutrients\": {{usa_micronutrients}},\n    \"guidelineUsed\": \"{{usa_guideline_used}}\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						}
+					}
+				},
+				{
+					"name": "5. Get USA Client (Verify)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ USA Client retrieved successfully');",
+									"    console.log('Name:', response.client.firstName + ' ' + response.client.lastName);",
+									"    console.log('EER:', response.client.eerCalories);",
+									"    console.log('Biotin:', response.client.micronutrients.biotin);",
+									"    console.log('Pantothenic Acid:', response.client.micronutrients.pantothenicAcid);",
+									"} else {",
+									"    console.log('❌ Failed to get client:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{usa_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{usa_client_id}}"
+							]
+						}
+					}
+				},
+				{
+					"name": "6. Update USA Client",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ USA Client updated successfully');",
+									"    console.log('Updated EER:', response.client.eerCalories);",
+									"} else {",
+									"    console.log('❌ Client update failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"eerCalories\": 3100,\n  \"macrosData\": {\n    \"Protein\": {\n      \"min_grams\": 77.5,\n      \"max_grams\": 271.3,\n      \"note\": \"IOM: 10-35% (Updated)\"\n    },\n    \"Carbohydrates\": {\n      \"min_grams\": 348.8,\n      \"max_grams\": 503.8,\n      \"note\": \"IOM: 45-65% (Updated)\"\n    },\n    \"Total Fat\": {\n      \"min_grams\": 68.9,\n      \"max_grams\": 120.6,\n      \"note\": \"IOM: 20-35% (Updated)\"\n    }\n  },\n  \"nutritionistNotes\": \"Updated nutrition plan for increased activity level\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{usa_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{usa_client_id}}"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🇮🇳 India Complete Journey",
+			"item": [
+				{
+					"name": "1. Calculate EER (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_eer', response.eer);",
+									"    pm.environment.set('india_bmr', response.bmr);",
+									"    pm.environment.set('india_bmi', response.bmi);",
+									"    console.log('✅ India EER calculated:', response.eer);",
+									"    console.log('Formula used:', response.formulaUsed);",
+									"    console.log('Guideline:', response.eerGuideline);",
+									"} else {",
+									"    console.log('❌ EER calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateEer\",\n  \"location\": \"India\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"heightCm\": 162,\n  \"weightKg\": 58,\n  \"activityLevel\": \"lightly_active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Calculate Macros (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_macros', JSON.stringify(response.macros));",
+									"    console.log('✅ India Macros calculated');",
+									"    console.log('Guideline:', response.macroGuideline);",
+									"    console.log('Protein:', response.macros.Protein.min_grams + '-' + response.macros.Protein.max_grams + 'g');",
+									"} else {",
+									"    console.log('❌ Macros calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMacros\",\n  \"location\": \"India\",\n  \"eer\": {{india_eer}},\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"weightKg\": 58\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Calculate Micronutrients (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_micronutrients', JSON.stringify(response.micronutrients));",
+									"    pm.environment.set('india_guideline_used', response.guidelineUsed);",
+									"    console.log('✅ India Micronutrients calculated');",
+									"    console.log('Guideline used:', response.guidelineUsed);",
+									"    console.log('Pantothenic Acid:', response.micronutrients.pantothenicAcid.amount + ' mg');",
+									"    console.log('Biotin:', response.micronutrients.biotin.amount + ' mcg');",
+									"} else {",
+									"    console.log('❌ Micronutrients calculation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"calculateMicronutrients\",\n  \"location\": \"India\",\n  \"age\": 28,\n  \"gender\": \"female\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/calculations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"calculations"
+							]
+						}
+					}
+				},
+				{
+					"name": "4. Create Client with All Data (India)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('india_client_id', response.client.id);",
+									"    console.log('✅ India Client created successfully');",
+									"    console.log('Client ID:', response.client.id);",
+									"    console.log('EER:', response.client.eerCalories || 'Not set');",
+									"} else {",
+									"    console.log('❌ Client creation failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"firstName\": \"Priya\",\n  \"lastName\": \"Sharma\",\n  \"email\": \"priya.journey@example.com\",\n  \"age\": 28,\n  \"gender\": \"female\",\n  \"heightCm\": 162,\n  \"weightKg\": 58,\n  \"activityLevel\": \"lightly_active\",\n  \"location\": \"India\",\n  \"eerCalories\": {{india_eer}},\n  \"bmi\": {{india_bmi}},\n  \"bmr\": {{india_bmr}},\n  \"macrosData\": {{india_macros}},\n  \"micronutrientsData\": {\n    \"micronutrients\": {{india_micronutrients}},\n    \"guidelineUsed\": \"{{india_guideline_used}}\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						}
+					}
+				},
+				{
+					"name": "5. Get India Client (Verify)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ India Client retrieved successfully');",
+									"    console.log('Name:', response.client.firstName + ' ' + response.client.lastName);",
+									"    console.log('EER:', response.client.eerCalories);",
+									"    console.log('Biotin:', response.client.micronutrients.biotin);",
+									"    console.log('Pantothenic Acid:', response.client.micronutrients.pantothenicAcid);",
+									"} else {",
+									"    console.log('❌ Failed to get client:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{india_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{india_client_id}}"
+							]
+						}
+					}
+				},
+				{
+					"name": "6. Update India Client",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    console.log('✅ India Client updated successfully');",
+									"    console.log('Updated EER:', response.client.eerCalories);",
+									"} else {",
+									"    console.log('❌ Client update failed:', pm.response.json());",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"eerCalories\": 2300,\n  \"macrosData\": {\n    \"Protein\": {\n      \"min_grams\": 57.5,\n      \"max_grams\": 115.0,\n      \"note\": \"ICMR-NIN: Adequate protein intake (Updated)\"\n    },\n    \"Carbohydrates\": {\n      \"min_grams\": 287.5,\n      \"max_grams\": 402.5,\n      \"note\": \"ICMR-NIN: 50-70% of total energy (Updated)\"\n    },\n    \"Total Fat\": {\n      \"min_grams\": 38.3,\n      \"max_grams\": 76.7,\n      \"note\": \"ICMR-NIN: 15-30% of total energy (Updated)\"\n    }\n  },\n  \"nutritionistNotes\": \"Adjusted for weight management goals\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{india_client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{india_client_id}}"
+							]
+						}
+					}
+				}
+			]
 		}
 	]
 } 
