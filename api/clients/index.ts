@@ -8,6 +8,7 @@ import { getEERGuidelineFromLocation } from '../../lib/locationMapping';
 import { calculateEER, calculateMacros } from '../../lib/calculations';
 import { calculateMicronutrients } from '../../lib/micronutrientCalculations';
 import { FlexibleMicronutrientService } from '../../lib/micronutrients-flexible';
+import { getGuidelineFromLocation } from '../../lib/clientMicronutrientHelpers';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method === 'GET') {
@@ -238,8 +239,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // 3. Calculate Micronutrients using flexible system
           const flexibleMicroService = new FlexibleMicronutrientService(supabase);
           
-          // Determine country for micronutrients (same as EER guideline)
-          const micronutrientCountry = eerGuideline === 'USA' ? 'US' : eerGuideline as 'UK' | 'US' | 'India';
+          // Determine country for micronutrients based on location
+          const locationGuideline = getGuidelineFromLocation(validation.value.location);
+          const micronutrientCountry = locationGuideline.country;
           
           // Prepare adjustment factors based on client data
           const adjustmentFactors = {
@@ -445,9 +447,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Use flexible micronutrient service for manual micronutrient data
         const flexibleMicroService = new FlexibleMicronutrientService(supabase);
         
-        // Determine country based on location
-        const country = validation.value.location?.includes('UK') ? 'UK' : 
-                       validation.value.location?.includes('India') ? 'India' : 'US';
+        // Determine country based on location using proper mapping
+        const locationGuideline = getGuidelineFromLocation(validation.value.location);
+        const country = locationGuideline.country;
         
         // Calculate age if not already calculated
         let age = 30; // Default age if date of birth not provided
@@ -555,8 +557,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             // 3. Calculate Micronutrients using flexible system
             const flexibleMicroService = new FlexibleMicronutrientService(supabase);
             
-            // Determine country for micronutrients (same as EER guideline)
-            const micronutrientCountry = eerGuideline === 'USA' ? 'US' : eerGuideline as 'UK' | 'US' | 'India';
+            // Determine country for micronutrients based on location
+            const locationGuideline = getGuidelineFromLocation(validation.value.location);
+            const micronutrientCountry = locationGuideline.country;
             
             // Prepare adjustment factors based on client data
             const adjustmentFactors = {

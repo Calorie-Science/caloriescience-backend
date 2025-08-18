@@ -8,15 +8,31 @@ import {
   getLowerLimit,
   MICRONUTRIENT_KEYS
 } from '../types/micronutrients';
+import { getCountryGuidelineSource, getCountryGuidelineType } from './countryMicronutrientMapping';
 
 export class FlexibleMicronutrientService {
   constructor(private supabase: SupabaseClient) {}
 
   /**
+   * Get micronutrient guidelines for a specific demographic using country name
+   */
+  async getGuidelinesByCountryName(
+    countryName: string,
+    gender: 'male' | 'female',
+    age: number,
+    pregnancy?: boolean,
+    lactation?: boolean
+  ): Promise<MicronutrientGuidelines | null> {
+    // Map country name to guideline source
+    const guidelineSource = getCountryGuidelineSource(countryName);
+    return this.getGuidelines(guidelineSource, gender, age, pregnancy, lactation);
+  }
+
+  /**
    * Get micronutrient guidelines for a specific demographic
    */
   async getGuidelines(
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     gender: 'male' | 'female',
     age: number,
     pregnancy?: boolean,
@@ -79,11 +95,33 @@ export class FlexibleMicronutrientService {
   }
 
   /**
+   * Calculate micronutrient requirements for a client using country name
+   */
+  async calculateClientRequirementsByCountryName(
+    clientId: string,
+    countryName: string,
+    gender: 'male' | 'female',
+    age: number,
+    adjustmentFactors?: {
+      pregnancy?: boolean;
+      lactation?: boolean;
+      activityLevel?: 'sedentary' | 'moderate' | 'active' | 'very_active';
+      healthConditions?: string[];
+    }
+  ): Promise<ClientMicronutrientRequirements | null> {
+    // Map country name to guideline source
+    const guidelineSource = getCountryGuidelineSource(countryName);
+    return this.calculateClientRequirements(
+      clientId, guidelineSource, gender, age, adjustmentFactors
+    );
+  }
+
+  /**
    * Calculate micronutrient requirements for a client
    */
   async calculateClientRequirements(
     clientId: string,
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     gender: 'male' | 'female',
     age: number,
     adjustmentFactors?: {
@@ -141,7 +179,7 @@ export class FlexibleMicronutrientService {
    */
   private applyAdjustments(
     baseMicronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     factors?: {
       pregnancy?: boolean;
       lactation?: boolean;
@@ -177,11 +215,25 @@ export class FlexibleMicronutrientService {
    */
   private updatePrimaryValue(
     nutrient: NutrientValue,
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     newValue: number
   ): void {
     if (country === 'UK') {
       (nutrient as any).rni = newValue;
+    } else if (country === 'EU') {
+      // For EU, update PRI if it exists, otherwise AI
+      if ('pri' in nutrient && nutrient.pri !== null && nutrient.pri !== undefined) {
+        (nutrient as any).pri = newValue;
+      } else if ('ai' in nutrient) {
+        (nutrient as any).ai = newValue;
+      }
+    } else if (country === 'WHO') {
+      // For WHO, update RNI if it exists, otherwise AI
+      if ('rni' in nutrient && nutrient.rni !== null && nutrient.rni !== undefined) {
+        (nutrient as any).rni = newValue;
+      } else if ('ai' in nutrient) {
+        (nutrient as any).ai = newValue;
+      }
     } else {
       (nutrient as any).rda = newValue;
     }
@@ -192,7 +244,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForPregnancy(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India'
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'
   ): void {
     // These adjustments are based on typical increases during pregnancy
     const adjustments = {
@@ -219,7 +271,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForLactation(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India'
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'
   ): void {
     const adjustments = {
       [MICRONUTRIENT_KEYS.VITAMIN_A]: 1.4, // 40% increase
@@ -239,7 +291,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForActivity(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     activityLevel: string
   ): void {
     // Higher activity increases need for B vitamins and some minerals
@@ -263,7 +315,7 @@ export class FlexibleMicronutrientService {
    */
   private applyMultipliers(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India',
+    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
     multipliers: Record<string, number>
   ): void {
     for (const [key, multiplier] of Object.entries(multipliers)) {
