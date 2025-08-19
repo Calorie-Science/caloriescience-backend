@@ -79,19 +79,23 @@ export interface MacrosCalculationResult {
 export async function calculateEER(input: EERCalculationInput): Promise<EERCalculationResult> {
   const { country, age, gender, height_cm, weight_kg, activity_level, pregnancy_status, lactation_status } = input;
 
+  // Round age to nearest integer for database query since EER formulas use integer age ranges
+  const roundedAge = Math.round(age);
+  console.log(`🔢 Age rounding: ${age} → ${roundedAge} for database query`);
+
   // 1. Get EER formula
   const { data: formulas, error: formulaError } = await supabase
     .from('eer_formulas')
     .select('*')
     .eq('country', country)
     .eq('gender', gender)
-    .lte('age_min', age)  // age_min <= age
-    .gte('age_max', age)  // age_max >= age
+    .lte('age_min', roundedAge)  // age_min <= roundedAge
+    .gte('age_max', roundedAge)  // age_max >= roundedAge
     .order('age_min', { ascending: false })  // Prefer more specific age ranges (higher age_min)
     .limit(1);
 
   if (formulaError || !formulas || formulas.length === 0) {
-    throw new Error(`No EER formula found for ${country}, ${gender}, age ${age}`);
+    throw new Error(`No EER formula found for ${country}, ${gender}, age ${age} (rounded to ${roundedAge})`);
   }
 
   const formula = formulas[0];
@@ -192,14 +196,18 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
 export async function calculateMacros(input: MacrosCalculationInput): Promise<MacrosCalculationResult> {
   const { eer, country, age, gender, weight_kg } = input;
 
+  // Round age to nearest integer for database query since macro guidelines use integer age ranges
+  const roundedAge = Math.round(age);
+  console.log(`🔢 Macro calculation age rounding: ${age} → ${roundedAge} for database query`);
+
   // Try to get macro guidelines for the requested country first
   let { data: guidelinesArray, error: guidelinesError } = await supabase
     .from('macro_guidelines')
     .select('*')
     .eq('country', country)
     .eq('gender', gender)
-    .lte('age_min', age)
-    .gte('age_max', age)
+    .lte('age_min', roundedAge)
+    .gte('age_max', roundedAge)
     .order('age_min', { ascending: false })  // Prefer more specific age ranges
     .limit(1);
 
@@ -214,8 +222,8 @@ export async function calculateMacros(input: MacrosCalculationInput): Promise<Ma
       .select('*')
       .eq('country', 'USA')
       .eq('gender', gender)
-      .lte('age_min', age)
-      .gte('age_max', age)
+      .lte('age_min', roundedAge)
+      .gte('age_max', roundedAge)
       .order('age_min', { ascending: false })
       .limit(1);
     

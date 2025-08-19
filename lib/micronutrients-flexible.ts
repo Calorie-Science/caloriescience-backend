@@ -21,11 +21,12 @@ export class FlexibleMicronutrientService {
     gender: 'male' | 'female',
     age: number,
     pregnancy?: boolean,
-    lactation?: boolean
+    lactation?: boolean,
+    activityLevel?: string
   ): Promise<MicronutrientGuidelines | null> {
     // Map country name to guideline source
     const guidelineSource = getCountryGuidelineSource(countryName);
-    return this.getGuidelines(guidelineSource, gender, age, pregnancy, lactation);
+    return this.getGuidelines(guidelineSource, gender, age, pregnancy, lactation, activityLevel);
   }
 
   /**
@@ -36,17 +37,20 @@ export class FlexibleMicronutrientService {
     gender: 'male' | 'female',
     age: number,
     pregnancy?: boolean,
-    lactation?: boolean
+    lactation?: boolean,
+    activityLevel?: string
   ): Promise<MicronutrientGuidelines | null> {
-    // Ensure age is treated as a float for precise database queries
-    const clientAge = parseFloat(age.toString());
+    // Round to float4 precision (6 decimal places) to match database data type
+    const clientAge = Math.round(parseFloat(age.toString()) * 1000000) / 1000000;
     
     console.log(`🔍 Starting micronutrient guideline search for:`, {
       country,
       gender,
-      age: clientAge,
+      age: age, // Original float age for logging
+      clientAge: clientAge, // Rounded to float4 precision (6 decimals) for database query
       pregnancy,
-      lactation
+      lactation,
+      activityLevel
     });
     
     // HIGHEST PRIORITY: Pregnancy/Lactation specific guidelines
@@ -54,15 +58,18 @@ export class FlexibleMicronutrientService {
       const condition = pregnancy ? 'pregnancy' : 'lactation';
       console.log(`🔴 HIGH PRIORITY: Looking for ${condition} guidelines for ${gender}, age ${clientAge}, country ${country}`);
       
-      const { data, error } = await this.supabase
+      const query = this.supabase
         .from('micronutrient_guidelines_flexible')
         .select('*')
         .eq('country', country)
         .eq('gender', gender)
         .lte('age_min', clientAge)
         .gte('age_max', clientAge)
-        .ilike('notes', `%${condition}%`)
-        .single();
+        .ilike('notes', `%${condition}%`);
+      
+      console.log(`🔍 Query params: country=${country}, gender=${gender}, age_min<=${clientAge}, age_max>=${clientAge}, notes like %${condition}%`);
+      
+      const { data, error } = await query.limit(1).single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
         console.error('Error fetching pregnancy/lactation guidelines:', error);
@@ -70,7 +77,7 @@ export class FlexibleMicronutrientService {
       }
       
       if (data) {
-        console.log(`✅ Found ${condition} guidelines for ${gender}, age ${clientAge}`);
+        console.log(`✅ Found ${condition} guidelines for ${gender}, age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
         return data;
       }
       
@@ -80,15 +87,21 @@ export class FlexibleMicronutrientService {
     // SECOND PRIORITY: Gender-specific guidelines (no pregnancy/lactation notes)
     console.log(`🟡 SECOND PRIORITY: Looking for gender-specific guidelines for ${gender}, age ${clientAge}, country ${country}`);
     
-    let { data, error } = await this.supabase
+    const query2 = this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
       .eq('country', country)
       .eq('gender', gender)
       .lte('age_min', clientAge)
       .gte('age_max', clientAge)
-      .is('notes', null) // Exclude specific notes like pregnancy/lactation
-      .single();
+      .is('notes', null); // Exclude specific notes like pregnancy/lactation
+    
+    console.log(`🔍 Query params: country=${country}, gender=${gender}, age_min<=${clientAge}, age_max>=${clientAge}, notes IS NULL`);
+    
+    // Add raw query logging to debug
+    console.log(`🔍 Raw query: SELECT * FROM micronutrient_guidelines_flexible WHERE country='${country}' AND gender='${gender}' AND age_min<=${clientAge} AND age_max>=${clientAge} AND notes IS NULL`);
+    
+    let { data, error } = await query2.limit(1).single();
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching gender-specific guidelines:', error);
@@ -96,22 +109,28 @@ export class FlexibleMicronutrientService {
     }
     
     if (data) {
-      console.log(`✅ Found gender-specific guidelines for ${gender}, age ${clientAge}`);
+      console.log(`✅ Found gender-specific guidelines for ${gender}, age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
       return data;
     }
+    
+    console.log(`⚠️ No gender-specific guidelines found for ${gender}, age ${clientAge}, country ${country}`);
+    console.log(`🔍 Database response: data=${JSON.stringify(data)}, error=${JSON.stringify(error)}`);
 
     // THIRD PRIORITY: Common gender guidelines (no pregnancy/lactation notes)
     console.log(`🟢 THIRD PRIORITY: Looking for common gender guidelines for age ${clientAge}, country ${country}`);
     
-    ({ data, error } = await this.supabase
+    const query3 = this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
       .eq('country', country)
       .eq('gender', 'common')
       .lte('age_min', clientAge)
       .gte('age_max', clientAge)
-      .is('notes', null)
-      .single());
+      .is('notes', null);
+    
+    console.log(`🔍 Query params: country=${country}, gender=common, age_min<=${clientAge}, age_max>=${clientAge}, notes IS NULL`);
+    
+    ({ data, error } = await query3.limit(1).single());
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching common guidelines:', error);
@@ -119,14 +138,17 @@ export class FlexibleMicronutrientService {
     }
     
     if (data) {
-      console.log(`✅ Found common gender guidelines for age ${clientAge}`);
+      console.log(`✅ Found common gender guidelines for age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
       return data;
     }
+    
+    console.log(`⚠️ No common gender guidelines found for age ${clientAge}, country ${country}`);
 
     // FOURTH PRIORITY: Gender-specific guidelines with any notes (excluding pregnancy/lactation already handled)
     console.log(`🔵 FOURTH PRIORITY: Looking for gender-specific guidelines with notes for ${gender}, age ${clientAge}, country ${country}`);
     
-    ({ data, error } = await this.supabase
+    // Try to match activity level first
+    let query4 = this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
       .eq('country', country)
@@ -134,8 +156,24 @@ export class FlexibleMicronutrientService {
       .lte('age_min', clientAge)
       .gte('age_max', clientAge)
       .not('notes', 'ilike', '%pregnancy%')
-      .not('notes', 'ilike', '%lactation%')
-      .single());
+      .not('notes', 'ilike', '%lactation%');
+    
+    // If we have activity level info, prioritize matching it
+    if (activityLevel) {
+      console.log(`🔍 Prioritizing activity level: ${activityLevel}`);
+      
+      if (activityLevel === 'moderately_active') {
+        query4 = query4.ilike('notes', '%moderate%');
+      } else if (activityLevel === 'very_active') {
+        query4 = query4.ilike('notes', '%heavy%');
+      } else if (activityLevel === 'sedentary') {
+        query4 = query4.ilike('notes', '%sedentary%');
+      }
+    }
+    
+    console.log(`🔍 Query params: country=${country}, gender=${gender}, age_min<=${clientAge}, age_max>=${clientAge}, notes NOT LIKE %pregnancy% AND NOT LIKE %lactation%`);
+    
+    ({ data, error } = await query4.limit(1).single());
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching gender-specific guidelines with notes:', error);
@@ -143,14 +181,16 @@ export class FlexibleMicronutrientService {
     }
     
     if (data) {
-      console.log(`✅ Found gender-specific guidelines with notes for ${gender}, age ${clientAge}`);
+      console.log(`✅ Found gender-specific guidelines with notes for ${gender}, age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
       return data;
     }
+    
+    console.log(`⚠️ No gender-specific guidelines with notes found for ${gender}, age ${clientAge}, country ${country}`);
 
     // FIFTH PRIORITY: Common gender guidelines with any notes (excluding pregnancy/lactation already handled)
     console.log(`🟣 FIFTH PRIORITY: Looking for common gender guidelines with notes for age ${clientAge}, country ${country}`);
     
-    ({ data, error } = await this.supabase
+    const query5 = this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
       .eq('country', country)
@@ -158,8 +198,11 @@ export class FlexibleMicronutrientService {
       .lte('age_min', clientAge)
       .gte('age_max', clientAge)
       .not('notes', 'ilike', '%pregnancy%')
-      .not('notes', 'ilike', '%lactation%')
-      .single());
+      .not('notes', 'ilike', '%lactation%');
+    
+    console.log(`🔍 Query params: country=${country}, gender=common, age_min<=${clientAge}, age_max>=${clientAge}, notes NOT LIKE %pregnancy% AND NOT LIKE %lactation%`);
+    
+    ({ data, error } = await query5.limit(1).single());
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching common guidelines with notes:', error);
@@ -167,9 +210,11 @@ export class FlexibleMicronutrientService {
     }
     
     if (data) {
-      console.log(`✅ Found common gender guidelines with notes for age ${clientAge}`);
+      console.log(`✅ Found common gender guidelines with notes for age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
       return data;
     }
+    
+    console.log(`⚠️ No common gender guidelines with notes found for age ${clientAge}, country ${country}`);
 
     console.log(`❌ No guidelines found for ${gender}, age ${clientAge}, country ${country}`);
     return null;
@@ -218,7 +263,8 @@ export class FlexibleMicronutrientService {
       gender, 
       age,
       adjustmentFactors?.pregnancy,
-      adjustmentFactors?.lactation
+      adjustmentFactors?.lactation,
+      adjustmentFactors?.activityLevel
     );
     if (!guidelines) return null;
 
