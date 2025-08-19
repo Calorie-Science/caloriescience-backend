@@ -74,7 +74,7 @@ export function isWHONutrient(value: NutrientValue): value is WHONutrientValue {
 export interface MicronutrientGuidelines {
   id?: number;
   country: 'UK' | 'US' | 'India' | 'EU' | 'WHO';
-  gender: 'male' | 'female';
+  gender: 'male' | 'female' | 'common';
   age_min: number;
   age_max: number;
   micronutrients: Record<string, NutrientValue>;

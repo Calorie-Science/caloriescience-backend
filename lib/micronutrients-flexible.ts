@@ -58,7 +58,7 @@ export class FlexibleMicronutrientService {
       // we'll fall back to regular guidelines below
     }
 
-    // Get regular guidelines
+    // Get regular guidelines - first try specific gender
     let { data, error } = await this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
@@ -68,6 +68,22 @@ export class FlexibleMicronutrientService {
       .gte('age_max', age)
       .is('notes', null)
       .single();
+
+    // If no specific gender guidelines found, try 'common' gender as fallback
+    if (!data) {
+      const commonResult = await this.supabase
+        .from('micronutrient_guidelines_flexible')
+        .select('*')
+        .eq('country', country)
+        .eq('gender', 'common')
+        .lte('age_min', age)
+        .gte('age_max', age)
+        .is('notes', null)
+        .single();
+      
+      data = commonResult.data;
+      error = commonResult.error;
+    }
 
     // If no result and it's a female, try again allowing notes but excluding pregnancy/lactation
     if (!data && gender === 'female') {
@@ -84,6 +100,23 @@ export class FlexibleMicronutrientService {
       
       data = result.data;
       error = result.error;
+    }
+
+    // Final fallback: try 'common' gender with notes (excluding pregnancy/lactation)
+    if (!data) {
+      const commonResult = await this.supabase
+        .from('micronutrient_guidelines_flexible')
+        .select('*')
+        .eq('country', country)
+        .eq('gender', 'common')
+        .lte('age_min', age)
+        .gte('age_max', age)
+        .not('notes', 'ilike', '%pregnancy%')
+        .not('notes', 'ilike', '%lactation%')
+        .single();
+      
+      data = commonResult.data;
+      error = commonResult.error;
     }
 
     if (error) {
