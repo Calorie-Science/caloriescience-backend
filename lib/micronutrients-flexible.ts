@@ -38,93 +38,141 @@ export class FlexibleMicronutrientService {
     pregnancy?: boolean,
     lactation?: boolean
   ): Promise<MicronutrientGuidelines | null> {
-    // For pregnancy/lactation, look for specific guidelines
+    // Ensure age is treated as a float for precise database queries
+    const clientAge = parseFloat(age.toString());
+    
+    console.log(`🔍 Starting micronutrient guideline search for:`, {
+      country,
+      gender,
+      age: clientAge,
+      pregnancy,
+      lactation
+    });
+    
+    // HIGHEST PRIORITY: Pregnancy/Lactation specific guidelines
     if (gender === 'female' && (pregnancy || lactation)) {
       const condition = pregnancy ? 'pregnancy' : 'lactation';
+      console.log(`🔴 HIGH PRIORITY: Looking for ${condition} guidelines for ${gender}, age ${clientAge}, country ${country}`);
+      
       const { data, error } = await this.supabase
         .from('micronutrient_guidelines_flexible')
         .select('*')
         .eq('country', country)
         .eq('gender', gender)
-        .lte('age_min', age)
-        .gte('age_max', age)
+        .lte('age_min', clientAge)
+        .gte('age_max', clientAge)
         .ilike('notes', `%${condition}%`)
         .single();
 
-      if (data) {
-        return data as MicronutrientGuidelines;
+      if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+        console.error('Error fetching pregnancy/lactation guidelines:', error);
+        throw error;
       }
-      // If no specific pregnancy/lactation guidelines found (like for UK),
-      // we'll fall back to regular guidelines below
+      
+      if (data) {
+        console.log(`✅ Found ${condition} guidelines for ${gender}, age ${clientAge}`);
+        return data;
+      }
+      
+      console.log(`⚠️ No specific ${condition} guidelines found, falling back to regular guidelines`);
     }
 
-    // Get regular guidelines - first try specific gender
+    // SECOND PRIORITY: Gender-specific guidelines (no pregnancy/lactation notes)
+    console.log(`🟡 SECOND PRIORITY: Looking for gender-specific guidelines for ${gender}, age ${clientAge}, country ${country}`);
+    
     let { data, error } = await this.supabase
       .from('micronutrient_guidelines_flexible')
       .select('*')
       .eq('country', country)
       .eq('gender', gender)
-      .lte('age_min', age)
-      .gte('age_max', age)
-      .is('notes', null)
+      .lte('age_min', clientAge)
+      .gte('age_max', clientAge)
+      .is('notes', null) // Exclude specific notes like pregnancy/lactation
       .single();
 
-    // If no specific gender guidelines found, try 'common' gender as fallback
-    if (!data) {
-      const commonResult = await this.supabase
-        .from('micronutrient_guidelines_flexible')
-        .select('*')
-        .eq('country', country)
-        .eq('gender', 'common')
-        .lte('age_min', age)
-        .gte('age_max', age)
-        .is('notes', null)
-        .single();
-      
-      data = commonResult.data;
-      error = commonResult.error;
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching gender-specific guidelines:', error);
+      throw error;
+    }
+    
+    if (data) {
+      console.log(`✅ Found gender-specific guidelines for ${gender}, age ${clientAge}`);
+      return data;
     }
 
-    // If no result and it's a female, try again allowing notes but excluding pregnancy/lactation
-    if (!data && gender === 'female') {
-      const result = await this.supabase
-        .from('micronutrient_guidelines_flexible')
-        .select('*')
-        .eq('country', country)
-        .eq('gender', gender)
-        .lte('age_min', age)
-        .gte('age_max', age)
-        .not('notes', 'ilike', '%pregnancy%')
-        .not('notes', 'ilike', '%lactation%')
-        .single();
-      
-      data = result.data;
-      error = result.error;
+    // THIRD PRIORITY: Common gender guidelines (no pregnancy/lactation notes)
+    console.log(`🟢 THIRD PRIORITY: Looking for common gender guidelines for age ${clientAge}, country ${country}`);
+    
+    ({ data, error } = await this.supabase
+      .from('micronutrient_guidelines_flexible')
+      .select('*')
+      .eq('country', country)
+      .eq('gender', 'common')
+      .lte('age_min', clientAge)
+      .gte('age_max', clientAge)
+      .is('notes', null)
+      .single());
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching common guidelines:', error);
+      throw error;
+    }
+    
+    if (data) {
+      console.log(`✅ Found common gender guidelines for age ${clientAge}`);
+      return data;
     }
 
-    // Final fallback: try 'common' gender with notes (excluding pregnancy/lactation)
-    if (!data) {
-      const commonResult = await this.supabase
-        .from('micronutrient_guidelines_flexible')
-        .select('*')
-        .eq('country', country)
-        .eq('gender', 'common')
-        .lte('age_min', age)
-        .gte('age_max', age)
-        .not('notes', 'ilike', '%pregnancy%')
-        .not('notes', 'ilike', '%lactation%')
-        .single();
-      
-      data = commonResult.data;
-      error = commonResult.error;
+    // FOURTH PRIORITY: Gender-specific guidelines with any notes (excluding pregnancy/lactation already handled)
+    console.log(`🔵 FOURTH PRIORITY: Looking for gender-specific guidelines with notes for ${gender}, age ${clientAge}, country ${country}`);
+    
+    ({ data, error } = await this.supabase
+      .from('micronutrient_guidelines_flexible')
+      .select('*')
+      .eq('country', country)
+      .eq('gender', gender)
+      .lte('age_min', clientAge)
+      .gte('age_max', clientAge)
+      .not('notes', 'ilike', '%pregnancy%')
+      .not('notes', 'ilike', '%lactation%')
+      .single());
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching gender-specific guidelines with notes:', error);
+      throw error;
+    }
+    
+    if (data) {
+      console.log(`✅ Found gender-specific guidelines with notes for ${gender}, age ${clientAge}`);
+      return data;
     }
 
-    if (error) {
-      console.error('Error fetching micronutrient guidelines:', error);
-      return null;
+    // FIFTH PRIORITY: Common gender guidelines with any notes (excluding pregnancy/lactation already handled)
+    console.log(`🟣 FIFTH PRIORITY: Looking for common gender guidelines with notes for age ${clientAge}, country ${country}`);
+    
+    ({ data, error } = await this.supabase
+      .from('micronutrient_guidelines_flexible')
+      .select('*')
+      .eq('country', country)
+      .eq('gender', 'common')
+      .lte('age_min', clientAge)
+      .gte('age_max', clientAge)
+      .not('notes', 'ilike', '%pregnancy%')
+      .not('notes', 'ilike', '%lactation%')
+      .single());
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching common guidelines with notes:', error);
+      throw error;
+    }
+    
+    if (data) {
+      console.log(`✅ Found common gender guidelines with notes for age ${clientAge}`);
+      return data;
     }
 
-    return data as MicronutrientGuidelines;
+    console.log(`❌ No guidelines found for ${gender}, age ${clientAge}, country ${country}`);
+    return null;
   }
 
   /**

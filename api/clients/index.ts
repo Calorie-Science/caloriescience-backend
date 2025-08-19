@@ -200,12 +200,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         validation.value.location;
 
       if (hasRequiredDataForCalculations && !eerCalories) {
-        // Calculate age from date of birth
+        // Calculate age from date of birth with decimal precision for infants/children
         const birthDate = new Date(validation.value.date_of_birth);
         const today = new Date();
-        const age = today.getFullYear() - birthDate.getFullYear() - 
-          (today.getMonth() < birthDate.getMonth() || 
-          (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+        
+        // Calculate precise age in years with decimal places for accurate database queries
+        const ageInMilliseconds = today.getTime() - birthDate.getTime();
+        const ageInDays = ageInMilliseconds / (1000 * 60 * 60 * 24);
+        const age = ageInDays / 365.25; // Use 365.25 to account for leap years
+        
+        console.log(`📅 Age calculation: Birth date: ${birthDate.toISOString()}, Today: ${today.toISOString()}, Age: ${age} years (${ageInDays} days)`);
 
         // Determine EER guideline from location
         const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
@@ -517,12 +521,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Run calculations asynchronously without blocking the response
         (async () => {
           try {
-            // Calculate age from date of birth
+            // Calculate age from date of birth with decimal precision for infants/children
             const birthDate = new Date(validation.value.date_of_birth);
             const today = new Date();
-            const age = today.getFullYear() - birthDate.getFullYear() - 
-              (today.getMonth() < birthDate.getMonth() || 
-              (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
+            
+            // Calculate precise age in years with decimal places for accurate database queries
+            const ageInMilliseconds = today.getTime() - birthDate.getTime();
+            const ageInDays = ageInMilliseconds / (1000 * 60 * 60 * 24);
+            const age = ageInDays / 365.25; // Use 365.25 to account for leap years
+            
+            console.log(`📅 Background age calculation: Birth date: ${birthDate.toISOString()}, Today: ${today.toISOString()}, Age: ${age} years (${ageInDays} days)`);
 
             // Determine EER guideline from location
             const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
