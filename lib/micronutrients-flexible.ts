@@ -158,10 +158,22 @@ export class FlexibleMicronutrientService {
       .not('notes', 'ilike', '%pregnancy%')
       .not('notes', 'ilike', '%lactation%');
     
-    // If we have activity level info, prioritize matching it
+    // If we have activity level info, try to match it, but don't require it
     if (activityLevel) {
-      console.log(`🔍 Prioritizing activity level: ${activityLevel}`);
+      console.log(`🔍 Trying to match activity level: ${activityLevel}`);
       
+      // Create a backup query without activity level restriction
+      const backupQuery = this.supabase
+        .from('micronutrient_guidelines_flexible')
+        .select('*')
+        .eq('country', country)
+        .eq('gender', gender)
+        .lte('age_min', clientAge)
+        .gte('age_max', clientAge)
+        .not('notes', 'ilike', '%pregnancy%')
+        .not('notes', 'ilike', '%lactation%');
+      
+      // Try with activity level first
       if (activityLevel === 'moderately_active') {
         query4 = query4.ilike('notes', '%moderate%');
       } else if (activityLevel === 'very_active') {
@@ -169,20 +181,45 @@ export class FlexibleMicronutrientService {
       } else if (activityLevel === 'sedentary') {
         query4 = query4.ilike('notes', '%sedentary%');
       }
+      
+      // Try the activity-specific query first
+      let { data: activityData, error: activityError } = await query4.limit(1).single();
+      
+      if (activityData) {
+        console.log(`✅ Found guidelines matching activity level ${activityLevel} for ${gender}, age ${clientAge}:`, { id: activityData.id, age_range: `${activityData.age_min}-${activityData.age_max}`, notes: activityData.notes });
+        return activityData;
+      }
+      
+      // If no activity-specific match, try the backup query
+      console.log(`⚠️ No activity-specific guidelines found, trying general guidelines`);
+      const { data: backupData, error: backupError } = await backupQuery.limit(1).single();
+      
+      if (backupData) {
+        console.log(`✅ Found general guidelines for ${gender}, age ${clientAge}:`, { id: backupData.id, age_range: `${backupData.age_min}-${backupData.age_max}`, notes: backupData.notes });
+        return backupData;
+      }
+      
+      if (backupError && backupError.code !== 'PGRST116') {
+        console.error('Error fetching backup guidelines:', backupError);
+        throw backupError;
+      }
     }
     
-    console.log(`🔍 Query params: country=${country}, gender=${gender}, age_min<=${clientAge}, age_max>=${clientAge}, notes NOT LIKE %pregnancy% AND NOT LIKE %lactation%`);
-    
-    ({ data, error } = await query4.limit(1).single());
+    // If no activity level or no activity-specific match, try the general query
+    if (!activityLevel) {
+      console.log(`🔍 Query params: country=${country}, gender=${gender}, age_min<=${clientAge}, age_max>=${clientAge}, notes NOT LIKE %pregnancy% AND NOT LIKE %lactation%`);
+      
+      ({ data, error } = await query4.limit(1).single());
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching gender-specific guidelines with notes:', error);
-      throw error;
-    }
-    
-    if (data) {
-      console.log(`✅ Found gender-specific guidelines with notes for ${gender}, age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
-      return data;
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching gender-specific guidelines with notes:', error);
+        throw error;
+      }
+      
+      if (data) {
+        console.log(`✅ Found gender-specific guidelines with notes for ${gender}, age ${clientAge}:`, { id: data.id, age_range: `${data.age_min}-${data.age_max}`, notes: data.notes });
+        return data;
+      }
     }
     
     console.log(`⚠️ No gender-specific guidelines with notes found for ${gender}, age ${clientAge}, country ${country}`);
