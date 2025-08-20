@@ -176,6 +176,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         console.error('Create client error:', error);
         console.error('Client data that failed:', JSON.stringify(clientData, null, 2));
         
+        // Handle specific database errors
+        if (error.code === '23505' && error.message.includes('clients_email_unique')) {
+          return res.status(409).json({
+            error: 'Email already exists',
+            message: 'A client with this email address already exists',
+            code: 'DUPLICATE_EMAIL'
+          });
+        }
+        
         // Return specific error details for debugging
         return res.status(500).json({
           error: 'Failed to create client',

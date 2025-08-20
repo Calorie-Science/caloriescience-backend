@@ -37,7 +37,7 @@ CREATE TABLE clients (
   nutritionist_id UUID REFERENCES users(id) ON DELETE CASCADE,
   
   -- Basic Info
-  email VARCHAR(255),
+  email VARCHAR(255) UNIQUE,
   phone VARCHAR(20),
   full_name VARCHAR(255) NOT NULL,
   date_of_birth DATE,

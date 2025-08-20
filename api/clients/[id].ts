@@ -249,6 +249,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             message: 'The requested client does not exist or you do not have access to it'
           });
         }
+        
+        // Handle unique constraint violation for email
+        if (error.code === '23505' && error.message.includes('clients_email_unique')) {
+          return res.status(409).json({
+            error: 'Email already exists',
+            message: 'A client with this email address already exists',
+            code: 'DUPLICATE_EMAIL'
+          });
+        }
+        
         throw error;
           }
         }
