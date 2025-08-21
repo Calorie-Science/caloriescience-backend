@@ -6,6 +6,7 @@ import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
 import { calculateHealthMetrics, calculateBMI } from '../../lib/healthMetrics';
 import { categorizeMicronutrients } from '../../lib/micronutrientCategorization';
 import { calculateEER, calculateMacros } from '../../lib/calculations';
+import { normalizeCountry, getEERGuidelineFromLocation } from '../../lib/locationMapping';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const { id } = req.query;
@@ -351,8 +352,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                   console.log(`📊 Weight change: ${currentClient.weight_kg} → ${finalWeight} kg`);
                   console.log(`📏 Height change: ${currentClient.height_cm} → ${finalHeight} cm`);
                   
-                  // Store location for later use
-                  autoCalculatedLocation = currentClient.location || 'UK';
+                  // Store location for later use (normalize to lowercase)
+                  autoCalculatedLocation = getEERGuidelineFromLocation(currentClient.location || 'UK');
                   console.log('🌍 Auto-calculation location set:', autoCalculatedLocation);
                   
                   try {
@@ -374,9 +375,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                       lactation_status: currentClient.lactation_status
                     });
                     
-                    // Calculate new EER (which includes BMR)
+                    // Calculate new EER (which includes BMR) - use normalized location
                     const eerResult = await calculateEER({
-                      country: currentClient.location || 'UK',
+                      country: autoCalculatedLocation,
                       age: age,
                       gender: currentClient.gender,
                       height_cm: finalHeight,
@@ -416,7 +417,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                     try {
                       const macrosResult = await calculateMacros({
                         eer: eerResult.eer,
-                        country: currentClient.location || 'UK',
+                        country: autoCalculatedLocation,
                         age: age,
                         gender: currentClient.gender,
                         weight_kg: finalWeight
@@ -577,7 +578,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
         // Add EER guideline tracking if auto-calculated
         if (autoCalculatedEER && !eerCalories) {
-          nutritionData.eer_guideline_country = autoCalculatedLocation || 'UK';
+          nutritionData.eer_guideline_country = autoCalculatedLocation || 'uk';
           console.log('🌍 EER guideline tracking added:', nutritionData.eer_guideline_country);
         }
 

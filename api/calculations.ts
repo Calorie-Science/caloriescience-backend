@@ -3,7 +3,8 @@ import { calculateEER, calculateMacros, EERCalculationInput, MacrosCalculationIn
 import { calculateMicronutrients, MicronutrientCalculationInput } from '../lib/micronutrientCalculations';
 import { transformWithMapping, FIELD_MAPPINGS } from '../lib/caseTransform';
 import { calculateBMI } from '../lib/healthMetrics';
-import { getEERGuidelineFromLocation } from '../lib/locationMapping';
+import { getEERGuidelineFromLocation, normalizeCountry } from '../lib/locationMapping';
+import { categorizeMicronutrients } from '../lib/micronutrientCategorization';
 import Joi from 'joi';
 
 // Validation schemas - Updated to use location instead of country
@@ -100,11 +101,14 @@ async function handleEERCalculation(req: VercelRequest, res: VercelResponse): Pr
     });
   }
 
-  // Automatically determine EER guideline from location
-  const eerGuideline = getEERGuidelineFromLocation(value.location);
+  // Normalize location to lowercase for consistent matching
+  const normalizedLocation = normalizeCountry(value.location);
+  
+  // Automatically determine EER guideline from location (returns lowercase)
+  const eerGuideline = getEERGuidelineFromLocation(normalizedLocation);
 
   const eerData: EERCalculationInput = {
-    country: eerGuideline, // Use the determined guideline as country
+    country: eerGuideline, // Use the determined guideline as country (already lowercase)
     age: value.age,
     gender: value.gender,
     height_cm: value.heightCm,
@@ -119,19 +123,61 @@ async function handleEERCalculation(req: VercelRequest, res: VercelResponse): Pr
   // Calculate BMI and classification
   const bmiResult = calculateBMI(value.heightCm, value.weightKg);
 
-  return res.status(200).json({
-    success: true,
+  // Format response to match GET client endpoint structure
+  const response = {
+    // EER data
+    eerCalories: eerResult.eer,
+    nutritionistNotes: null,
+    eerLastUpdated: new Date().toISOString(),
+    
+    // Guideline tracking (without country)
+    eerGuidelineCountry: null,
+    macroGuidelineCountry: null,
+    guidelineNotes: null,
+    
+    // Target Macros data (not calculated yet)
+    proteinGrams: null,
+    carbsGrams: null,
+    fatGrams: null,
+    fiberGrams: null,
+    proteinPercentage: null,
+    carbsPercentage: null,
+    fatPercentage: null,
+    
+    // Macros Ranges (not calculated yet)
+    macrosRanges: null,
+    
+    // Micronutrient data (not calculated yet)
+    micronutrients: {
+      vitamins: {},
+      minerals: {},
+      miscellaneous: {}
+    },
+    guidelineUsed: null,
+    micronutrientNotes: null,
+    micronutrientGuidelineType: null,
+    micronutrientCalculationFactors: null,
+    
+    // AI calculation metadata
+    calculationMethod: 'auto_calculated',
+    
+    // Additional EER-specific data
     bmr: eerResult.bmr,
     pal: eerResult.pal,
-    eer: eerResult.eer,
     formulaUsed: eerResult.formula_used,
-    eerGuideline: eerGuideline, // Include the determined guideline in response
-    // Add BMI information
     bmi: parseFloat(bmiResult.bmi.toFixed(2)),
     bmiCategory: bmiResult.category,
     bmiClassification: bmiResult.classification,
     input: value,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toISOString()
+  };
+
+  // Transform response to camelCase to match client endpoint
+  const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+
+  return res.status(200).json({
+    success: true,
+    ...transformedResponse,
     message: 'EER calculation completed successfully'
   });
 }
@@ -151,12 +197,15 @@ async function handleMacrosCalculation(req: VercelRequest, res: VercelResponse):
     });
   }
 
-  // Automatically determine macro guideline from location
-  const macroGuideline = getEERGuidelineFromLocation(value.location);
+  // Normalize location to lowercase for consistent matching
+  const normalizedLocation = normalizeCountry(value.location);
+  
+  // Automatically determine macro guideline from location (returns lowercase)
+  const macroGuideline = getEERGuidelineFromLocation(normalizedLocation);
 
   const macrosData: MacrosCalculationInput = {
     eer: value.eer,
-    country: macroGuideline, // Use the determined guideline as country
+    country: macroGuideline, // Use the determined guideline as country (already lowercase)
     age: value.age,
     gender: value.gender,
     weight_kg: value.weightKg
@@ -164,12 +213,128 @@ async function handleMacrosCalculation(req: VercelRequest, res: VercelResponse):
 
   const macrosResult = await calculateMacros(macrosData);
 
+  // Calculate average values for macros with ranges (for target values)
+  const calculateAverage = (min: number | null, max: number | null): number => {
+    if (min !== null && max !== null) return (min + max) / 2;
+    if (min !== null) return min;
+    if (max !== null) return max;
+    return 0;
+  };
+
+  const proteinGrams = calculateAverage(macrosResult.Protein?.min, macrosResult.Protein?.max);
+  const carbsGrams = calculateAverage(macrosResult['Carbohydrates']?.min, macrosResult['Carbohydrates']?.max);
+  const fatGrams = calculateAverage(macrosResult['Total Fat']?.min, macrosResult['Total Fat']?.max);
+  const fiberGrams = calculateAverage(macrosResult.Fiber?.min, macrosResult.Fiber?.max);
+
+  // Calculate percentages
+  const proteinPercentage = value.eer > 0 ? (proteinGrams * 4 / value.eer) * 100 : 0;
+  const carbsPercentage = value.eer > 0 ? (carbsGrams * 4 / value.eer) * 100 : 0;
+  const fatPercentage = value.eer > 0 ? (fatGrams * 9 / value.eer) * 100 : 0;
+
+  // Format response to match GET client endpoint structure
+  const response = {
+    // EER data
+    eerCalories: value.eer,
+    nutritionistNotes: null,
+    eerLastUpdated: new Date().toISOString(),
+    
+    // Guideline tracking (without country)
+    eerGuidelineCountry: null,
+    macroGuidelineCountry: null,
+    guidelineNotes: null,
+    
+    // Target Macros data
+    proteinGrams: Math.round(proteinGrams * 100) / 100,
+    carbsGrams: Math.round(carbsGrams * 100) / 100,
+    fatGrams: Math.round(fatGrams * 100) / 100,
+    fiberGrams: Math.round(fiberGrams * 100) / 100,
+    proteinPercentage: Math.round(proteinPercentage * 100) / 100,
+    carbsPercentage: Math.round(carbsPercentage * 100) / 100,
+    fatPercentage: Math.round(fatPercentage * 100) / 100,
+    
+    // Macros Ranges
+    macrosRanges: {
+      protein: {
+        min: macrosResult.Protein?.min || null,
+        max: macrosResult.Protein?.max || null,
+        unit: 'g',
+        note: macrosResult.Protein?.note || null
+      },
+      carbs: {
+        min: macrosResult['Carbohydrates']?.min || null,
+        max: macrosResult['Carbohydrates']?.max || null,
+        unit: 'g',
+        note: macrosResult['Carbohydrates']?.note || null
+      },
+      fat: {
+        min: macrosResult['Total Fat']?.min || null,
+        max: macrosResult['Total Fat']?.max || null,
+        unit: 'g',
+        note: macrosResult['Total Fat']?.note || null
+      },
+      fiber: {
+        min: macrosResult.Fiber?.min || null,
+        max: macrosResult.Fiber?.max || null,
+        unit: 'g',
+        note: macrosResult.Fiber?.note || null
+      },
+      saturatedFat: {
+        min: macrosResult['Saturated Fat']?.min || null,
+        max: macrosResult['Saturated Fat']?.max || null,
+        unit: 'g',
+        note: macrosResult['Saturated Fat']?.note || null
+      },
+      monounsaturatedFat: {
+        min: macrosResult['Monounsaturated Fat']?.min || null,
+        max: macrosResult['Monounsaturated Fat']?.max || null,
+        unit: 'g',
+        note: macrosResult['Monounsaturated Fat']?.note || null
+      },
+      polyunsaturatedFat: {
+        min: macrosResult['Polyunsaturated Fat']?.min || null,
+        max: macrosResult['Polyunsaturated Fat']?.max || null,
+        unit: 'g',
+        note: macrosResult['Polyunsaturated Fat']?.note || null
+      },
+      omega3: {
+        min: macrosResult['Omega-3 Fatty Acids']?.min || null,
+        max: macrosResult['Omega-3 Fatty Acids']?.max || null,
+        unit: 'g',
+        note: macrosResult['Omega-3 Fatty Acids']?.note || null
+      },
+      cholesterol: {
+        min: macrosResult.Cholesterol?.min || null,
+        max: macrosResult.Cholesterol?.max || null,
+        unit: 'mg',
+        note: macrosResult.Cholesterol?.note || null
+      }
+    },
+    
+    // Micronutrient data (not calculated yet)
+    micronutrients: {
+      vitamins: {},
+      minerals: {},
+      miscellaneous: {}
+    },
+    guidelineUsed: null,
+    micronutrientNotes: null,
+    micronutrientGuidelineType: null,
+    micronutrientCalculationFactors: null,
+    
+    // AI calculation metadata
+    calculationMethod: 'auto_calculated',
+    
+    // Additional macro-specific data
+    input: value,
+    timestamp: new Date().toISOString()
+  };
+
+  // Transform response to camelCase to match client endpoint
+  const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+
   return res.status(200).json({
     success: true,
-    input: value,
-    macroGuideline: macroGuideline, // Include the determined guideline in response
-    macros: macrosResult,
-    timestamp: new Date().toISOString(),
+    ...transformedResponse,
     message: 'Macronutrient recommendations calculated successfully'
   });
 }
@@ -189,27 +354,68 @@ async function handleMicronutrientCalculation(req: VercelRequest, res: VercelRes
     });
   }
 
-  // Automatically determine micronutrient guideline from location
-  const micronutrientGuideline = getEERGuidelineFromLocation(value.location);
+  // Normalize location to lowercase for consistent matching
+  const normalizedLocation = normalizeCountry(value.location);
+  
+  // Automatically determine micronutrient guideline from location (returns lowercase)
+  const micronutrientGuideline = getEERGuidelineFromLocation(normalizedLocation);
 
   const micronutrientData: MicronutrientCalculationInput = {
-    location: value.location,
+    location: normalizedLocation, // Use normalized lowercase location
     age: value.age,
     gender: value.gender
   };
 
   const micronutrientResult = await calculateMicronutrients(micronutrientData);
 
-  return res.status(200).json({
-    success: true,
+  // Format response to match GET client endpoint structure
+  const response = {
+    // EER data (not calculated)
+    eerCalories: null,
+    nutritionistNotes: null,
+    eerLastUpdated: null,
+    
+    // Guideline tracking (without country)
+    eerGuidelineCountry: null,
+    macroGuidelineCountry: null,
+    guidelineNotes: null,
+    
+    // Target Macros data (not calculated)
+    proteinGrams: null,
+    carbsGrams: null,
+    fatGrams: null,
+    fiberGrams: null,
+    proteinPercentage: null,
+    carbsPercentage: null,
+    fatPercentage: null,
+    
+    // Macros Ranges (not calculated)
+    macrosRanges: null,
+    
+    // Micronutrient data - categorized into vitamins, minerals, and miscellaneous
+    micronutrients: categorizeMicronutrients(micronutrientResult.micronutrients, true),
+    guidelineUsed: null,
+    micronutrientNotes: null,
+    micronutrientGuidelineType: null,
+    micronutrientCalculationFactors: null,
+    
+    // AI calculation metadata
+    calculationMethod: 'auto_calculated',
+    
+    // Additional micronutrient-specific data
     input: value,
-    micronutrientGuideline: micronutrientGuideline, // Include the determined guideline in response
-    micronutrients: micronutrientResult.micronutrients,
     ageGroup: micronutrientResult.age_group,
-    guidelineUsed: micronutrientResult.guideline_used,
     source: micronutrientResult.source,
     notes: micronutrientResult.notes,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toISOString()
+  };
+
+  // Transform response to camelCase to match client endpoint
+  const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+
+  return res.status(200).json({
+    success: true,
+    ...transformedResponse,
     message: 'Micronutrient recommendations calculated successfully'
   });
 } 

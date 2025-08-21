@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { normalizeCountry } from './locationMapping';
 
 // Input interfaces
 export interface EERCalculationInput {
@@ -97,8 +98,8 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   const roundedAge = Math.round(age);
   console.log(`🔢 Age rounding: ${age} → ${roundedAge} for database query`);
 
-  // Normalize country to title case (e.g., 'india' → 'India')
-  const normalizedCountry = country ? country.charAt(0).toUpperCase() + country.slice(1).toLowerCase() : 'USA'; // Fallback to USA if no country
+  // Normalize country to lowercase (e.g., 'INDIA' → 'india')
+  const normalizedCountry = normalizeCountry(country);
 
   // 1. Get EER formula
   const { data: formulas, error: formulaError } = await supabase
@@ -213,6 +214,9 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
 export async function calculateMacros(input: MacrosCalculationInput): Promise<MacrosCalculationResult> {
   const { eer, country, age, gender, weight_kg } = input;
 
+  // Normalize country to lowercase
+  const normalizedCountry = normalizeCountry(country);
+
   // Round age to nearest integer for database query since macro guidelines use integer age ranges
   const roundedAge = Math.round(age);
   console.log(`🔢 Macro calculation age rounding: ${age} → ${roundedAge} for database query`);
@@ -221,23 +225,23 @@ export async function calculateMacros(input: MacrosCalculationInput): Promise<Ma
   let { data: guidelinesArray, error: guidelinesError } = await supabase
     .from('macro_guidelines')
     .select('*')
-    .eq('country', country)
+    .eq('country', normalizedCountry)
     .eq('gender', gender)
     .lte('age_min', roundedAge)
     .gte('age_max', roundedAge)
     .order('age_min', { ascending: false })  // Prefer more specific age ranges
     .limit(1);
 
-  // If no guidelines found for the requested country, fallback to USA
-  let effectiveCountry = country;
+  // If no guidelines found for the requested country, fallback to usa
+  let effectiveCountry = normalizedCountry;
   if (guidelinesError || !guidelinesArray || guidelinesArray.length === 0) {
-    console.log(`No macro guidelines found for ${country}, falling back to USA`);
-    effectiveCountry = 'USA';
+    console.log(`No macro guidelines found for ${normalizedCountry}, falling back to USA`);
+    effectiveCountry = 'usa';
     
     const fallbackResult = await supabase
       .from('macro_guidelines')
       .select('*')
-      .eq('country', 'USA')
+      .eq('country', 'usa')
       .eq('gender', gender)
       .lte('age_min', roundedAge)
       .gte('age_max', roundedAge)

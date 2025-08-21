@@ -2,99 +2,100 @@
 
 /**
  * Map of countries/regions to their corresponding EER guidelines
+ * All country keys are lowercase for consistent matching
  */
 const COUNTRY_TO_EER_GUIDELINE: Record<string, string> = {
   // USA
-  'united states': 'USA',
-  'usa': 'USA',
-  'us': 'USA',
-  'america': 'USA',
+  'united states': 'usa',
+  'usa': 'usa',
+  'us': 'usa',
+  'america': 'usa',
   
   // Canada
-  'canada': 'Canada',
-  'canadian': 'Canada',
+  'canada': 'canada',
+  'canadian': 'canada',
   
   // EU Countries
-  'france': 'EU',
-  'germany': 'EU',
-  'spain': 'EU',
-  'italy': 'EU',
-  'netherlands': 'EU',
-  'belgium': 'EU',
-  'austria': 'EU',
-  'portugal': 'EU',
-  'greece': 'EU',
-  'ireland': 'EU',
-  'finland': 'EU',
-  'sweden': 'EU',
-  'denmark': 'EU',
-  'poland': 'EU',
-  'czech republic': 'EU',
-  'hungary': 'EU',
-  'romania': 'EU',
-  'bulgaria': 'EU',
-  'croatia': 'EU',
-  'slovakia': 'EU',
-  'slovenia': 'EU',
-  'estonia': 'EU',
-  'latvia': 'EU',
-  'lithuania': 'EU',
-  'luxembourg': 'EU',
-  'malta': 'EU',
-  'cyprus': 'EU',
-  'european union': 'EU',
-  'eu': 'EU',
+  'france': 'eu',
+  'germany': 'eu',
+  'spain': 'eu',
+  'italy': 'eu',
+  'netherlands': 'eu',
+  'belgium': 'eu',
+  'austria': 'eu',
+  'portugal': 'eu',
+  'greece': 'eu',
+  'ireland': 'eu',
+  'finland': 'eu',
+  'sweden': 'eu',
+  'denmark': 'eu',
+  'poland': 'eu',
+  'czech republic': 'eu',
+  'hungary': 'eu',
+  'romania': 'eu',
+  'bulgaria': 'eu',
+  'croatia': 'eu',
+  'slovakia': 'eu',
+  'slovenia': 'eu',
+  'estonia': 'eu',
+  'latvia': 'eu',
+  'lithuania': 'eu',
+  'luxembourg': 'eu',
+  'malta': 'eu',
+  'cyprus': 'eu',
+  'european union': 'eu',
+  'eu': 'eu',
   
   // Australia/New Zealand
-  'australia': 'AU/NZ',
-  'new zealand': 'AU/NZ',
-  'nz': 'AU/NZ',
-  'aus': 'AU/NZ',
+  'australia': 'au/nz',
+  'new zealand': 'au/nz',
+  'nz': 'au/nz',
+  'aus': 'au/nz',
   
   // United Kingdom
-  'united kingdom': 'UK',
-  'uk': 'UK',
-  'england': 'UK',
-  'scotland': 'UK',
-  'wales': 'UK',
-  'northern ireland': 'UK',
-  'britain': 'UK',
-  'great britain': 'UK',
+  'united kingdom': 'uk',
+  'uk': 'uk',
+  'england': 'uk',
+  'scotland': 'uk',
+  'wales': 'uk',
+  'northern ireland': 'uk',
+  'britain': 'uk',
+  'great britain': 'uk',
   
   // Singapore
-  'singapore': 'Singapore',
+  'singapore': 'singapore',
   
   // UAE
-  'uae': 'UAE',
-  'united arab emirates': 'UAE',
-  'dubai': 'UAE',
-  'abu dhabi': 'UAE',
+  'uae': 'uae',
+  'united arab emirates': 'uae',
+  'dubai': 'uae',
+  'abu dhabi': 'uae',
   
   // India
-  'india': 'India',
-  'indian': 'India',
+  'india': 'india',
+  'indian': 'india',
   
   // Japan
-  'japan': 'Japan',
-  'japanese': 'Japan',
+  'japan': 'japan',
+  'japanese': 'japan',
   
   // South Africa
-  'south africa': 'ZA',
-  'za': 'ZA',
+  'south africa': 'za',
+  'za': 'za',
   
   // Brazil
-  'brazil': 'Brazil',
-  'brazilian': 'Brazil'
+  'brazil': 'brazil',
+  'brazilian': 'brazil'
 };
 
 /**
  * Extract country from location string and map to EER guideline
  * @param location - Client's location string (e.g., "Paris, France", "New York, NY", "Mumbai, India")
- * @returns EER guideline code (USA, EU, etc.) or 'USA' as default
+ * @returns EER guideline code in lowercase (usa, eu, etc.) or 'usa' as default
  */
 export function getEERGuidelineFromLocation(location: string): string {
   if (!location || typeof location !== 'string') {
-    return 'USA'; // Default fallback
+    return 'usa'; // Default fallback in lowercase
   }
 
   // Convert to lowercase for case-insensitive matching
@@ -103,24 +104,61 @@ export function getEERGuidelineFromLocation(location: string): string {
   // Try to match against known countries/regions
   for (const [country, guideline] of Object.entries(COUNTRY_TO_EER_GUIDELINE)) {
     if (locationLower.includes(country)) {
-      return guideline;
+      return guideline; // Return lowercase guideline
     }
   }
   
-  // If no match found, default to USA
-  return 'USA';
+  // If no match found, default to usa (lowercase)
+  return 'usa';
 }
 
 /**
- * Get all available EER guidelines
+ * Get all available EER guidelines (all lowercase)
  */
 export function getAvailableEERGuidelines(): string[] {
-  return ['USA', 'Canada', 'EU', 'AU/NZ', 'UK', 'Singapore', 'UAE', 'India', 'Japan', 'WHO', 'ZA', 'Brazil'];
+  return ['usa', 'canada', 'eu', 'au/nz', 'uk', 'singapore', 'uae', 'india', 'japan', 'who', 'za', 'brazil'];
 }
 
 /**
- * Validate if a guideline is supported
+ * Validate if a guideline is supported (case-insensitive)
  */
 export function isValidEERGuideline(guideline: string): boolean {
-  return getAvailableEERGuidelines().includes(guideline);
+  if (!guideline) return false;
+  return getAvailableEERGuidelines().includes(guideline.toLowerCase());
+}
+
+/**
+ * Normalize country value to lowercase
+ * @param country - Country value to normalize
+ * @returns Lowercase country value
+ */
+export function normalizeCountry(country: string): string {
+  if (!country || typeof country !== 'string') {
+    return 'usa'; // Default fallback
+  }
+  return country.toLowerCase().trim();
+}
+
+/**
+ * Get country mapping for a given country name
+ * @param countryName - Country name to look up
+ * @returns Mapped country code or the original name in lowercase
+ */
+export function getCountryMapping(countryName: string): string {
+  const normalized = normalizeCountry(countryName);
+  
+  // Check if we have a direct mapping
+  if (COUNTRY_TO_EER_GUIDELINE[normalized]) {
+    return COUNTRY_TO_EER_GUIDELINE[normalized];
+  }
+  
+  // Check if any key contains the country name
+  for (const [key, value] of Object.entries(COUNTRY_TO_EER_GUIDELINE)) {
+    if (key.includes(normalized) || normalized.includes(key)) {
+      return value;
+    }
+  }
+  
+  // Return normalized name if no mapping found
+  return normalized;
 } 

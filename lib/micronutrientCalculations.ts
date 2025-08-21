@@ -1,7 +1,7 @@
 // Micronutrient calculation logic using database-driven guidelines
 
 import { supabase } from './supabase';
-import { getEERGuidelineFromLocation } from './locationMapping';
+import { getEERGuidelineFromLocation, normalizeCountry } from './locationMapping';
 
 export interface MicronutrientCalculationInput {
   location: string;
@@ -52,11 +52,11 @@ export async function calculateMicronutrients(
   input: MicronutrientCalculationInput
 ): Promise<MicronutrientCalculationResult> {
   try {
-    // Determine guideline from location
+    // Determine guideline from location (returns lowercase)
     const guideline = getEERGuidelineFromLocation(input.location);
     
-    // Only UK has complete micronutrient data, so default all other countries to UK
-    const effectiveGuideline = guideline === 'UK' ? 'UK' : 'UK';
+    // Only UK has complete micronutrient data, so default all other countries to uk
+    const effectiveGuideline = guideline === 'uk' ? 'uk' : 'uk';
     
     // Find the appropriate guideline entry for the age/gender combination
     // Prioritize records with complete vitamin A data over incomplete records

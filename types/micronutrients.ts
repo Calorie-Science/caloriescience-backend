@@ -124,7 +124,7 @@ export function getPrimaryValue(
   country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
   preferenceOrder?: string[]
 ): number | null {
-  if (country === 'UK' && isUKNutrient(nutrient)) {
+  if (country === 'uk' && isUKNutrient(nutrient)) {
     // Default UK preference: RNI > SUI > LRNI
     const order = preferenceOrder || ['rni', 'sui', 'lrni'];
     for (const field of order) {
@@ -133,7 +133,7 @@ export function getPrimaryValue(
         return value as number;
       }
     }
-  } else if ((country === 'US' || country === 'India') && (isUSNutrient(nutrient) || isIndiaNutrient(nutrient))) {
+  } else if ((country === 'us' || country === 'india') && (isUSNutrient(nutrient) || isIndiaNutrient(nutrient))) {
     // Default US/India preference: RDA > AI
     const order = preferenceOrder || ['rda', 'ai'];
     for (const field of order) {
@@ -142,7 +142,7 @@ export function getPrimaryValue(
         return value as number;
       }
     }
-  } else if (country === 'EU' && isEUNutrient(nutrient)) {
+  } else if (country === 'eu' && isEUNutrient(nutrient)) {
     // Default EU preference: PRI > AI > AR > Safe Adequate
     const order = preferenceOrder || ['pri', 'ai', 'ar', 'safe_adequate'];
     for (const field of order) {
@@ -151,7 +151,7 @@ export function getPrimaryValue(
         return value;
       }
     }
-  } else if (country === 'WHO' && isWHONutrient(nutrient)) {
+  } else if (country === 'who' && isWHONutrient(nutrient)) {
     // Default WHO preference: RNI > AI > EAR > LRNI
     const order = preferenceOrder || ['rni', 'ai', 'ear', 'lrni'];
     for (const field of order) {
@@ -169,13 +169,13 @@ export function getPrimaryValue(
  * Get the upper limit value based on country
  */
 export function getUpperLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): number | null {
-  if (country === 'UK' && isUKNutrient(nutrient)) {
+  if (country === 'uk' && isUKNutrient(nutrient)) {
     return nutrient.sui || null;
-  } else if ((country === 'US' || country === 'India') && (isUSNutrient(nutrient) || isIndiaNutrient(nutrient))) {
+  } else if ((country === 'us' || country === 'india') && (isUSNutrient(nutrient) || isIndiaNutrient(nutrient))) {
     return (nutrient as USNutrientValue | IndiaNutrientValue).ul || null;
-  } else if (country === 'EU' && isEUNutrient(nutrient)) {
+  } else if (country === 'eu' && isEUNutrient(nutrient)) {
     return nutrient.ul || null;
-  } else if (country === 'WHO' && isWHONutrient(nutrient)) {
+  } else if (country === 'who' && isWHONutrient(nutrient)) {
     return nutrient.ul || null;
   }
   return null;
@@ -185,12 +185,12 @@ export function getUpperLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'I
  * Get the lower safe limit (only for UK)
  */
 export function getLowerLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): number | null {
-  if (country === 'UK' && isUKNutrient(nutrient)) {
+  if (country === 'uk' && isUKNutrient(nutrient)) {
     return nutrient.lrni || null;
-  } else if (country === 'EU' && isEUNutrient(nutrient)) {
+  } else if (country === 'eu' && isEUNutrient(nutrient)) {
     // EU uses AR (Average Requirement) as a lower reference point
     return nutrient.ar || null;
-  } else if (country === 'WHO' && isWHONutrient(nutrient)) {
+  } else if (country === 'who' && isWHONutrient(nutrient)) {
     // WHO has LRNI (Lower Reference Nutrient Intake) or EAR
     return nutrient.lrni || nutrient.ear || null;
   }
@@ -212,22 +212,22 @@ export function formatNutrientValue(value: number | null, unit: string): string 
 export function getAllValues(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): Record<string, string> {
   const result: Record<string, string> = {};
   
-  if (country === 'UK' && isUKNutrient(nutrient)) {
+  if (country === 'uk' && isUKNutrient(nutrient)) {
     if (nutrient.rni !== null && nutrient.rni !== undefined) result['RNI'] = formatNutrientValue(nutrient.rni, nutrient.unit);
     if (nutrient.lrni !== null && nutrient.lrni !== undefined) result['LRNI'] = formatNutrientValue(nutrient.lrni, nutrient.unit);
     if (nutrient.sui !== null && nutrient.sui !== undefined) result['Safe Upper Intake'] = formatNutrientValue(nutrient.sui, nutrient.unit);
-  } else if ((country === 'US' || country === 'India')) {
+  } else if ((country === 'us' || country === 'india')) {
     const usIndiaValue = nutrient as USNutrientValue | IndiaNutrientValue;
     if (usIndiaValue.rda !== null && usIndiaValue.rda !== undefined) result['RDA'] = formatNutrientValue(usIndiaValue.rda, usIndiaValue.unit);
     if (usIndiaValue.ai !== null && usIndiaValue.ai !== undefined) result['AI'] = formatNutrientValue(usIndiaValue.ai, usIndiaValue.unit);
     if (usIndiaValue.ul !== null && usIndiaValue.ul !== undefined) result['UL'] = formatNutrientValue(usIndiaValue.ul, usIndiaValue.unit);
-  } else if (country === 'EU' && isEUNutrient(nutrient)) {
+  } else if (country === 'eu' && isEUNutrient(nutrient)) {
     if (nutrient.ar !== null && nutrient.ar !== undefined) result['AR'] = formatNutrientValue(nutrient.ar, nutrient.unit);
     if (nutrient.pri !== null && nutrient.pri !== undefined) result['PRI'] = formatNutrientValue(nutrient.pri, nutrient.unit);
     if (nutrient.ai !== null && nutrient.ai !== undefined) result['AI'] = formatNutrientValue(nutrient.ai, nutrient.unit);
     if (nutrient.ul !== null && nutrient.ul !== undefined) result['UL'] = formatNutrientValue(nutrient.ul, nutrient.unit);
     if (nutrient.safe_adequate !== null && nutrient.safe_adequate !== undefined) result['Safe & Adequate'] = formatNutrientValue(nutrient.safe_adequate, nutrient.unit);
-  } else if (country === 'WHO' && isWHONutrient(nutrient)) {
+  } else if (country === 'who' && isWHONutrient(nutrient)) {
     if (nutrient.ear !== null && nutrient.ear !== undefined) result['EAR'] = formatNutrientValue(nutrient.ear, nutrient.unit);
     if (nutrient.rni !== null && nutrient.rni !== undefined) result['RNI'] = formatNutrientValue(nutrient.rni, nutrient.unit);
     if (nutrient.ai !== null && nutrient.ai !== undefined) result['AI'] = formatNutrientValue(nutrient.ai, nutrient.unit);

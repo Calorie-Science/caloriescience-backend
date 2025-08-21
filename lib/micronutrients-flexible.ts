@@ -379,19 +379,19 @@ export class FlexibleMicronutrientService {
    */
   private updatePrimaryValue(
     nutrient: NutrientValue,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     newValue: number
   ): void {
-    if (country === 'UK') {
+    if (country === 'uk') {
       (nutrient as any).rni = newValue;
-    } else if (country === 'EU') {
+    } else if (country === 'eu') {
       // For EU, update PRI if it exists, otherwise AI
       if ('pri' in nutrient && nutrient.pri !== null && nutrient.pri !== undefined) {
         (nutrient as any).pri = newValue;
       } else if ('ai' in nutrient) {
         (nutrient as any).ai = newValue;
       }
-    } else if (country === 'WHO') {
+    } else if (country === 'who') {
       // For WHO, update RNI if it exists, otherwise AI
       if ('rni' in nutrient && nutrient.rni !== null && nutrient.rni !== undefined) {
         (nutrient as any).rni = newValue;
@@ -567,7 +567,7 @@ export class FlexibleMicronutrientService {
       let status: 'deficient' | 'low' | 'adequate' | 'high' | 'excessive';
       const percentage = required ? (intake / required) * 100 : 0;
 
-      if (requirements.country_guideline === 'UK' && lowerLimit) {
+      if (requirements.country_guideline === 'uk' && lowerLimit) {
         // UK has LRNI
         if (intake < lowerLimit) {
           status = 'deficient';
