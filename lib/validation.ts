@@ -108,48 +108,57 @@ export const clientSchema = Joi.object({
   // Macros data - optional for client creation
   macrosData: Joi.object({
     Protein: Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     Carbohydrates: Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     'Total Fat': Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     Fiber: Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     'Saturated Fat': Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     'Monounsaturated Fat': Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     'Polyunsaturated Fat': Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     'Omega-3 Fatty Acids': Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional(),
     Cholesterol: Joi.object({
-      min_grams: Joi.number().allow(null).optional(),
-      max_grams: Joi.number().allow(null).optional(),
+      min: Joi.number().allow(null).optional(),
+      max: Joi.number().allow(null).optional(),
+      unit: Joi.string().optional(),
       note: Joi.string().optional()
     }).optional()
   }).optional(),

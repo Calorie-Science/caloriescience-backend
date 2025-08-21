@@ -83,48 +83,57 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Macros Ranges
         macrosRanges: nutritionReq ? {
           protein: {
-            minGrams: nutritionReq.protein_min_grams,
-            maxGrams: nutritionReq.protein_max_grams,
+            min: nutritionReq.protein_min_grams,
+            max: nutritionReq.protein_max_grams,
+            unit: 'g',
             note: nutritionReq.protein_note
           },
           carbs: {
-            minGrams: nutritionReq.carbs_min_grams,
-            maxGrams: nutritionReq.carbs_max_grams,
+            min: nutritionReq.carbs_min_grams,
+            max: nutritionReq.carbs_max_grams,
+            unit: 'g',
             note: nutritionReq.carbs_note
           },
           fat: {
-            minGrams: nutritionReq.fat_min_grams,
-            maxGrams: nutritionReq.fat_max_grams,
+            min: nutritionReq.fat_min_grams,
+            max: nutritionReq.fat_max_grams,
+            unit: 'g',
             note: nutritionReq.fat_note
           },
           fiber: {
-            minGrams: nutritionReq.fiber_min_grams,
-            maxGrams: nutritionReq.fiber_max_grams,
+            min: nutritionReq.fiber_min_grams,
+            max: nutritionReq.fiber_max_grams,
+            unit: 'g',
             note: nutritionReq.fiber_note
           },
           saturatedFat: {
-            minGrams: nutritionReq.saturated_fat_min_grams,
-            maxGrams: nutritionReq.saturated_fat_max_grams,
+            min: nutritionReq.saturated_fat_min_grams,
+            max: nutritionReq.saturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.saturated_fat_note
           },
           monounsaturatedFat: {
-            minGrams: nutritionReq.monounsaturated_fat_min_grams,
-            maxGrams: nutritionReq.monounsaturated_fat_max_grams,
+            min: nutritionReq.monounsaturated_fat_min_grams,
+            max: nutritionReq.monounsaturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.monounsaturated_fat_note
           },
           polyunsaturatedFat: {
-            minGrams: nutritionReq.polyunsaturated_fat_min_grams,
-            maxGrams: nutritionReq.polyunsaturated_fat_max_grams,
+            min: nutritionReq.polyunsaturated_fat_min_grams,
+            max: nutritionReq.polyunsaturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.polyunsaturated_fat_note
           },
           omega3: {
-            minGrams: nutritionReq.omega3_min_grams,
-            maxGrams: nutritionReq.omega3_max_grams,
+            min: nutritionReq.omega3_min_grams,
+            max: nutritionReq.omega3_max_grams,
+            unit: 'g',
             note: nutritionReq.omega3_note
           },
           cholesterol: {
-            minGrams: nutritionReq.cholesterol_min_grams,
-            maxGrams: nutritionReq.cholesterol_max_grams,
+            min: nutritionReq.cholesterol_min_grams,
+            max: nutritionReq.cholesterol_max_grams,
+            unit: 'mg',
             note: nutritionReq.cholesterol_note
           }
         } : null,
@@ -312,10 +321,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           };
 
           // Extract macro values and ranges
-          const proteinGrams = macros.Protein ? calculateAverage(macros.Protein.min_grams, macros.Protein.max_grams) : 0;
-          const carbsGrams = macros.Carbohydrates ? calculateAverage(macros.Carbohydrates.min_grams, macros.Carbohydrates.max_grams) : 0;
-          const fatGrams = macros['Total Fat'] ? calculateAverage(macros['Total Fat'].min_grams, macros['Total Fat'].max_grams) : 0;
-          const fiberGrams = macros.Fiber ? calculateAverage(macros.Fiber.min_grams, macros.Fiber.max_grams) : 0;
+          const proteinGrams = macros.Protein ? calculateAverage(macros.Protein.min, macros.Protein.max) : 0;
+          const carbsGrams = macros.Carbohydrates ? calculateAverage(macros.Carbohydrates.min, macros.Carbohydrates.max) : 0;
+          const fatGrams = macros['Total Fat'] ? calculateAverage(macros['Total Fat'].min, macros['Total Fat'].max) : 0;
+          const fiberGrams = macros.Fiber ? calculateAverage(macros.Fiber.min, macros.Fiber.max) : 0;
 
           // Calculate percentages
           const proteinPercentage = eerValue > 0 ? (proteinGrams * 4 / eerValue) * 100 : 0;
@@ -336,48 +345,48 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
             // Min/Max ranges from AI recommendations
             // Protein
-            protein_min_grams: macros.Protein?.min_grams || null,
-            protein_max_grams: macros.Protein?.max_grams || null,
+            protein_min_grams: macros.Protein?.min || null,
+            protein_max_grams: macros.Protein?.max || null,
             protein_note: macros.Protein?.note || null,
 
             // Carbohydrates  
-            carbs_min_grams: macros.Carbohydrates?.min_grams || null,
-            carbs_max_grams: macros.Carbohydrates?.max_grams || null,
+            carbs_min_grams: macros.Carbohydrates?.min || null,
+            carbs_max_grams: macros.Carbohydrates?.max || null,
             carbs_note: macros.Carbohydrates?.note || null,
 
             // Total Fat
-            fat_min_grams: macros['Total Fat']?.min_grams || null,
-            fat_max_grams: macros['Total Fat']?.max_grams || null,
+            fat_min_grams: macros['Total Fat']?.min || null,
+            fat_max_grams: macros['Total Fat']?.max || null,
             fat_note: macros['Total Fat']?.note || null,
 
             // Fiber
-            fiber_min_grams: macros.Fiber?.min_grams || null,
-            fiber_max_grams: macros.Fiber?.max_grams || null,
+            fiber_min_grams: macros.Fiber?.min || null,
+            fiber_max_grams: macros.Fiber?.max || null,
             fiber_note: macros.Fiber?.note || null,
 
             // Saturated Fat
-            saturated_fat_min_grams: macros['Saturated Fat']?.min_grams || null,
-            saturated_fat_max_grams: macros['Saturated Fat']?.max_grams || null,
+            saturated_fat_min_grams: macros['Saturated Fat']?.min || null,
+            saturated_fat_max_grams: macros['Saturated Fat']?.max || null,
             saturated_fat_note: macros['Saturated Fat']?.note || null,
 
             // Monounsaturated Fat
-            monounsaturated_fat_min_grams: macros['Monounsaturated Fat']?.min_grams || null,
-            monounsaturated_fat_max_grams: macros['Monounsaturated Fat']?.max_grams || null,
+            monounsaturated_fat_min_grams: macros['Monounsaturated Fat']?.min || null,
+            monounsaturated_fat_max_grams: macros['Monounsaturated Fat']?.max || null,
             monounsaturated_fat_note: macros['Monounsaturated Fat']?.note || null,
 
             // Polyunsaturated Fat
-            polyunsaturated_fat_min_grams: macros['Polyunsaturated Fat']?.min_grams || null,
-            polyunsaturated_fat_max_grams: macros['Polyunsaturated Fat']?.max_grams || null,
+            polyunsaturated_fat_min_grams: macros['Polyunsaturated Fat']?.min || null,
+            polyunsaturated_fat_max_grams: macros['Polyunsaturated Fat']?.max || null,
             polyunsaturated_fat_note: macros['Polyunsaturated Fat']?.note || null,
 
             // Omega-3 Fatty Acids
-            omega3_min_grams: macros['Omega-3 Fatty Acids']?.min_grams || null,
-            omega3_max_grams: macros['Omega-3 Fatty Acids']?.max_grams || null,
+            omega3_min_grams: macros['Omega-3 Fatty Acids']?.min || null,
+            omega3_max_grams: macros['Omega-3 Fatty Acids']?.max || null,
             omega3_note: macros['Omega-3 Fatty Acids']?.note || null,
 
             // Cholesterol
-            cholesterol_min_grams: macros.Cholesterol?.min_grams || null,
-            cholesterol_max_grams: macros.Cholesterol?.max_grams || null,
+            cholesterol_min_grams: macros.Cholesterol?.min || null,
+            cholesterol_max_grams: macros.Cholesterol?.max || null,
             cholesterol_note: macros.Cholesterol?.note || null
           };
         } else {
@@ -547,48 +556,57 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Macros Ranges
         macrosRanges: nutritionReq ? {
           protein: {
-            minGrams: nutritionReq.protein_min_grams,
-            maxGrams: nutritionReq.protein_max_grams,
+            min: nutritionReq.protein_min_grams,
+            max: nutritionReq.protein_max_grams,
+            unit: 'g',
             note: nutritionReq.protein_note
           },
           carbs: {
-            minGrams: nutritionReq.carbs_min_grams,
-            maxGrams: nutritionReq.carbs_max_grams,
+            min: nutritionReq.carbs_min_grams,
+            max: nutritionReq.carbs_max_grams,
+            unit: 'g',
             note: nutritionReq.carbs_note
           },
           fat: {
-            minGrams: nutritionReq.fat_min_grams,
-            maxGrams: nutritionReq.fat_max_grams,
+            min: nutritionReq.fat_min_grams,
+            max: nutritionReq.fat_max_grams,
+            unit: 'g',
             note: nutritionReq.fat_note
           },
           fiber: {
-            minGrams: nutritionReq.fiber_min_grams,
-            maxGrams: nutritionReq.fiber_max_grams,
+            min: nutritionReq.fiber_min_grams,
+            max: nutritionReq.fiber_max_grams,
+            unit: 'g',
             note: nutritionReq.fiber_note
           },
           saturatedFat: {
-            minGrams: nutritionReq.saturated_fat_min_grams,
-            maxGrams: nutritionReq.saturated_fat_max_grams,
+            min: nutritionReq.saturated_fat_min_grams,
+            max: nutritionReq.saturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.saturated_fat_note
           },
           monounsaturatedFat: {
-            minGrams: nutritionReq.monounsaturated_fat_min_grams,
-            maxGrams: nutritionReq.monounsaturated_fat_max_grams,
+            min: nutritionReq.monounsaturated_fat_min_grams,
+            max: nutritionReq.monounsaturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.monounsaturated_fat_note
           },
           polyunsaturatedFat: {
-            minGrams: nutritionReq.polyunsaturated_fat_min_grams,
-            maxGrams: nutritionReq.polyunsaturated_fat_max_grams,
+            min: nutritionReq.polyunsaturated_fat_min_grams,
+            max: nutritionReq.polyunsaturated_fat_max_grams,
+            unit: 'g',
             note: nutritionReq.polyunsaturated_fat_note
           },
           omega3: {
-            minGrams: nutritionReq.omega3_min_grams,
-            maxGrams: nutritionReq.omega3_max_grams,
+            min: nutritionReq.omega3_min_grams,
+            max: nutritionReq.omega3_max_grams,
+            unit: 'g',
             note: nutritionReq.omega3_note
           },
           cholesterol: {
-            minGrams: nutritionReq.cholesterol_min_grams,
-            maxGrams: nutritionReq.cholesterol_max_grams,
+            min: nutritionReq.cholesterol_min_grams,
+            max: nutritionReq.cholesterol_max_grams,
+            unit: 'mg',
             note: nutritionReq.cholesterol_note
           }
         } : null,

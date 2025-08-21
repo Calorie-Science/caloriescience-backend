@@ -373,8 +373,9 @@ export interface MacrosCalculationInput {
 // Interface for macros calculation result
 export interface MacrosCalculationResult {
   [nutrient: string]: {
-    min_grams: number | null;
-    max_grams: number | null;
+    min: number | null;
+    max: number | null;
+    unit: string;
     note: string;
   };
 }
