@@ -23,26 +23,33 @@ const MINERAL_KEYS = [
 /**
  * Categorize micronutrients into vitamins, minerals, and miscellaneous
  * @param micronutrients - Raw micronutrient data from database
+ * @param convertToCamelCase - Whether to convert keys to camelCase for API responses
  * @returns Categorized micronutrients object
  */
-export function categorizeMicronutrients(micronutrients: Record<string, any>): CategorizedMicronutrients {
+export function categorizeMicronutrients(micronutrients: Record<string, any>, convertToCamelCase: boolean = false): CategorizedMicronutrients {
   const categorized: CategorizedMicronutrients = {
     vitamins: {},
     minerals: {},
     miscellaneous: {}
   };
 
+  // Helper function to convert snake_case to camelCase
+  const toCamelCase = (str: string): string => {
+    return str.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
+  };
+
   // Process each micronutrient
   Object.entries(micronutrients).forEach(([key, value]) => {
     const normalizedKey = key.toLowerCase();
+    const outputKey = convertToCamelCase ? toCamelCase(key) : key;
     
     if (VITAMIN_KEYS.includes(normalizedKey)) {
-      categorized.vitamins[key] = value;
+      categorized.vitamins[outputKey] = value;
     } else if (MINERAL_KEYS.includes(normalizedKey)) {
-      categorized.minerals[key] = value;
+      categorized.minerals[outputKey] = value;
     } else {
       // Any other micronutrients go to miscellaneous
-      categorized.miscellaneous[key] = value;
+      categorized.miscellaneous[outputKey] = value;
     }
   });
 

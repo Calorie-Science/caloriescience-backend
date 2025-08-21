@@ -97,11 +97,14 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   const roundedAge = Math.round(age);
   console.log(`🔢 Age rounding: ${age} → ${roundedAge} for database query`);
 
+  // Normalize country to title case (e.g., 'india' → 'India')
+  const normalizedCountry = country ? country.charAt(0).toUpperCase() + country.slice(1).toLowerCase() : 'USA'; // Fallback to USA if no country
+
   // 1. Get EER formula
   const { data: formulas, error: formulaError } = await supabase
     .from('eer_formulas')
     .select('*')
-    .eq('country', country)
+    .eq('country', normalizedCountry)  // Use normalized country
     .eq('gender', gender)
     .lte('age_min', roundedAge)  // age_min <= roundedAge
     .gte('age_max', roundedAge)  // age_max >= roundedAge
@@ -118,7 +121,7 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   const { data: palData, error: palError } = await supabase
     .from('pal_values')
     .select('pal_value')
-    .eq('country', country)
+    .eq('country', normalizedCountry)  // Use normalized country
     .eq('activity_level', activity_level)
     .single();
 

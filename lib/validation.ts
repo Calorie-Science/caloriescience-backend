@@ -195,6 +195,68 @@ export const clientSchema = Joi.object({
   }).optional()
 });
 
+// Client update validation - Makes firstName optional for partial updates
+export const clientUpdateSchema = Joi.object({
+  firstName: Joi.string().min(1).max(100).optional()
+    .messages({
+      'string.min': 'First name must be at least 1 character',
+      'string.max': 'First name cannot exceed 100 characters'
+    }),
+  lastName: Joi.string().max(100).optional().allow('')
+    .messages({
+      'string.max': 'Last name cannot exceed 100 characters'
+    }),
+  email: Joi.string().email().optional(),
+  phone: Joi.string().pattern(/^[0-9+\-\s\(\)\.]+$/).min(7).max(20).optional()
+    .messages({
+      'string.pattern.base': 'Phone number can only contain numbers, spaces, hyphens, parentheses, plus signs, and dots',
+      'string.min': 'Phone number must be at least 7 characters',
+      'string.max': 'Phone number cannot exceed 20 characters'
+    }),
+  phoneCountryCode: Joi.string().pattern(/^\+[1-9][0-9]{0,3}$/).optional().default('+1')
+    .messages({
+      'string.pattern.base': 'Country code must start with + followed by 1-4 digits (e.g., +1, +44, +91)'
+    }),
+  // Keep full_name for backward compatibility (will be deprecated)
+  fullName: Joi.string().min(2).max(255).optional()
+    .messages({
+      'string.min': 'Full name must be at least 2 characters',
+      'string.max': 'Full name cannot exceed 255 characters'
+    }),
+  dateOfBirth: Joi.date().max('now').optional(),
+  gender: Joi.string().valid('male', 'female', 'other').optional(),
+  location: Joi.string().max(255).optional()
+    .messages({
+      'string.max': 'Location cannot exceed 255 characters'
+    }),
+  pregnancyStatus: Joi.string().valid('not_pregnant', 'first_trimester', 'second_trimester', 'third_trimester').optional().default('not_pregnant')
+    .messages({
+      'any.only': 'Pregnancy status must be one of: not_pregnant, first_trimester, second_trimester, third_trimester'
+    }),
+  lactationStatus: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating')
+    .messages({
+      'any.only': 'Lactation status must be one of: not_lactating, lactating_0_6_months, lactating_7_12_months'
+    }),
+  heightCm: Joi.number().min(50).max(300).optional(),
+  weightKg: Joi.number().min(20).max(500).optional(),
+  activityLevel: Joi.string().valid('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active').optional(),
+  medicalConditions: Joi.array().items(Joi.string()).optional(),
+  allergies: Joi.array().items(Joi.string()).optional(),
+  medications: Joi.array().items(Joi.string()).optional(),
+  dietaryPreferences: Joi.array().items(Joi.string()).optional(),
+  healthGoals: Joi.array().items(Joi.string()).optional(),
+  targetWeightKg: Joi.number().min(20).max(500).optional(),
+  // EER-related fields that can be passed from EER calculation API
+  bmi: Joi.number().min(10).max(100).optional(),
+  bmiCategory: Joi.string().valid('underweight', 'normal', 'overweight', 'obese_class_1', 'obese_class_2', 'obese_class_3').optional(),
+  bmr: Joi.number().min(500).max(5000).optional(),
+  // Status and management fields
+  status: Joi.string().valid('prospective', 'active', 'inactive', 'archived').optional(),
+  source: Joi.string().max(100).optional(),
+  notes: Joi.string().optional(),
+  preferredContactMethod: Joi.string().valid('email', 'phone', 'sms').optional().default('email')
+});
+
 // EER calculation validation - Updated for OpenAI Assistant
 export const eerCalculationSchema = Joi.object({
   clientId: Joi.string().uuid().required(),
@@ -230,7 +292,7 @@ export function validateBody(schema: Joi.ObjectSchema, body: any) {
 
 // Helper function to validate and transform client data
 export function validateAndTransformClient(body: any) {
-  const validation = validateBody(clientSchema, body);
+  const validation = validateBody(clientUpdateSchema, body);
   
   if (!validation.isValid) {
     return validation;
