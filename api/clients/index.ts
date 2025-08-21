@@ -9,6 +9,7 @@ import { calculateEER, calculateMacros } from '../../lib/calculations';
 import { calculateMicronutrients } from '../../lib/micronutrientCalculations';
 import { FlexibleMicronutrientService } from '../../lib/micronutrients-flexible';
 import { getGuidelineFromLocation } from '../../lib/clientMicronutrientHelpers';
+import { categorizeMicronutrients } from '../../lib/micronutrientCategorization';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method === 'GET') {
@@ -393,56 +394,84 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Extract macros from the provided data
         const macros = macrosData;
         
-        const macroUpdateData = {
-          // Protein
-          protein_min_grams: macros.Protein?.min || null,
-          protein_max_grams: macros.Protein?.max || null,
-          protein_note: macros.Protein?.note || null,
-          
-          // Carbohydrates
-          carbs_min_grams: macros.Carbohydrates?.min || null,
-          carbs_max_grams: macros.Carbohydrates?.max || null,
-          carbs_note: macros.Carbohydrates?.note || null,
-          
-          // Total Fat
-          fat_min_grams: macros['Total Fat']?.min || null,
-          fat_max_grams: macros['Total Fat']?.max || null,
-          fat_note: macros['Total Fat']?.note || null,
-          
-          // Fiber
-          fiber_min_grams: macros.Fiber?.min || null,
-          fiber_max_grams: macros.Fiber?.max || null,
-          fiber_note: macros.Fiber?.note || null,
-          
-          // Saturated Fat
-          saturated_fat_min_grams: macros['Saturated Fat']?.min || null,
-          saturated_fat_max_grams: macros['Saturated Fat']?.max || null,
-          saturated_fat_note: macros['Saturated Fat']?.note || null,
-          
-          // Monounsaturated Fat
-          monounsaturated_fat_min_grams: macros['Monounsaturated Fat']?.min || null,
-          monounsaturated_fat_max_grams: macros['Monounsaturated Fat']?.max || null,
-          monounsaturated_fat_note: macros['Monounsaturated Fat']?.note || null,
-          
-          // Polyunsaturated Fat
-          polyunsaturated_fat_min_grams: macros['Polyunsaturated Fat']?.min || null,
-          polyunsaturated_fat_max_grams: macros['Polyunsaturated Fat']?.max || null,
-          polyunsaturated_fat_note: macros['Polyunsaturated Fat']?.note || null,
-          
-          // Omega-3 Fatty Acids
-          omega3_min_grams: macros['Omega-3 Fatty Acids']?.min || null,
-          omega3_max_grams: macros['Omega-3 Fatty Acids']?.max || null,
-          omega3_note: macros['Omega-3 Fatty Acids']?.note || null,
-          
-          // Cholesterol
-          cholesterol_min_grams: macros.Cholesterol?.min || null,
-          cholesterol_max_grams: macros.Cholesterol?.max || null,
-          cholesterol_note: macros.Cholesterol?.note || null,
-          
-          calculation_method: 'formula_based',
-          is_ai_generated: false,
+        // First, get the current nutrition requirements to preserve existing values
+        const { data: currentNutrition } = await supabase
+          .from('client_nutrition_requirements')
+          .select('*')
+          .eq('client_id', client.id)
+          .eq('is_active', true)
+          .single();
+        
+        // Create update data that only includes provided macros, preserving existing values
+        const macroUpdateData: any = {
           updated_at: new Date().toISOString()
         };
+        
+        // Only update macros that are actually provided in the request
+        if (macros.Protein) {
+          macroUpdateData.protein_min_grams = macros.Protein.min;
+          macroUpdateData.protein_max_grams = macros.Protein.max;
+          macroUpdateData.protein_note = macros.Protein.note;
+          console.log('Updating Protein macros:', macros.Protein);
+        }
+        
+        if (macros.Carbohydrates) {
+          macroUpdateData.carbs_min_grams = macros.Carbohydrates.min;
+          macroUpdateData.carbs_max_grams = macros.Carbohydrates.max;
+          macroUpdateData.carbs_note = macros.Carbohydrates.note;
+          console.log('Updating Carbohydrates macros:', macros.Carbohydrates);
+        }
+        
+        if (macros['Total Fat']) {
+          macroUpdateData.fat_min_grams = macros['Total Fat'].min;
+          macroUpdateData.fat_max_grams = macros['Total Fat'].max;
+          macroUpdateData.fat_note = macros['Total Fat'].note;
+          console.log('Updating Total Fat macros:', macros['Total Fat']);
+        }
+        
+        if (macros.Fiber) {
+          macroUpdateData.fiber_min_grams = macros.Fiber.min;
+          macroUpdateData.fiber_max_grams = macros.Fiber.max;
+          macroUpdateData.fiber_note = macros.Fiber.note;
+          console.log('Updating Fiber macros:', macros.Fiber);
+        }
+        
+        if (macros['Saturated Fat']) {
+          macroUpdateData.saturated_fat_min_grams = macros['Saturated Fat'].min;
+          macroUpdateData.saturated_fat_max_grams = macros['Saturated Fat'].max;
+          macroUpdateData.saturated_fat_note = macros['Saturated Fat'].note;
+          console.log('Updating Saturated Fat macros:', macros['Saturated Fat']);
+        }
+        
+        if (macros['Monounsaturated Fat']) {
+          macroUpdateData.monounsaturated_fat_min_grams = macros['Monounsaturated Fat'].min;
+          macroUpdateData.monounsaturated_fat_max_grams = macros['Monounsaturated Fat'].max;
+          macroUpdateData.monounsaturated_fat_note = macros['Monounsaturated Fat'].note;
+          console.log('Updating Monounsaturated Fat macros:', macros['Monounsaturated Fat']);
+        }
+        
+        if (macros['Polyunsaturated Fat']) {
+          macroUpdateData.polyunsaturated_fat_min_grams = macros['Polyunsaturated Fat'].min;
+          macroUpdateData.polyunsaturated_fat_max_grams = macros['Polyunsaturated Fat'].max;
+          macroUpdateData.polyunsaturated_fat_note = macros['Polyunsaturated Fat'].note;
+          console.log('Updating Polyunsaturated Fat macros:', macros['Polyunsaturated Fat']);
+        }
+        
+        if (macros['Omega-3 Fatty Acids']) {
+          macroUpdateData.omega3_min_grams = macros['Omega-3 Fatty Acids'].min;
+          macroUpdateData.omega3_max_grams = macros['Omega-3 Fatty Acids'].max;
+          macroUpdateData.omega3_note = macros['Omega-3 Fatty Acids'].note;
+          console.log('Updating Omega-3 Fatty Acids macros:', macros['Omega-3 Fatty Acids']);
+        }
+        
+        if (macros.Cholesterol) {
+          macroUpdateData.cholesterol_min_grams = macros.Cholesterol.min;
+          macroUpdateData.cholesterol_max_grams = macros.Cholesterol.max;
+          macroUpdateData.cholesterol_note = macros.Cholesterol.note;
+          console.log('Updating Cholesterol macros:', macros.Cholesterol);
+        }
+        
+        console.log('Macro update data (only provided fields):', macroUpdateData);
 
         const { error: macroError } = await supabase
           .from('client_nutrition_requirements')
@@ -455,45 +484,170 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       }
 
-      // If micronutrient data is provided, create micronutrient requirements record
+      // If micronutrient data is provided, update micronutrient requirements record
       if (micronutrientsData && micronutrientsData.micronutrients) {
-        // Use flexible micronutrient service for manual micronutrient data
-        const flexibleMicroService = new FlexibleMicronutrientService(supabase);
+        const micronutrients = micronutrientsData.micronutrients;
         
-        // Determine country based on location using proper mapping
-        const locationGuideline = getGuidelineFromLocation(validation.value.location);
-        const country = locationGuideline.country;
+        // First, get the current micronutrient requirements to preserve existing values
+        const { data: currentMicroReq } = await supabase
+          .from('client_micronutrient_requirements_flexible')
+          .select('*')
+          .eq('client_id', client.id)
+          .eq('is_active', true)
+          .single();
         
-        // Calculate age if not already calculated
-        let age = 30; // Default age if date of birth not provided
-        if (validation.value.date_of_birth) {
-          const birthDate = new Date(validation.value.date_of_birth);
-          const today = new Date();
-          age = today.getFullYear() - birthDate.getFullYear() - 
-            (today.getMonth() < birthDate.getMonth() || 
-            (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate()) ? 1 : 0);
-        }
-        
-        // Prepare adjustment factors
-        const adjustmentFactors = {
-          pregnancy: validation.value.pregnancy_status !== 'not_pregnant',
-          lactation: validation.value.lactation_status !== 'not_lactating',
-          activityLevel: validation.value.activity_level,
-          healthConditions: validation.value.medical_conditions
+        // Create update data that only includes provided micronutrients, preserving existing values
+        const microUpdateData: any = {
+          updated_at: new Date().toISOString()
         };
         
-        const flexibleMicroReq = await flexibleMicroService.calculateClientRequirements(
-          client.id,
-          country as 'UK' | 'US' | 'India',
-          validation.value.gender || 'male',
-          age,
-          adjustmentFactors
-        );
+        // Only update micronutrients that are actually provided in the request
+        if (micronutrients.vitaminA) {
+          microUpdateData.vitamin_a_mcg = micronutrients.vitaminA.amount;
+          console.log('Updating Vitamin A:', micronutrients.vitaminA);
+        }
         
-        if (flexibleMicroReq) {
-          const savedMicroReq = await flexibleMicroService.saveClientRequirements(flexibleMicroReq);
-          if (!savedMicroReq) {
-            console.warn('Failed to save flexible micronutrient requirements');
+        if (micronutrients.thiamin) {
+          microUpdateData.thiamin_mg = micronutrients.thiamin.amount;
+          console.log('Updating Thiamin:', micronutrients.thiamin);
+        }
+        
+        if (micronutrients.riboflavin) {
+          microUpdateData.riboflavin_mg = micronutrients.riboflavin.amount;
+          console.log('Updating Riboflavin:', micronutrients.riboflavin);
+        }
+        
+        if (micronutrients.niacinEquivalent) {
+          microUpdateData.niacin_equivalent_mg = micronutrients.niacinEquivalent.amount;
+          console.log('Updating Niacin Equivalent:', micronutrients.niacinEquivalent);
+        }
+        
+        if (micronutrients.pantothenicAcid) {
+          microUpdateData.pantothenic_acid_mg = micronutrients.pantothenicAcid.amount;
+          console.log('Updating Pantothenic Acid:', micronutrients.pantothenicAcid);
+        }
+        
+        if (micronutrients.vitaminB6) {
+          microUpdateData.vitamin_b6_mg = micronutrients.vitaminB6.amount;
+          console.log('Updating Vitamin B6:', micronutrients.vitaminB6);
+        }
+        
+        if (micronutrients.biotin) {
+          microUpdateData.biotin_mcg = micronutrients.biotin.amount;
+          console.log('Updating Biotin:', micronutrients.biotin);
+        }
+        
+        if (micronutrients.vitaminB12) {
+          microUpdateData.vitamin_b12_mcg = micronutrients.vitaminB12.amount;
+          console.log('Updating Vitamin B12:', micronutrients.vitaminB12);
+        }
+        
+        if (micronutrients.folate) {
+          microUpdateData.folate_mcg = micronutrients.folate.amount;
+          console.log('Updating Folate:', micronutrients.folate);
+        }
+        
+        if (micronutrients.vitaminC) {
+          microUpdateData.vitamin_c_mg = micronutrients.vitaminC.amount;
+          console.log('Updating Vitamin C:', micronutrients.vitaminC);
+        }
+        
+        if (micronutrients.vitaminD) {
+          microUpdateData.vitamin_d_mcg = micronutrients.vitaminD.amount;
+          console.log('Updating Vitamin D:', micronutrients.vitaminD);
+        }
+        
+        if (micronutrients.iron) {
+          microUpdateData.iron_mg = micronutrients.iron.amount;
+          console.log('Updating Iron:', micronutrients.iron);
+        }
+        
+        if (micronutrients.calcium) {
+          microUpdateData.calcium_mg = micronutrients.calcium.amount;
+          console.log('Updating Calcium:', micronutrients.calcium);
+        }
+        
+        if (micronutrients.magnesium) {
+          microUpdateData.magnesium_mg = micronutrients.magnesium.amount;
+          console.log('Updating Magnesium:', micronutrients.magnesium);
+        }
+        
+        if (micronutrients.potassium) {
+          microUpdateData.potassium_mg = micronutrients.potassium.amount;
+          console.log('Updating Potassium:', micronutrients.potassium);
+        }
+        
+        if (micronutrients.zinc) {
+          microUpdateData.zinc_mg = micronutrients.zinc.amount;
+          console.log('Updating Zinc:', micronutrients.zinc);
+        }
+        
+        if (micronutrients.copper) {
+          microUpdateData.copper_mg = micronutrients.copper.amount;
+          console.log('Updating Copper:', micronutrients.copper);
+        }
+        
+        if (micronutrients.iodine) {
+          microUpdateData.iodine_mcg = micronutrients.iodine.amount;
+          console.log('Updating Iodine:', micronutrients.iodine);
+        }
+        
+        if (micronutrients.selenium) {
+          microUpdateData.selenium_mcg = micronutrients.selenium.amount;
+          console.log('Updating Selenium:', micronutrients.selenium);
+        }
+        
+        if (micronutrients.phosphorus) {
+          microUpdateData.phosphorus_mg = micronutrients.phosphorus.amount;
+          console.log('Updating Phosphorus:', micronutrients.phosphorus);
+        }
+        
+        if (micronutrients.chloride) {
+          microUpdateData.chloride_mg = micronutrients.chloride.amount;
+          console.log('Updating Chloride:', micronutrients.chloride);
+        }
+        
+        if (micronutrients.sodium) {
+          microUpdateData.sodium_g = micronutrients.sodium.amount;
+          console.log('Updating Sodium:', micronutrients.sodium);
+        }
+        
+        console.log('Micronutrient update data (only provided fields):', microUpdateData);
+        
+        // If we have micronutrients to update and there's an existing record, update it
+        if (Object.keys(microUpdateData).length > 1 && currentMicroReq) { // > 1 because updated_at is always included
+          const { error: microUpdateError } = await supabase
+            .from('client_micronutrient_requirements_flexible')
+            .update(microUpdateData)
+            .eq('id', currentMicroReq.id);
+          
+          if (microUpdateError) {
+            console.warn('Failed to update micronutrient requirements:', microUpdateError);
+          } else {
+            console.log('Successfully updated micronutrient requirements');
+          }
+        } else if (Object.keys(microUpdateData).length > 1) {
+          // If no existing record, create a new one with the provided micronutrients
+          const newMicroData = {
+            client_id: client.id,
+            country_guideline: micronutrientsData.guidelineUsed || 'UK',
+            guideline_type: 'manual',
+            calculation_method: 'manual',
+            is_ai_generated: false,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            ...microUpdateData
+          };
+          
+          const { error: microInsertError } = await supabase
+            .from('client_micronutrient_requirements_flexible')
+            .insert(newMicroData);
+          
+          if (microInsertError) {
+            console.warn('Failed to create micronutrient requirements:', microInsertError);
+          } else {
+            console.log('Successfully created micronutrient requirements');
           }
         }
       }
