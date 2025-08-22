@@ -221,8 +221,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         
         console.log(`📅 Age calculation: Birth date: ${birthDate.toISOString()}, Today: ${today.toISOString()}, Age: ${age} years (${ageInDays} days)`);
 
-        // Determine EER guideline from location
-        const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
+        // Normalize location and determine EER guideline from location
+        const normalizedLocation = validation.value.location?.trim();
+        const eerGuideline = getEERGuidelineFromLocation(normalizedLocation);
 
         try {
           // 1. Calculate EER
@@ -254,8 +255,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           const flexibleMicroService = new FlexibleMicronutrientService(supabase);
           
           // Determine country for micronutrients based on location
-          const locationGuideline = getGuidelineFromLocation(validation.value.location);
+          const locationGuideline = getGuidelineFromLocation(normalizedLocation);
           const micronutrientCountry = locationGuideline.country;
+          
+          console.log('🔍 Micronutrient calculation debug:', {
+            originalLocation: validation.value.location,
+            locationGuideline: locationGuideline,
+            micronutrientCountry: micronutrientCountry,
+            countryType: typeof micronutrientCountry
+          });
           
           // Prepare adjustment factors based on client data
           const adjustmentFactors = {
@@ -695,8 +703,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             
             console.log(`📅 Background age calculation: Birth date: ${birthDate.toISOString()}, Today: ${today.toISOString()}, Age: ${age} years (${ageInDays} days)`);
 
-            // Determine EER guideline from location
-            const eerGuideline = getEERGuidelineFromLocation(validation.value.location);
+            // Normalize location and determine EER guideline from location
+            const normalizedLocationBg = validation.value.location?.trim();
+            const eerGuideline = getEERGuidelineFromLocation(normalizedLocationBg);
 
             console.log(`Background: Starting calculations for client ${client.id}`);
 
@@ -729,8 +738,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             const flexibleMicroService = new FlexibleMicronutrientService(supabase);
             
             // Determine country for micronutrients based on location
-            const locationGuideline = getGuidelineFromLocation(validation.value.location);
+            const locationGuideline = getGuidelineFromLocation(normalizedLocationBg);
             const micronutrientCountry = locationGuideline.country;
+            
+            console.log('🔍 Micronutrient calculation debug:', {
+              originalLocation: validation.value.location,
+              locationGuideline: locationGuideline,
+              micronutrientCountry: micronutrientCountry,
+              countryType: typeof micronutrientCountry
+            });
             
             // Prepare adjustment factors based on client data
             const adjustmentFactors = {

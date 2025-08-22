@@ -29,7 +29,7 @@ export function extractCountryFromLocation(location: string | null | undefined):
  * @returns Object with guideline source and type
  */
 export function getGuidelineFromLocation(location: string | null | undefined): {
-  country: 'US' | 'EU' | 'UK' | 'India' | 'WHO';
+  country: 'us' | 'eu' | 'uk' | 'india' | 'who';
   guidelineType: 'US_DRI' | 'EFSA_DRV' | 'UK_COMA' | 'INDIA_ICMR' | 'WHO_FAO';
   extractedCountry: string | null;
 } {
@@ -38,7 +38,7 @@ export function getGuidelineFromLocation(location: string | null | undefined): {
   if (!extractedCountry) {
     // Default to WHO if no country can be extracted
     return {
-      country: 'WHO',
+      country: 'who',
       guidelineType: 'WHO_FAO',
       extractedCountry: null
     };
@@ -67,12 +67,16 @@ export function formatLocationWithGuideline(location: string | null | undefined)
   }
   
   const guidelineNames = {
-    'US': 'US DRI',
-    'EU': 'EFSA',
-    'UK': 'UK SACN',
-    'India': 'India ICMR',
-    'WHO': 'WHO/FAO'
+    'us': 'US DRI',
+    'eu': 'EFSA',
+    'uk': 'UK SACN',
+    'india': 'India ICMR',
+    'who': 'WHO/FAO'
   };
   
   return `${location} - Using ${guidelineNames[guideline.country]} guidelines`;
+}
+
+export interface MicronutrientCalculationInput {
+  country: 'us' | 'eu' | 'uk' | 'india' | 'who';
 }

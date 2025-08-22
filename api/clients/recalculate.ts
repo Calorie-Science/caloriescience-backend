@@ -38,7 +38,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // Prepare calculation inputs
     const calculationInput = {
-      country: client.location || 'UK',
+      country: client.location || 'uk',
       age: calculateAge(client.date_of_birth),
       gender: client.gender,
       height_cm: heightCm || client.height_cm,

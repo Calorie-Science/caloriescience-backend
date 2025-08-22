@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { FlexibleMicronutrientService } from '../../lib/micronutrients-flexible';
 import { getAllValues } from '../../types/micronutrients';
+import { normalizeCountry } from '../../lib/locationMapping';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { method } = req;
@@ -29,10 +30,13 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // Normalize country to lowercase
+  const normalizedCountry = normalizeCountry(country as string);
+
   // Validate country
-  if (!['UK', 'US', 'India'].includes(country as string)) {
+  if (!['uk', 'us', 'india'].includes(normalizedCountry)) {
     return res.status(400).json({ 
-      error: 'Invalid country. Must be UK, US, or India' 
+      error: 'Invalid country. Must be uk, us, or india' 
     });
   }
 
@@ -47,7 +51,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   
   try {
     const guidelines = await service.getGuidelines(
-      country as 'UK' | 'US' | 'India',
+      normalizedCountry as 'uk' | 'us' | 'india',
       gender as 'male' | 'female',
       parseInt(age as string)
     );
@@ -104,13 +108,23 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // Normalize country to lowercase
+  const normalizedCountry = normalizeCountry(country as string);
+
+  // Validate country
+  if (!['uk', 'us', 'india'].includes(normalizedCountry)) {
+    return res.status(400).json({ 
+      error: 'Invalid country. Must be uk, us, or india' 
+    });
+  }
+
   const service = new FlexibleMicronutrientService(supabase);
 
   try {
     // Calculate requirements
     const requirements = await service.calculateClientRequirements(
       client_id,
-      country as 'UK' | 'US' | 'India',
+      normalizedCountry as 'uk' | 'us' | 'india',
       gender as 'male' | 'female',
       age,
       adjustmentFactors

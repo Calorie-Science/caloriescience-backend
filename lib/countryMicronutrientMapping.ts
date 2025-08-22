@@ -121,10 +121,10 @@ export function getCountryGuideline(country: string): CountryGuidelineMapping | 
  */
 export function getCountryGuidelineSource(
   country: string,
-  defaultSource: 'US' | 'EU' | 'UK' | 'India' | 'WHO' = 'WHO'
-): 'US' | 'EU' | 'UK' | 'India' | 'WHO' {
+  defaultSource: 'us' | 'eu' | 'uk' | 'india' | 'who' = 'who'
+): 'us' | 'eu' | 'uk' | 'india' | 'who' {
   const mapping = getCountryGuideline(country);
-  return mapping?.guidelineSource || defaultSource;
+  return (mapping?.guidelineSource || defaultSource).toLowerCase() as 'us' | 'eu' | 'uk' | 'india' | 'who';
 }
 
 /**
@@ -148,7 +148,7 @@ export function getCountryGuidelineType(
  */
 export function usesWHOGuidelines(country: string): boolean {
   const mapping = getCountryGuideline(country);
-  return mapping?.guidelineSource === 'WHO';
+  return mapping?.guidelineSource.toLowerCase() === 'who';
 }
 
 /**
@@ -157,9 +157,9 @@ export function usesWHOGuidelines(country: string): boolean {
  * @returns Array of country names
  */
 export function getCountriesByGuidelineSource(
-  guidelineSource: 'US' | 'EU' | 'UK' | 'India' | 'WHO'
+  guidelineSource: 'us' | 'eu' | 'uk' | 'india' | 'who'
 ): string[] {
   return COUNTRY_MICRONUTRIENT_MAPPINGS
-    .filter(mapping => mapping.guidelineSource === guidelineSource)
+    .filter(mapping => mapping.guidelineSource.toLowerCase() === guidelineSource)
     .map(mapping => mapping.country);
 }

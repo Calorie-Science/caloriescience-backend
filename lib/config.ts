@@ -13,6 +13,15 @@ export const config = {
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '1000')
   },
 
+  // Edamam API Configuration
+  edamam: {
+    appId: process.env.EDAMAM_APP_ID!,
+    appKey: process.env.EDAMAM_APP_KEY!,
+    recipeApiUrl: 'https://api.edamam.com/api/recipes/v2',
+    mealPlannerApiUrl: 'https://api.edamam.com/api/meal-planner/v1',
+    nutritionApiUrl: 'https://api.edamam.com/api/food-database/v2'
+  },
+
   // JWT Configuration
   jwt: {
     secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
@@ -59,7 +68,9 @@ export function validateConfig() {
     'SUPABASE_SERVICE_ROLE_KEY', 
     'SUPABASE_ANON_KEY',
     'OPENAI_API_KEY',
-    'JWT_SECRET'
+    'JWT_SECRET',
+    'EDAMAM_APP_ID',
+    'EDAMAM_APP_KEY'
   ];
 
   const missing = required.filter(key => !process.env[key]);

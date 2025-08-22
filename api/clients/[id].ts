@@ -353,7 +353,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                   console.log(`📏 Height change: ${currentClient.height_cm} → ${finalHeight} cm`);
                   
                   // Store location for later use (normalize to lowercase)
-                  autoCalculatedLocation = getEERGuidelineFromLocation(currentClient.location || 'UK');
+                  autoCalculatedLocation = getEERGuidelineFromLocation(currentClient.location || 'uk');
                   console.log('🌍 Auto-calculation location set:', autoCalculatedLocation);
                   
                   try {

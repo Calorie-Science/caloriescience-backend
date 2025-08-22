@@ -33,7 +33,7 @@ export class FlexibleMicronutrientService {
    * Get micronutrient guidelines for a specific demographic
    */
   async getGuidelines(
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     gender: 'male' | 'female',
     age: number,
     pregnancy?: boolean,
@@ -284,7 +284,7 @@ export class FlexibleMicronutrientService {
    */
   async calculateClientRequirements(
     clientId: string,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     gender: 'male' | 'female',
     age: number,
     adjustmentFactors?: {
@@ -343,7 +343,7 @@ export class FlexibleMicronutrientService {
    */
   private applyAdjustments(
     baseMicronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     factors?: {
       pregnancy?: boolean;
       lactation?: boolean;
@@ -408,7 +408,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForPregnancy(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who'
   ): void {
     // These adjustments are based on typical increases during pregnancy
     const adjustments = {
@@ -435,7 +435,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForLactation(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who'
   ): void {
     const adjustments = {
       [MICRONUTRIENT_KEYS.VITAMIN_A]: 1.4, // 40% increase
@@ -455,7 +455,7 @@ export class FlexibleMicronutrientService {
    */
   private adjustForActivity(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     activityLevel: string
   ): void {
     // Higher activity increases need for B vitamins and some minerals
@@ -479,7 +479,7 @@ export class FlexibleMicronutrientService {
    */
   private applyMultipliers(
     micronutrients: Record<string, NutrientValue>,
-    country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+    country: 'uk' | 'us' | 'india' | 'eu' | 'who',
     multipliers: Record<string, number>
   ): void {
     for (const [key, multiplier] of Object.entries(multipliers)) {

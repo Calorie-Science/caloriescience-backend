@@ -73,7 +73,7 @@ export function isWHONutrient(value: NutrientValue): value is WHONutrientValue {
 // Micronutrient guidelines structure from database
 export interface MicronutrientGuidelines {
   id?: number;
-  country: 'UK' | 'US' | 'India' | 'EU' | 'WHO';
+  country: 'uk' | 'us' | 'india' | 'eu' | 'who';
   gender: 'male' | 'female' | 'common';
   age_min: number;
   age_max: number;
@@ -92,7 +92,7 @@ export interface ClientMicronutrientRequirements {
   id?: string;
   client_id: string;
   micronutrient_recommendations: Record<string, NutrientValue>;
-  country_guideline: 'UK' | 'US' | 'India' | 'EU' | 'WHO';
+  country_guideline: 'uk' | 'us' | 'india' | 'eu' | 'who';
   guideline_type: 'UK_COMA' | 'US_DRI' | 'INDIA_ICMR' | 'EFSA_DRV' | 'WHO_FAO';
   calculation_method?: string;
   calculation_factors?: Record<string, any>;
@@ -121,7 +121,7 @@ export interface NutrientWithPrimaryValue {
  */
 export function getPrimaryValue(
   nutrient: NutrientValue,
-  country: 'UK' | 'US' | 'India' | 'EU' | 'WHO',
+  country: 'uk' | 'us' | 'india' | 'eu' | 'who',
   preferenceOrder?: string[]
 ): number | null {
   if (country === 'uk' && isUKNutrient(nutrient)) {
@@ -168,7 +168,7 @@ export function getPrimaryValue(
 /**
  * Get the upper limit value based on country
  */
-export function getUpperLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): number | null {
+export function getUpperLimit(nutrient: NutrientValue, country: 'uk' | 'us' | 'india' | 'eu' | 'who'): number | null {
   if (country === 'uk' && isUKNutrient(nutrient)) {
     return nutrient.sui || null;
   } else if ((country === 'us' || country === 'india') && (isUSNutrient(nutrient) || isIndiaNutrient(nutrient))) {
@@ -184,7 +184,7 @@ export function getUpperLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'I
 /**
  * Get the lower safe limit (only for UK)
  */
-export function getLowerLimit(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): number | null {
+export function getLowerLimit(nutrient: NutrientValue, country: 'uk' | 'us' | 'india' | 'eu' | 'who'): number | null {
   if (country === 'uk' && isUKNutrient(nutrient)) {
     return nutrient.lrni || null;
   } else if (country === 'eu' && isEUNutrient(nutrient)) {
@@ -209,7 +209,7 @@ export function formatNutrientValue(value: number | null, unit: string): string 
 /**
  * Get all available values for a nutrient
  */
-export function getAllValues(nutrient: NutrientValue, country: 'UK' | 'US' | 'India' | 'EU' | 'WHO'): Record<string, string> {
+export function getAllValues(nutrient: NutrientValue, country: 'uk' | 'us' | 'india' | 'eu' | 'who'): Record<string, string> {
   const result: Record<string, string> = {};
   
   if (country === 'uk' && isUKNutrient(nutrient)) {
