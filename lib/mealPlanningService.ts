@@ -109,6 +109,7 @@ export class MealPlanningService {
       
       // 3. Merge with request preferences
       console.log('🚀 Meal Planning Service - Merging preferences...');
+      console.log('🚀 Meal Planning Service - Request dietary restrictions:', JSON.stringify(request.dietaryRestrictions, null, 2));
       const finalPreferences = this.mergePreferences(clientPreferences, request);
       console.log('🚀 Meal Planning Service - Final merged preferences:', JSON.stringify(finalPreferences, null, 2));
 
@@ -282,21 +283,24 @@ export class MealPlanningService {
   }
 
   /**
-   * Merge client preferences with request preferences
+   * Override client preferences with request preferences
+   * Request preferences take precedence over database preferences
    */
   private mergePreferences(
     clientPreferences: MealPlanPreferences,
     request: MealPlanGenerationRequest
   ): MealPlanPreferences {
     return {
-      dietaryRestrictions: [
-        ...clientPreferences.dietaryRestrictions,
-        ...(request.dietaryRestrictions || [])
-      ],
-      cuisinePreferences: [
-        ...clientPreferences.cuisinePreferences,
-        ...(request.cuisinePreferences || [])
-      ],
+      // If request has dietary restrictions, use those; otherwise use client preferences
+      dietaryRestrictions: request.dietaryRestrictions !== undefined 
+        ? request.dietaryRestrictions 
+        : clientPreferences.dietaryRestrictions,
+      
+      // If request has cuisine preferences, use those; otherwise use client preferences  
+      cuisinePreferences: request.cuisinePreferences !== undefined 
+        ? request.cuisinePreferences 
+        : clientPreferences.cuisinePreferences,
+      
       mealPreferences: {
         ...clientPreferences.mealPreferences,
         ...(request.mealPreferences || {})
@@ -451,9 +455,8 @@ export class MealPlanningService {
       // Convert cuisine preferences to proper Edamam cuisine types
       const edamamCuisineTypes = this.convertCuisinePreferencesToEdamam(preferences.cuisinePreferences);
       
-      // Temporarily remove plan-level accept criteria to avoid 400 errors
-      // We'll still have meal-specific accept criteria in each section
-      const request = {
+      // Add dietary restrictions back with a simpler structure
+      const request: any = {
         size: 1, // 1 day meal plan
         plan: {
           fit: {
@@ -465,6 +468,17 @@ export class MealPlanningService {
           sections
         }
       };
+
+      // Add health labels if we have any dietary restrictions
+      if (edamamHealthLabels.length > 0) {
+        request.plan.accept = {
+          all: [
+            {
+              health: edamamHealthLabels
+            }
+          ]
+        };
+      }
     
     console.log('🍽️ Meal Planning Debug - Meal plan request created:', JSON.stringify(request, null, 2));
     return request;
@@ -522,7 +536,7 @@ export class MealPlanningService {
         case 'low-carb': edamamHealthLabels.push('low-carb'); break;
         case 'low-fat': edamamHealthLabels.push('low-fat'); break;
         case 'low-sodium': edamamHealthLabels.push('low-sodium'); break;
-        case 'low-sugar': edamamHealthLabels.push('low-sugar'); break;
+        case 'low-sugar': edamamHealthLabels.push('sugar-conscious'); break;
         case 'sugar-conscious': edamamHealthLabels.push('sugar-conscious'); break;
         case 'keto-friendly': edamamHealthLabels.push('keto-friendly'); break;
         case 'paleo': edamamHealthLabels.push('paleo'); break;
