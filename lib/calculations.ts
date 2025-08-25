@@ -29,6 +29,7 @@ export interface EERCalculationResult {
   formula_used: string;
   input: EERCalculationInput;
   guideline_country: string; // Added to track which country's guideline was used
+  calculation_details?: string; // Added for debugging formula calculations
 }
 
 export interface MacrosCalculationResult {
@@ -138,18 +139,49 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
     (formula.bmr_height_coefficient * height_cm) + 
     (formula.bmr_age_coefficient * age);
 
-  // 4. Calculate EER using IOM formula
+  // 4. Calculate EER using appropriate formula based on country and formula type
   const height_m = height_cm / 100;
   let eer: number;
+  let formulaType = 'unknown';
+  let calculationDetails = '';
 
   if (formula.eer_base !== null) {
-    // Use IOM EER formula: EER = base - (age_coeff × age) + PAL × (weight_coeff × weight + height_coeff × height_m)
-    eer = formula.eer_base + 
-      (formula.eer_age_coefficient * age) + 
-      (pal * ((formula.eer_weight_coefficient * weight_kg) + (formula.eer_height_coefficient * height_m)));
+    // Check formula type based on country and coefficients
+    if (normalizedCountry === 'india') {
+      // ICMR-NIN Formula: EER = (weight_coeff × weight + base) × PAL
+      // This is different from IOM formula structure
+      const weightComponent = (formula.eer_weight_coefficient * weight_kg) + formula.eer_base;
+      eer = weightComponent * pal;
+      formulaType = 'ICMR-NIN';
+      calculationDetails = `(${formula.eer_weight_coefficient} × ${weight_kg} + ${formula.eer_base}) × ${pal} = ${weightComponent} × ${pal} = ${eer}`;
+      console.log(`🇮🇳 Using ICMR-NIN formula for India: ${calculationDetails}`);
+    } else if (normalizedCountry === 'japan') {
+      // Japan MHLW Formula: EER = (weight_coeff × weight + height_coeff × height + age_coeff × age + base) × PAL
+      const baseComponent = formula.eer_base + 
+        (formula.eer_weight_coefficient * weight_kg) + 
+        (formula.eer_height_coefficient * height_m) + 
+        (formula.eer_age_coefficient * age);
+      eer = baseComponent * pal;
+      formulaType = 'MHLW (Japan)';
+      calculationDetails = `(${formula.eer_weight_coefficient} × ${weight_kg} + ${formula.eer_height_coefficient} × ${height_m} + ${formula.eer_age_coefficient} × ${age} + ${formula.eer_base}) × ${pal} = ${baseComponent} × ${pal} = ${eer}`;
+      console.log(`🇯🇵 Using MHLW formula for Japan: ${calculationDetails}`);
+    } else {
+      // Standard IOM EER formula: EER = base + (age_coeff × age) + PAL × (weight_coeff × weight + height_coeff × height_m)
+      // Used by: USA, Canada, UK, EU, Australia, Singapore, UAE, WHO, Brazil, South Africa
+      eer = formula.eer_base + 
+        (formula.eer_age_coefficient * age) + 
+        (pal * ((formula.eer_weight_coefficient * weight_kg) + (formula.eer_height_coefficient * height_m)));
+      formulaType = 'IOM';
+      calculationDetails = `${formula.eer_base} + (${formula.eer_age_coefficient} × ${age}) + ${pal} × ((${formula.eer_weight_coefficient} × ${weight_kg}) + (${formula.eer_height_coefficient} × ${height_m})) = ${eer}`;
+      console.log(`🌍 Using IOM formula for ${normalizedCountry}: ${calculationDetails}`);
+    }
   } else {
-    // Fallback to BMR × PAL
+    // Fallback to BMR × PAL (for countries without EER formulas)
+    // Used by: Some UK/EU/Australia age groups that only have BMR
     eer = bmr * pal;
+    formulaType = 'BMR×PAL';
+    calculationDetails = `${bmr} × ${pal} = ${eer}`;
+    console.log(`🔄 Using BMR × PAL fallback for ${normalizedCountry}: ${calculationDetails}`);
   }
 
   // 5. Apply pregnancy and lactation adjustments (for females only) based on database values
@@ -204,9 +236,10 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
     bmr: Math.round(bmr),
     pal: pal,
     eer: Math.round(finalEER),
-    formula_used: formula.bmr_formula + adjustmentString,
+    formula_used: `${formula.bmr_formula} (${formulaType})` + adjustmentString,
     input: input,
-    guideline_country: country // Assuming the input country is the guideline country for EER
+    guideline_country: country,
+    calculation_details: calculationDetails // Add this for debugging
   };
 }
 

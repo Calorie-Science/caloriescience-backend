@@ -119,11 +119,30 @@ export class MealPlanningService {
       console.log('🚀 Meal Planning Service - Target calories:', targetCalories);
       console.log('🚀 Meal Planning Service - Calculating meal distribution...');
       
+      // Use macro ranges if available, otherwise use 0
+      const targetProtein = nutritionRequirements.protein_grams || 
+        (nutritionRequirements.protein_min_grams && nutritionRequirements.protein_max_grams ? 
+          Math.round((nutritionRequirements.protein_min_grams + nutritionRequirements.protein_max_grams) / 2) : 0);
+      
+      const targetCarbs = nutritionRequirements.carbs_grams || 
+        (nutritionRequirements.carbs_min_grams && nutritionRequirements.carbs_max_grams ? 
+          Math.round((nutritionRequirements.carbs_min_grams + nutritionRequirements.carbs_max_grams) / 2) : 0);
+      
+      const targetFat = nutritionRequirements.fat_grams || 
+        (nutritionRequirements.fat_min_grams && nutritionRequirements.fat_max_grams ? 
+          Math.round((nutritionRequirements.fat_min_grams + nutritionRequirements.fat_max_grams) / 2) : 0);
+      
+      console.log('🚀 Meal Planning Service - Target macros - Protein:', targetProtein, 'Carbs:', targetCarbs, 'Fat:', targetFat);
+      console.log('🚀 Meal Planning Service - Raw macro values from DB:');
+      console.log('🚀 Meal Planning Service - - Protein grams:', nutritionRequirements.protein_grams, 'min:', nutritionRequirements.protein_min_grams, 'max:', nutritionRequirements.protein_max_grams);
+      console.log('🚀 Meal Planning Service - - Carbs grams:', nutritionRequirements.carbs_grams, 'min:', nutritionRequirements.carbs_min_grams, 'max:', nutritionRequirements.carbs_max_grams);
+      console.log('🚀 Meal Planning Service - - Fat grams:', nutritionRequirements.fat_grams, 'min:', nutritionRequirements.fat_min_grams, 'max:', nutritionRequirements.fat_max_grams);
+      
       const mealDistribution = this.calculateMealDistribution(
         targetCalories,
-        0, // Skip protein filtering
-        0, // Skip carbs filtering  
-        0  // Skip fat filtering
+        targetProtein,
+        targetCarbs,
+        targetFat
       );
       
       console.log('🚀 Meal Planning Service - Meal distribution calculated:', JSON.stringify(mealDistribution, null, 2));
@@ -420,11 +439,11 @@ export class MealPlanningService {
     
     const sections: any = {};
     
-        // Create sections for each meal type
+    // Create sections for each meal type
     Object.entries(mealDistribution).forEach(([mealType, targets]) => {
       const sectionName = mealType.charAt(0).toUpperCase() + mealType.slice(1);
 
-      sections[sectionName] = {
+      const section: any = {
         accept: {
           all: [
             {
@@ -442,45 +461,71 @@ export class MealPlanningService {
           }
         }
       };
+
+      // Only add ENERC_KCAL constraints at section level (like the working curl)
+      // Macro constraints should go at the plan level, not section level
+
+      sections[sectionName] = section;
     });
     
-          // Convert dietary restrictions to proper Edamam health labels
-      const edamamHealthLabels = this.convertDietaryRestrictionsToEdamam(preferences.dietaryRestrictions);
-      
-      // Always include alcohol-free as default if no specific restrictions
-      if (edamamHealthLabels.length === 0) {
-        edamamHealthLabels.push('alcohol-free');
+    // Create request structure matching the working curl format
+    const request: any = {
+      size: 1, // 1 day meal plan
+      plan: {
+        sections,
+        // Global fit constraints at plan level (like the working curl)
+        fit: {
+          ENERC_KCAL: {
+            min: Math.round(mealDistribution.breakfast.calories + mealDistribution.lunch.calories + mealDistribution.dinner.calories + mealDistribution.snack.calories),
+            max: Math.round((mealDistribution.breakfast.calories + mealDistribution.lunch.calories + mealDistribution.dinner.calories + mealDistribution.snack.calories) * 1.1)
+          }
+                }
       }
-      
-      // Convert cuisine preferences to proper Edamam cuisine types
-      const edamamCuisineTypes = this.convertCuisinePreferencesToEdamam(preferences.cuisinePreferences);
-      
-      // Add dietary restrictions back with a simpler structure
-      const request: any = {
-        size: 1, // 1 day meal plan
-        plan: {
-          fit: {
-            ENERC_KCAL: {
-              min: Math.round(Object.values(mealDistribution).reduce((sum: any, meal: any) => sum + meal.calories, 0) * 0.9),
-              max: Math.round(Object.values(mealDistribution).reduce((sum: any, meal: any) => sum + meal.calories, 0) * 1.1)
-            }
-          },
-          sections
-        }
-      };
+    };
 
-      // Add health labels if we have any dietary restrictions
-      if (edamamHealthLabels.length > 0) {
-        request.plan.accept = {
-          all: [
-            {
-              health: edamamHealthLabels
-            }
-          ]
-        };
-      }
+    // TEMPORARILY DISABLED: Macro constraints causing Edamam to return incomplete results
+    // TODO: Re-enable once we figure out why macro filters break meal generation
+    /*
+    // Add macro constraints only if client has nutrition requirements
+    if (mealDistribution.breakfast.protein && mealDistribution.breakfast.protein > 0) {
+      const dailyProtein = mealDistribution.breakfast.protein + mealDistribution.lunch.protein + mealDistribution.dinner.protein + mealDistribution.snack.protein;
+      request.plan.fit.PROCNT = {
+        min: Math.round(dailyProtein * 0.8),  // 20% tolerance below target
+        max: Math.round(dailyProtein * 1.2)   // 20% tolerance above target
+      };
+    }
     
-    console.log('🍽️ Meal Planning Debug - Meal plan request created:', JSON.stringify(request, null, 2));
+    if (mealDistribution.breakfast.fat && mealDistribution.breakfast.fat > 0) {
+      const dailyFat = mealDistribution.breakfast.fat + mealDistribution.lunch.fat + mealDistribution.dinner.fat + mealDistribution.snack.fat;
+      request.plan.fit.FAT = {
+        min: Math.round(dailyFat * 0.8),      // 20% tolerance below target
+        max: Math.round(dailyFat * 1.2)       // 20% tolerance above target
+      };
+    }
+    
+    if (mealDistribution.breakfast.carbs && mealDistribution.breakfast.carbs > 0) {
+      const dailyCarbs = mealDistribution.breakfast.carbs + mealDistribution.lunch.carbs + mealDistribution.dinner.carbs + mealDistribution.snack.carbs;
+      request.plan.fit.CHOCDF = {
+        min: Math.round(dailyCarbs * 0.8),    // 20% tolerance below target
+        max: Math.round(dailyCarbs * 1.2)     // 20% tolerance above target
+      };
+    }
+    */
+
+    // Add valid health labels if we have any dietary restrictions
+    const edamamHealthLabels = this.convertDietaryRestrictionsToEdamam(preferences.dietaryRestrictions);
+    if (edamamHealthLabels.length > 0) {
+      request.plan.accept = {
+        all: [
+          {
+            health: edamamHealthLabels
+          }
+        ]
+      };
+      console.log('🍽️ Meal Planning Debug - Added valid health labels to request:', edamamHealthLabels);
+    }
+
+    console.log('🍽️ Meal Planning Debug - Meal plan request created (macro filtering temporarily disabled):', JSON.stringify(request, null, 2));
     return request;
   }
 
@@ -505,7 +550,7 @@ export class MealPlanningService {
     
     restrictions.forEach(restriction => {
       switch (restriction.toLowerCase()) {
-        // Health Labels
+        // Valid Health Labels (confirmed working)
         case 'vegetarian': edamamHealthLabels.push('vegetarian'); break;
         case 'vegan': edamamHealthLabels.push('vegan'); break;
         case 'gluten-free': edamamHealthLabels.push('gluten-free'); break;
@@ -522,35 +567,26 @@ export class MealPlanningService {
         case 'sesame-free': edamamHealthLabels.push('sesame-free'); break;
         case 'lupine-free': edamamHealthLabels.push('lupine-free'); break;
         case 'mollusk-free': edamamHealthLabels.push('mollusk-free'); break;
-        case 'sulfite-free': edamamHealthLabels.push('sulfite-free'); break;
-        case 'fodmap-free': edamamHealthLabels.push('fodmap-free'); break;
-        case 'alcohol-free': edamamHealthLabels.push('alcohol-free'); break;
-        case 'pork-free': edamamHealthLabels.push('pork-free'); break;
-        case 'red-meat-free': edamamHealthLabels.push('red-meat-free'); break;
-        case 'crustacean-free': edamamHealthLabels.push('crustacean-free'); break;
         
-        // Diet Labels
-        case 'balanced': edamamHealthLabels.push('balanced'); break;
-        case 'high-fiber': edamamHealthLabels.push('high-fiber'); break;
-        case 'high-protein': edamamHealthLabels.push('high-protein'); break;
-        case 'low-carb': edamamHealthLabels.push('low-carb'); break;
-        case 'low-fat': edamamHealthLabels.push('low-fat'); break;
-        case 'low-sodium': edamamHealthLabels.push('low-sodium'); break;
-        case 'low-sugar': edamamHealthLabels.push('sugar-conscious'); break;
-        case 'sugar-conscious': edamamHealthLabels.push('sugar-conscious'); break;
-        case 'keto-friendly': edamamHealthLabels.push('keto-friendly'); break;
-        case 'paleo': edamamHealthLabels.push('paleo'); break;
-        case 'mediterranean': edamamHealthLabels.push('mediterranean'); break;
-        case 'dash': edamamHealthLabels.push('DASH'); break;
-        case 'pescatarian': edamamHealthLabels.push('pecatarian'); break;
-        case 'kidney-friendly': edamamHealthLabels.push('kidney-friendly'); break;
-        case 'low-potassium': edamamHealthLabels.push('low-potassium'); break;
-        case 'immuno-supportive': edamamHealthLabels.push('immuno-supportive'); break;
-        case 'kosher': edamamHealthLabels.push('kosher'); break;
-        case 'no-oil-added': edamamHealthLabels.push('No-oil-added'); break;
+        // Invalid Health Labels (confirmed not working) - skip these
+        // case 'balanced': edamamHealthLabels.push('balanced'); break;
+        // case 'high-fiber': edamamHealthLabels.push('high-fiber'); break;
+        // case 'high-protein': edamamHealthLabels.push('high-protein'); break;
+        // case 'low-carb': edamamHealthLabels.push('low-carb'); break;
+        // case 'low-fat': edamamHealthLabels.push('low-fat'); break;
+        // case 'low-sodium': edamamHealthLabels.push('low-sodium'); break;
+        // case 'sugar-conscious': edamamHealthLabels.push('sugar-conscious'); break;
+        
+        // Rate limited labels - skip these too
+        // case 'sulfite-free': edamamHealthLabels.push('sulfite-free'); break;
+        // case 'fodmap-free': edamamHealthLabels.push('fodmap-free'); break;
+        // case 'alcohol-free': edamamHealthLabels.push('alcohol-free'); break;
+        // case 'pork-free': edamamHealthLabels.push('pork-free'); break;
+        // case 'red-meat-free': edamamHealthLabels.push('red-meat-free'); break;
+        // case 'crustacean-free': edamamHealthLabels.push('crustacean-free'); break;
         
         default:
-          console.log(`⚠️ Meal Planning Debug - Unknown dietary restriction: ${restriction}`);
+          console.log(`🍽️ Meal Planning Debug - Skipping invalid health label: ${restriction}`);
           break;
       }
     });

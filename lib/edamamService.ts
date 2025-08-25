@@ -306,8 +306,9 @@ export class EdamamService {
    * Generate a meal plan using the NEW Meal Planner API v1
    */
   async generateMealPlanV1(request: MealPlannerRequest, userId?: string): Promise<MealPlannerResponse> {
-    console.log('🍽️ Edamam Service - Generating meal plan with Meal Planner API v1');
-    console.log('🍽️ Edamam Service - Request:', JSON.stringify(request, null, 2));
+    console.log('🍽️ Edamam Service - ===== generateMealPlanV1 START =====');
+    console.log('🍽️ Edamam Service - Input request:', JSON.stringify(request, null, 2));
+    console.log('🍽️ Edamam Service - User ID:', userId);
     
     try {
       // Create Basic Auth header using app_id:app_key
@@ -321,37 +322,42 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      if (userId) {
-        headers['Edamam-Account-User'] = userId;
-      }
+      // If no userId provided, use 'test' as default to make API work
+      const accountUser = userId || 'test';
+      headers['Edamam-Account-User'] = accountUser;
+      console.log('🍽️ Edamam Service - Using Edamam-Account-User:', accountUser);
 
       // Add type=public query parameter as shown in working CURL
       const url = `${this.mealPlannerApiUrl}/${this.appId}/select?type=public`;
-              console.log('🍽️ Edamam Service - Calling URL:', url);
-        console.log('🍽️ Edamam Service - Headers:', JSON.stringify(headers, null, 2));
-        console.log('🍽️ Edamam Service - Request body:', JSON.stringify(request, null, 2));
+      console.log('🍽️ Edamam Service - Request URL:', url);
+      console.log('🍽️ Edamam Service - Request headers:', JSON.stringify(headers, null, 2));
+      console.log('🍽️ Edamam Service - Request body:', JSON.stringify(request, null, 2));
 
-        const response = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(request)
-        });
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request)
+      });
       
       console.log('🍽️ Edamam Service - Response status:', response.status);
+      console.log('🍽️ Edamam Service - Response status text:', response.statusText);
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Edamam Service - Meal Planner API error:', errorText);
+        console.error('❌ Edamam Service - Meal Planner API error response:', errorText);
         throw new Error(`Edamam Meal Planner API error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
       console.log('✅ Edamam Service - Meal plan generated successfully');
       console.log('✅ Edamam Service - Response data:', JSON.stringify(data, null, 2));
+      console.log('🍽️ Edamam Service - ===== generateMealPlanV1 END =====');
       
       return data;
     } catch (error) {
       console.error('❌ Edamam Service - Error generating meal plan:', error);
+      console.error('❌ Edamam Service - Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.log('🍽️ Edamam Service - ===== generateMealPlanV1 ERROR =====');
       throw new Error(`Failed to generate meal plan: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -378,9 +384,10 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      if (userId) {
-        headers['Edamam-Account-User'] = userId;
-      }
+      // If no userId provided, use 'test' as default to make API work
+      const accountUser = userId || 'test';
+      headers['Edamam-Account-User'] = accountUser;
+      console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 
       // Use query parameters for app_id and app_key as shown in working CURL
       const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${this.appId}&app_key=${this.appKey}&type=public`;
