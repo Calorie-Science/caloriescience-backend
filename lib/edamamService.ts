@@ -322,8 +322,8 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      // If no userId provided, use 'test' as default to make API work
-      const accountUser = userId || 'test';
+      // Always use 'test2' for Edamam API calls to avoid rate limiting
+      const accountUser = "test2"
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User:', accountUser);
 
@@ -384,8 +384,8 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      // If no userId provided, use 'test' as default to make API work
-      const accountUser = userId || 'test';
+      // Always use 'test2' for Edamam API calls to avoid rate limiting
+      const accountUser = "test2"
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 

@@ -14,6 +14,11 @@ export interface MealPlanGenerationRequest {
     snack?: string[];
   };
   targetCalories?: number; // Override client's EER if provided
+  macroTargets?: {
+    protein?: { min: number; max: number };
+    fat?: { min: number; max: number };
+    carbs?: { min: number; max: number };
+  };
 }
 
 export interface GeneratedMealPlan {
@@ -152,7 +157,9 @@ export class MealPlanningService {
       const generatedMeals = await this.generateMealsForDay(
         mealDistribution,
         finalPreferences,
-        userId
+        userId,
+        nutritionRequirements,
+        request.macroTargets
       );
       
       console.log('🚀 Meal Planning Service - Meals generation completed');
@@ -374,7 +381,9 @@ export class MealPlanningService {
   private async generateMealsForDay(
     mealDistribution: Record<string, any>,
     preferences: MealPlanPreferences,
-    userId?: string
+    userId?: string,
+    nutritionRequirements?: any,
+    macroTargets?: any
   ): Promise<GeneratedMeal[]> {
     console.log('🍽️ Meal Planning Debug - Starting generateMealsForDay with Meal Planner API');
     console.log('🍽️ Meal Planning Debug - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
@@ -385,7 +394,7 @@ export class MealPlanningService {
         // Use the new Meal Planner API instead of individual recipe searches
         console.log('🍽️ Meal Planning Debug - Creating meal plan request for Meal Planner API...');
 
-        const mealPlanRequest = this.createMealPlanRequest(mealDistribution, preferences);
+        const mealPlanRequest = this.createMealPlanRequest(mealDistribution, preferences, nutritionRequirements, macroTargets);
         console.log('🍽️ Meal Planning Debug - Meal plan request:', JSON.stringify(mealPlanRequest, null, 2));
 
         console.log('🍽️ Meal Planning Debug - Calling Edamam Meal Planner API...');
@@ -433,7 +442,9 @@ export class MealPlanningService {
    */
   private createMealPlanRequest(
     mealDistribution: Record<string, any>,
-    preferences: MealPlanPreferences
+    preferences: MealPlanPreferences,
+    nutritionRequirements?: any,
+    macroTargets?: any
   ): any {
     console.log('🍽️ Meal Planning Debug - Creating meal plan request structure...');
     
@@ -479,38 +490,96 @@ export class MealPlanningService {
             min: Math.round(mealDistribution.breakfast.calories + mealDistribution.lunch.calories + mealDistribution.dinner.calories + mealDistribution.snack.calories),
             max: Math.round((mealDistribution.breakfast.calories + mealDistribution.lunch.calories + mealDistribution.dinner.calories + mealDistribution.snack.calories) * 1.1)
           }
-                }
+        }
       }
     };
 
-    // TEMPORARILY DISABLED: Macro constraints causing Edamam to return incomplete results
-    // TODO: Re-enable once we figure out why macro filters break meal generation
-    /*
-    // Add macro constraints only if client has nutrition requirements
-    if (mealDistribution.breakfast.protein && mealDistribution.breakfast.protein > 0) {
-      const dailyProtein = mealDistribution.breakfast.protein + mealDistribution.lunch.protein + mealDistribution.dinner.protein + mealDistribution.snack.protein;
-      request.plan.fit.PROCNT = {
-        min: Math.round(dailyProtein * 0.8),  // 20% tolerance below target
-        max: Math.round(dailyProtein * 1.2)   // 20% tolerance above target
-      };
+    // Add macro constraints at plan level based on client's nutrition requirements or provided macro targets
+    // Priority: 1. Provided macro targets, 2. Client nutrition requirements, 3. Fallback ranges
+    if (macroTargets) {
+      console.log('🍽️ Meal Planning Debug - Using provided macro targets:', JSON.stringify(macroTargets, null, 2));
+      
+      // Apply protein constraints if provided
+      if (macroTargets.protein) {
+        request.plan.fit.PROCNT = {
+          min: Math.max(30, macroTargets.protein.min),
+          max: Math.min(300, macroTargets.protein.max)
+        };
+        console.log('🍽️ Meal Planning Debug - Applied protein constraints from macro targets:', request.plan.fit.PROCNT);
+      }
+      
+      // Apply fat constraints if provided
+      if (macroTargets.fat) {
+        request.plan.fit.FAT = {
+          min: Math.max(20, macroTargets.fat.min),
+          max: Math.min(200, macroTargets.fat.max)
+        };
+        console.log('🍽️ Meal Planning Debug - Applied fat constraints from macro targets:', request.plan.fit.FAT);
+      }
+      
+      // Apply carb constraints if provided
+      if (macroTargets.carbs) {
+        request.plan.fit.CHOCDF = {
+          min: Math.max(50, macroTargets.carbs.min),
+          max: Math.min(600, macroTargets.carbs.max)
+        };
+        console.log('🍽️ Meal Planning Debug - Applied carb constraints from macro targets:', request.plan.fit.CHOCDF);
+      }
+      
+      console.log('🍽️ Meal Planning Debug - Applied macro constraints from provided targets');
+    } else if (nutritionRequirements) {
+      console.log('🍽️ Meal Planning Debug - Nutrition requirements available:', JSON.stringify(nutritionRequirements, null, 2));
+      
+      // Protein constraints
+      if (nutritionRequirements.protein_grams || (nutritionRequirements.protein_min_grams && nutritionRequirements.protein_max_grams)) {
+        const targetProtein = nutritionRequirements.protein_grams || 
+          Math.round((nutritionRequirements.protein_min_grams + nutritionRequirements.protein_max_grams) / 2);
+        
+        request.plan.fit.PROCNT = {
+          min: Math.max(30, Math.round(targetProtein * 0.7)),   // Minimum 70% of target or 30g
+          max: Math.min(300, Math.round(targetProtein * 1.3))   // Maximum 130% of target or 300g
+        };
+        console.log('🍽️ Meal Planning Debug - Applied protein constraints:', request.plan.fit.PROCNT);
+      } else {
+        console.log('🍽️ Meal Planning Debug - No protein requirements available, using fallback');
+      }
+      
+      // Fat constraints
+      if (nutritionRequirements.fat_grams || (nutritionRequirements.fat_min_grams && nutritionRequirements.fat_max_grams)) {
+        const targetFat = nutritionRequirements.fat_grams || 
+          Math.round((nutritionRequirements.fat_min_grams + nutritionRequirements.fat_max_grams) / 2);
+        
+        request.plan.fit.FAT = {
+          min: Math.max(20, Math.round(targetFat * 0.7)),   // Minimum 70% of target or 20g
+          max: Math.min(200, Math.round(targetFat * 1.3))   // Maximum 130% of target or 200g
+        };
+        console.log('🍽️ Meal Planning Debug - Applied fat constraints:', request.plan.fit.FAT);
+      } else {
+        console.log('🍽️ Meal Planning Debug - No fat requirements available, using fallback');
+      }
+      
+      // Carbohydrate constraints
+      if (nutritionRequirements.carbs_grams || (nutritionRequirements.carbs_min_grams && nutritionRequirements.carbs_max_grams)) {
+        const targetCarbs = nutritionRequirements.carbs_grams || 
+          Math.round((nutritionRequirements.carbs_min_grams + nutritionRequirements.carbs_max_grams) / 2);
+        
+        request.plan.fit.CHOCDF = {
+          min: Math.max(50, Math.round(targetCarbs * 0.7)),   // Minimum 70% of target or 50g
+          max: Math.min(600, Math.round(targetCarbs * 1.3))   // Maximum 130% of target or 600g
+        };
+        console.log('🍽️ Meal Planning Debug - Applied carb constraints:', request.plan.fit.CHOCDF);
+      } else {
+        console.log('🍽️ Meal Planning Debug - No carb requirements available, using fallback');
+      }
+      
+      console.log('🍽️ Meal Planning Debug - Applied dynamic macro constraints based on client requirements (with ±30% tolerance)');
+    } else {
+      // Fallback to broad ranges if no nutrition requirements available
+      request.plan.fit.PROCNT = { min: 30, max: 300 };
+      request.plan.fit.FAT = { min: 20, max: 200 };
+      request.plan.fit.CHOCDF = { min: 50, max: 600 };
+      console.log('🍽️ Meal Planning Debug - Applied fallback broad macro constraints (no client requirements available)');
     }
-    
-    if (mealDistribution.breakfast.fat && mealDistribution.breakfast.fat > 0) {
-      const dailyFat = mealDistribution.breakfast.fat + mealDistribution.lunch.fat + mealDistribution.dinner.fat + mealDistribution.snack.fat;
-      request.plan.fit.FAT = {
-        min: Math.round(dailyFat * 0.8),      // 20% tolerance below target
-        max: Math.round(dailyFat * 1.2)       // 20% tolerance above target
-      };
-    }
-    
-    if (mealDistribution.breakfast.carbs && mealDistribution.breakfast.carbs > 0) {
-      const dailyCarbs = mealDistribution.breakfast.carbs + mealDistribution.lunch.carbs + mealDistribution.dinner.carbs + mealDistribution.snack.carbs;
-      request.plan.fit.CHOCDF = {
-        min: Math.round(dailyCarbs * 0.8),    // 20% tolerance below target
-        max: Math.round(dailyCarbs * 1.2)     // 20% tolerance above target
-      };
-    }
-    */
 
     // Add valid health labels if we have any dietary restrictions
     const edamamHealthLabels = this.convertDietaryRestrictionsToEdamam(preferences.dietaryRestrictions);
@@ -525,7 +594,8 @@ export class MealPlanningService {
       console.log('🍽️ Meal Planning Debug - Added valid health labels to request:', edamamHealthLabels);
     }
 
-    console.log('🍽️ Meal Planning Debug - Meal plan request created (macro filtering temporarily disabled):', JSON.stringify(request, null, 2));
+    console.log('🍽️ Meal Planning Debug - Final meal plan request created:', JSON.stringify(request, null, 2));
+    console.log('🍽️ Meal Planning Debug - Request plan.fit section:', JSON.stringify(request.plan.fit, null, 2));
     return request;
   }
 

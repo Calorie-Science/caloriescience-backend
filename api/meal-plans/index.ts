@@ -22,7 +22,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         dietaryRestrictions = [],
         cuisinePreferences = [],
         mealPreferences = {},
-        targetCalories
+        targetCalories,
+        macroTargets = null // New field for macro targets
       } = req.body;
 
       // Validate action
@@ -84,6 +85,44 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
+      // Validate macro targets if provided
+      if (macroTargets) {
+        if (typeof macroTargets !== 'object' || macroTargets === null) {
+          return res.status(400).json({
+            error: 'Invalid macro targets format',
+            message: 'macroTargets must be an object with protein, fat, and/or carbs properties'
+          });
+        }
+
+        // Validate each macro target
+        const validMacros = ['protein', 'fat', 'carbs'];
+        for (const [macro, value] of Object.entries(macroTargets)) {
+          if (!validMacros.includes(macro)) {
+            return res.status(400).json({
+              error: 'Invalid macro type',
+              message: `Invalid macro type: ${macro}. Valid types are: ${validMacros.join(', ')}`
+            });
+          }
+
+          if (typeof value !== 'object' || value === null || !('min' in value) || !('max' in value)) {
+            return res.status(400).json({
+              error: 'Invalid macro target format',
+              message: `Each macro target must have min and max numeric values. Got: ${JSON.stringify(value)}`
+            });
+          }
+
+          const min = (value as any).min;
+          const max = (value as any).max;
+
+          if (typeof min !== 'number' || typeof max !== 'number' || min < 0 || max < 0 || min > max) {
+            return res.status(400).json({
+              error: 'Invalid macro target values',
+              message: `Macro targets must have positive values with min <= max. Got: ${macro} min: ${min}, max: ${max}`
+            });
+          }
+        }
+      }
+
       // Generate meal plan
       const mealPlanRequest: MealPlanGenerationRequest = {
         clientId,
@@ -92,7 +131,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         dietaryRestrictions,
         cuisinePreferences,
         mealPreferences,
-        targetCalories
+        targetCalories,
+        macroTargets
       };
 
       console.log('🔍 API Debug - User ID from JWT:', user.id);
