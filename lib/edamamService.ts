@@ -306,9 +306,9 @@ export class EdamamService {
    * Generate a meal plan using the NEW Meal Planner API v1
    */
   async generateMealPlanV1(request: MealPlannerRequest, userId?: string): Promise<MealPlannerResponse> {
-    console.log('🍽️ Edamam Service - ===== generateMealPlanV1 START =====');
-    console.log('🍽️ Edamam Service - Input request:', JSON.stringify(request, null, 2));
-    console.log('🍽️ Edamam Service - User ID:', userId);
+    console.log('🚨🚨🚨 EDAMAM SERVICE START 🚨🚨🚨');
+    console.log('🚨 EDAMAM SERVICE - Input request:', JSON.stringify(request, null, 2));
+    console.log('🚨 EDAMAM SERVICE - User ID:', userId);
     
     try {
       // Create Basic Auth header using app_id:app_key
@@ -327,30 +327,59 @@ export class EdamamService {
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User:', accountUser);
 
-      // Add type=public query parameter as shown in working CURL
+      // Use the correct Edamam Meal Planner API endpoint with appId and type=public
       const url = `${this.mealPlannerApiUrl}/${this.appId}/select?type=public`;
       console.log('🍽️ Edamam Service - Request URL:', url);
       console.log('🍽️ Edamam Service - Request headers:', JSON.stringify(headers, null, 2));
       console.log('🍽️ Edamam Service - Request body:', JSON.stringify(request, null, 2));
+      console.log('🚨🚨🚨 EDAMAM REQUEST START 🚨🚨🚨');
+      console.log('🚨 EDAMAM REQUEST METHOD: POST');
+      console.log('🚨 EDAMAM REQUEST URL:', url);
+      console.log('🚨 EDAMAM REQUEST HEADERS:', JSON.stringify(headers, null, 2));
+      console.log('🚨 EDAMAM REQUEST BODY:', JSON.stringify(request, null, 2));
+      console.log('🚨🚨🚨 EDAMAM REQUEST END 🚨🚨🚨');
+      console.log('🚨 EDAMAM - ABOUT TO MAKE FETCH CALL 🚨');
 
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      console.log('🚨 EDAMAM - FETCH CALL STARTING 🚨');
       const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(request)
+        body: JSON.stringify(request),
+        signal: controller.signal
       });
       
-      console.log('🍽️ Edamam Service - Response status:', response.status);
-      console.log('🍽️ Edamam Service - Response status text:', response.statusText);
+      clearTimeout(timeoutId);
+      
+      console.log('🚨 EDAMAM - FETCH CALL COMPLETED 🚨');
+      console.log('🚨 EDAMAM - RESPONSE STATUS:', response.status);
+      console.log('🚨🚨🚨 EDAMAM RESPONSE START 🚨🚨🚨');
+      console.log('🚨 EDAMAM RESPONSE STATUS:', response.status);
+      console.log('🚨 EDAMAM RESPONSE STATUS TEXT:', response.statusText);
+      console.log('🚨 EDAMAM RESPONSE HEADERS:', JSON.stringify(Object.fromEntries(response.headers as any), null, 2));
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Edamam Service - Meal Planner API error response:', errorText);
+        console.error('❌ Edamam Service - Meal Planner API error response:');
+        console.error('  - Status:', response.status);
+        console.error('  - Status Text:', response.statusText);
+        console.error('  - Error Body:', errorText);
         throw new Error(`Edamam Meal Planner API error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('🚨🚨🚨 EDAMAM RESPONSE BODY START 🚨🚨🚨');
+      console.log('🚨 EDAMAM FULL RESPONSE DATA:', JSON.stringify(data, null, 2));
+      console.log('🚨🚨🚨 EDAMAM RESPONSE BODY END 🚨🚨🚨');
       console.log('✅ Edamam Service - Meal plan generated successfully');
-      console.log('✅ Edamam Service - Response data:', JSON.stringify(data, null, 2));
+      console.log('✅ Edamam Service - Response summary:');
+      console.log('  - Response type:', typeof data);
+      console.log('  - Has selection:', !!data.selection);
+      console.log('  - Selection count:', data.selection ? data.selection.length : 0);
+      console.log('  - Status:', data.status);
       console.log('🍽️ Edamam Service - ===== generateMealPlanV1 END =====');
       
       return data;
@@ -366,7 +395,9 @@ export class EdamamService {
    * Fetch recipe details from Edamam Recipe API v2 using the recipe URI
    */
   async getRecipeDetails(recipeUri: string, userId?: string): Promise<any> {
-    console.log('🍽️ Edamam Service - Fetching recipe details for:', recipeUri);
+    console.log('🍽️ Edamam Service - ===== getRecipeDetails START =====');
+    console.log('🍽️ Edamam Service - Input recipe URI:', recipeUri);
+    console.log('🍽️ Edamam Service - User ID:', userId);
     
     try {
       // Extract recipe ID from URI (e.g., "recipe_f0ae5c39b8140a2523ebb1f45ebefdf3")
@@ -391,19 +422,35 @@ export class EdamamService {
 
       // Use query parameters for app_id and app_key as shown in working CURL
       const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${this.appId}&app_key=${this.appKey}&type=public`;
-      console.log('🍽️ Edamam Service - Fetching recipe from:', url);
-      console.log('🍽️ Edamam Service - Headers:', JSON.stringify(headers, null, 2));
+      console.log('🍽️ Edamam Service - Recipe API request details:');
+      console.log('  - Method: GET');
+      console.log('  - URL:', url);
+      console.log('  - Headers:', JSON.stringify(headers, null, 2));
+      console.log('  - Recipe ID:', recipeId);
+      
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
       
       const response = await fetch(url, {
         method: 'GET',
-        headers
+        headers,
+        signal: controller.signal
       });
       
-      console.log('🍽️ Edamam Service - Recipe API response status:', response.status);
+      clearTimeout(timeoutId);
+      
+      console.log('🍽️ Edamam Service - Recipe API response received:');
+      console.log('  - Status:', response.status);
+      console.log('  - Status Text:', response.statusText);
+      console.log('  - Response Headers:', JSON.stringify(Object.fromEntries(response.headers as any), null, 2));
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Edamam Service - Recipe API error:', errorText);
+        console.error('❌ Edamam Service - Recipe API error:');
+        console.error('  - Status:', response.status);
+        console.error('  - Status Text:', response.statusText);
+        console.error('  - Error Body:', errorText);
         
         // If Recipe API v2 fails, create a mock recipe as fallback
         console.log('🍽️ Edamam Service - Recipe API v2 failed, creating mock recipe as fallback');
@@ -428,7 +475,13 @@ export class EdamamService {
 
       const data = await response.json();
       console.log('✅ Edamam Service - Recipe details fetched successfully');
-      console.log('✅ Edamam Service - Recipe data:', JSON.stringify(data, null, 2));
+      console.log('✅ Edamam Service - Recipe response data:', JSON.stringify(data, null, 2));
+      console.log('✅ Edamam Service - Recipe response summary:');
+      console.log('  - Recipe label:', data.label);
+      console.log('  - Calories:', data.calories);
+      console.log('  - Ingredients count:', data.ingredients ? data.ingredients.length : 0);
+      console.log('  - Total nutrients:', data.totalNutrients ? Object.keys(data.totalNutrients).length : 0);
+      console.log('🍽️ Edamam Service - ===== getRecipeDetails END =====');
       
       return data;
     } catch (error) {

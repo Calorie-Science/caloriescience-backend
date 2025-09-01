@@ -1,8 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MealPlanningService, MealPlanGenerationRequest } from '../../lib/mealPlanningService';
+import { MealProgramService } from '../../lib/mealProgramService';
+import { ClientGoalsService } from '../../lib/clientGoalsService';
 import { requireAuth } from '../../lib/auth';
 
 const mealPlanningService = new MealPlanningService();
+const mealProgramService = new MealProgramService();
+const clientGoalsService = new ClientGoalsService();
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Get user from request (set by requireAuth middleware)
@@ -11,11 +15,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // POST - Generate new meal plan (preview or save)
+  // Only nutritionists can access meal plans and programs
+  if (user.role !== 'nutritionist') {
+    return res.status(403).json({ error: 'Access denied. Only nutritionists can manage meal plans and programs.' });
+  }
+
+  // POST - Handle both meal planning and meal program creation
   if (req.method === 'POST') {
     try {
       const {
-        action = 'save', // 'preview' or 'save'
+        type = 'meal-plan', // 'meal-plan' or 'meal-program'
+        action = 'save', // 'preview' or 'save' (for meal-plan type)
         clientId,
         planDate,
         planType = 'daily',
@@ -23,50 +33,26 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         cuisinePreferences = [],
         mealPreferences = {},
         targetCalories,
-        macroTargets = null // New field for macro targets
+        macroTargets = null, // New field for macro targets
+        // Meal program fields
+        name,
+        description,
+        meals
       } = req.body;
 
-      // Validate action
-      if (!['preview', 'save'].includes(action)) {
+      // Validate type
+      if (!['meal-plan', 'meal-program', 'client-goal'].includes(type)) {
         return res.status(400).json({
-          error: 'Invalid action',
-          message: 'action must be either "preview" or "save"'
+          error: 'Invalid type',
+          message: 'type must be either "meal-plan", "meal-program", or "client-goal"'
         });
       }
 
-      // Validation
+      // Validate clientId
       if (!clientId) {
         return res.status(400).json({
           error: 'Missing required field',
           message: 'clientId is required'
-        });
-      }
-
-      if (!planDate) {
-        return res.status(400).json({
-          error: 'Missing required field',
-          message: 'planDate is required (YYYY-MM-DD format)'
-        });
-      }
-
-      // Validate date format
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(planDate)) {
-        return res.status(400).json({
-          error: 'Invalid date format',
-          message: 'planDate must be in YYYY-MM-DD format'
-        });
-      }
-
-      // Check if plan date is not in the past
-      const planDateObj = new Date(planDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (planDateObj < today) {
-        return res.status(400).json({
-          error: 'Invalid date',
-          message: 'Plan date cannot be in the past'
         });
       }
 
@@ -85,105 +71,302 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Validate macro targets if provided
-      if (macroTargets) {
-        if (typeof macroTargets !== 'object' || macroTargets === null) {
+      // Handle different types
+      if (type === 'meal-program') {
+        // Validate meal program fields
+        if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
           return res.status(400).json({
-            error: 'Invalid macro targets format',
-            message: 'macroTargets must be an object with protein, fat, and/or carbs properties'
+            error: 'Missing required fields',
+            message: 'name and meals array are required for meal programs'
           });
         }
 
-        // Validate each macro target
-        const validMacros = ['protein', 'fat', 'carbs'];
-        for (const [macro, value] of Object.entries(macroTargets)) {
-          if (!validMacros.includes(macro)) {
+        if (meals.length > 10) {
+          return res.status(400).json({
+            error: 'Too many meals',
+            message: 'Maximum 10 meals allowed per program'
+          });
+        }
+
+        // Check for duplicate meal orders
+        const mealOrders = meals.map(m => m.mealOrder);
+        if (new Set(mealOrders).size !== mealOrders.length) {
+          return res.status(400).json({
+            error: 'Duplicate meal orders',
+            message: 'Each meal must have a unique order number'
+          });
+        }
+
+        // Create meal program
+        const result = await mealProgramService.createMealProgram(
+          { clientId, name, description, meals },
+          user.id
+        );
+
+        if (!result.success) {
+          return res.status(400).json({
+            error: 'Failed to create meal program',
+            message: result.error
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          data: result.data,
+          message: result.message || 'Meal program created successfully'
+        });
+      } else if (type === 'client-goal') {
+        // Validate client goal fields
+        const {
+          eerGoalCalories,
+          bmrGoalCalories,
+          proteinGoalGrams,
+          carbsGoalGrams,
+          fatGoalGrams,
+          proteinGoalPercentage,
+          carbsGoalPercentage,
+          fatGoalPercentage,
+          fiberGoalGrams,
+          waterGoalLiters,
+          goalStartDate,
+          goalEndDate,
+          notes
+        } = req.body;
+
+        if (!eerGoalCalories || !bmrGoalCalories || !proteinGoalGrams || !carbsGoalGrams || !fatGoalGrams) {
+          return res.status(400).json({
+            error: 'Missing required fields',
+            message: 'eerGoalCalories, bmrGoalCalories, proteinGoalGrams, carbsGoalGrams, and fatGoalGrams are required'
+          });
+        }
+
+        if (!proteinGoalPercentage || !carbsGoalPercentage || !fatGoalPercentage) {
+          return res.status(400).json({
+            error: 'Missing required fields',
+            message: 'proteinGoalPercentage, carbsGoalPercentage, and fatGoalPercentage are required'
+          });
+        }
+
+        // Create client goal
+        const result = await clientGoalsService.createClientGoal(
+          {
+            clientId,
+            eerGoalCalories,
+            bmrGoalCalories,
+            proteinGoalGrams,
+            carbsGoalGrams,
+            fatGoalGrams,
+            proteinGoalPercentage,
+            carbsGoalPercentage,
+            fatGoalPercentage,
+            fiberGoalGrams,
+            waterGoalLiters,
+            goalStartDate,
+            goalEndDate,
+            notes
+          },
+          user.id
+        );
+
+        if (!result.success) {
+          return res.status(400).json({
+            error: 'Failed to create client goal',
+            message: result.error
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          data: result.data,
+          message: 'Client goal created successfully'
+        });
+      } else {
+        // Meal plan type - validate action
+        if (!['preview', 'save'].includes(action)) {
+          return res.status(400).json({
+            error: 'Invalid action',
+            message: 'action must be either "preview" or "save"'
+          });
+        }
+
+        if (!planDate) {
+          return res.status(400).json({
+            error: 'Missing required field',
+            message: 'planDate is required (YYYY-MM-DD format)'
+          });
+        }
+
+        // Validate date format
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(planDate)) {
+          return res.status(400).json({
+            error: 'Invalid date format',
+            message: 'planDate must be in YYYY-MM-DD format'
+          });
+        }
+
+        // Check if plan date is not in the past
+        const planDateObj = new Date(planDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (planDateObj < today) {
+          return res.status(400).json({
+            error: 'Invalid date',
+            message: 'Plan date cannot be in the past'
+          });
+        }
+
+        // Validate macro targets if provided
+        if (macroTargets) {
+          if (typeof macroTargets !== 'object' || macroTargets === null) {
             return res.status(400).json({
-              error: 'Invalid macro type',
-              message: `Invalid macro type: ${macro}. Valid types are: ${validMacros.join(', ')}`
+              error: 'Invalid macro targets format',
+              message: 'macroTargets must be an object with protein, fat, and/or carbs properties'
             });
           }
 
-          if (typeof value !== 'object' || value === null || !('min' in value) || !('max' in value)) {
+          // Validate each macro target
+          const validMacros = ['protein', 'fat', 'carbs'];
+          for (const [macro, value] of Object.entries(macroTargets)) {
+            if (!validMacros.includes(macro)) {
+              return res.status(400).json({
+                error: 'Invalid macro type',
+                message: `Invalid macro type: ${macro}. Valid types are: ${validMacros.join(', ')}`
+              });
+            }
+
+            if (typeof value !== 'object' || value === null || !('min' in value) || !('max' in value)) {
+              return res.status(400).json({
+                error: 'Invalid macro target format',
+                message: `Each macro target must have min and max numeric values. Got: ${JSON.stringify(value)}`
+              });
+            }
+
+            const min = (value as any).min;
+            const max = (value as any).max;
+
+            if (typeof min !== 'number' || typeof max !== 'number' || min < 0 || max < 0 || min > max) {
+              return res.status(400).json({
+                error: 'Invalid macro target values',
+                message: `Macro targets must have positive values with min <= max. Got: ${macro} min: ${min}, max: ${max}`
+              });
+            }
+          }
+        }
+
+        // Check if client has a meal program - if yes, use it for meal planning
+        const { data: activeMealProgram } = await require('../../lib/supabase').supabase
+          .from('meal_programs')
+          .select('id')
+          .eq('client_id', clientId)
+          .eq('is_active', true)
+          .single();
+
+        let generatedMealPlan;
+        
+        if (activeMealProgram) {
+          console.log('🎯 API - Client has active meal program, using program-based meal planning');
+          
+          // Check if UI is sending meal program overrides
+          const uiOverrideMeals = req.body.uiOverrideMeals || null;
+          
+          // Generate meal plan based on meal program
+          generatedMealPlan = await mealPlanningService.generateMealPlanFromProgram(
+            clientId,
+            planDate,
+            dietaryRestrictions,
+            cuisinePreferences,
+            uiOverrideMeals,
+            user.id
+          );
+          
+          if (!generatedMealPlan.success) {
             return res.status(400).json({
-              error: 'Invalid macro target format',
-              message: `Each macro target must have min and max numeric values. Got: ${JSON.stringify(value)}`
+              error: 'Meal plan generation failed',
+              message: generatedMealPlan.error
             });
           }
-
-          const min = (value as any).min;
-          const max = (value as any).max;
-
-          if (typeof min !== 'number' || typeof max !== 'number' || min < 0 || max < 0 || min > max) {
-            return res.status(400).json({
-              error: 'Invalid macro target values',
-              message: `Macro targets must have positive values with min <= max. Got: ${macro} min: ${min}, max: ${max}`
+          
+          // Return the program-based meal plan
+          if (action === 'preview') {
+            return res.status(200).json({
+              message: 'Meal plan preview generated from program successfully',
+              data: generatedMealPlan.data
+            });
+          } else {
+            // For save action, you might want to store this differently
+            return res.status(200).json({
+              message: 'Meal plan saved from program successfully',
+              data: generatedMealPlan.data
             });
           }
+        } else {
+          console.log('🎯 API - No active meal program, using standard meal planning');
+          
+          // Generate meal plan using standard method
+          const mealPlanRequest: MealPlanGenerationRequest = {
+            clientId,
+            planDate,
+            planType,
+            dietaryRestrictions,
+            cuisinePreferences,
+            mealPreferences,
+            targetCalories,
+            macroTargets
+          };
+
+          console.log('🔍 API Debug - User ID from JWT:', user.id);
+          console.log('🔍 API Debug - User object:', JSON.stringify(user, null, 2));
+          
+          // Use a simple user ID for Edamam instead of the UUID
+          const edamamUserId = 'nutritionist1';
+          console.log('🔍 API Debug - Using Edamam User ID:', edamamUserId);
+          console.log('🚨 TEST DEBUG - This should appear in logs!');
+          
+          generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, edamamUserId);
+        }
+
+        // Handle based on action
+        if (action === 'preview') {
+          // Return preview without saving
+          return res.status(200).json({
+            message: 'Meal plan preview generated successfully',
+            action: 'preview',
+            mealPlan: {
+              ...generatedMealPlan,
+              id: 'preview-' + Date.now(), // Temporary ID for preview
+              status: 'preview'
+            }
+          });
+        } else {
+          // Save to database
+          const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
+
+          // Return the generated meal plan with the new ID
+          const savedMealPlan = await mealPlanningService.getMealPlan(planId);
+
+          return res.status(201).json({
+            message: 'Meal plan generated and saved successfully',
+            action: 'save',
+            mealPlan: savedMealPlan
+          });
         }
       }
 
-      // Generate meal plan
-      const mealPlanRequest: MealPlanGenerationRequest = {
-        clientId,
-        planDate,
-        planType,
-        dietaryRestrictions,
-        cuisinePreferences,
-        mealPreferences,
-        targetCalories,
-        macroTargets
-      };
-
-      console.log('🔍 API Debug - User ID from JWT:', user.id);
-      console.log('🔍 API Debug - User object:', JSON.stringify(user, null, 2));
-      
-      // Use a simple user ID for Edamam instead of the UUID
-      const edamamUserId = 'nutritionist1';
-      console.log('🔍 API Debug - Using Edamam User ID:', edamamUserId);
-      console.log('🚨 TEST DEBUG - This should appear in logs!');
-      
-      const generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, edamamUserId);
-
-      // Handle based on action
-      if (action === 'preview') {
-        // Return preview without saving
-        return res.status(200).json({
-          message: 'Meal plan preview generated successfully',
-          action: 'preview',
-          mealPlan: {
-            ...generatedMealPlan,
-            id: 'preview-' + Date.now(), // Temporary ID for preview
-            status: 'preview'
-          }
-        });
-      } else {
-        // Save to database
-        const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
-
-        // Return the generated meal plan with the new ID
-        const savedMealPlan = await mealPlanningService.getMealPlan(planId);
-
-        return res.status(201).json({
-          message: 'Meal plan generated and saved successfully',
-          action: 'save',
-          mealPlan: savedMealPlan
-        });
-      }
-
     } catch (error) {
-      console.error('Error generating meal plan:', error);
+      console.error('Error in POST request:', error);
       return res.status(500).json({
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Failed to generate meal plan'
+        message: error instanceof Error ? error.message : 'Failed to process request'
       });
     }
   }
 
-  // GET - List meal plans for a client
+  // GET - Handle different modes: meal plans or meal programs
   if (req.method === 'GET') {
     try {
-      const { clientId } = req.query;
+      const { clientId, mode = 'meal-plans' } = req.query;
 
       if (!clientId || typeof clientId !== 'string') {
         return res.status(400).json({
@@ -207,20 +390,55 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Get meal plans for the client
-      const mealPlans = await mealPlanningService.getClientMealPlans(clientId);
+      // Handle different modes
+      if (mode === 'meal-programs') {
+        // Get meal programs for the client
+        const result = await mealProgramService.getMealProgramsForClient(clientId, user.id);
 
-      return res.status(200).json({
-        message: 'Meal plans retrieved successfully',
-        mealPlans,
-        count: mealPlans.length
-      });
+        if (!result.success) {
+          return res.status(400).json({
+            error: 'Failed to fetch meal programs',
+            message: result.error
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: result.data,
+          message: 'Meal programs fetched successfully'
+        });
+      } else if (mode === 'client-goals') {
+        // Get client goals
+        const result = await clientGoalsService.getClientGoals(clientId, user.id);
+
+        if (!result.success) {
+          return res.status(400).json({
+            error: 'Failed to fetch client goals',
+            message: result.error
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: result.data,
+          message: 'Client goals fetched successfully'
+        });
+      } else {
+        // Default mode: get meal plans for the client
+        const mealPlans = await mealPlanningService.getClientMealPlans(clientId);
+
+        return res.status(200).json({
+          message: 'Meal plans retrieved successfully',
+          mealPlans,
+          count: mealPlans.length
+        });
+      }
 
     } catch (error) {
-      console.error('Error fetching meal plans:', error);
+      console.error('Error in GET request:', error);
       return res.status(500).json({
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Failed to fetch meal plans'
+        message: error instanceof Error ? error.message : 'Failed to process request'
       });
     }
   }

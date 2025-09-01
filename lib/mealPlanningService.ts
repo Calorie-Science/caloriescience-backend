@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { EdamamService, EdamamRecipe, RecipeSearchParams } from './edamamService';
+import { MealProgramMappingService } from './mealProgramMappingService';
+import { ClientGoalsService } from './clientGoalsService';
 
 export interface MealPlanGenerationRequest {
   clientId: string;
@@ -1348,6 +1350,259 @@ export class MealPlanningService {
     } catch (error) {
       console.error('Error deleting meal plan:', error);
       return false;
+    }
+  }
+
+  /**
+   * Generate meal plan based on client's meal program and goals
+   */
+  async generateMealPlanFromProgram(
+    clientId: string,
+    planDate: string,
+    dietaryRestrictions: string[],
+    cuisinePreferences: string[],
+    uiOverrideMeals?: any[], // Allow UI to override meal calories
+    userId?: string
+  ): Promise<any> {
+    console.log('🎯 Meal Planning Service - Generating meal plan from program for client:', clientId);
+    
+    try {
+      const clientGoalsService = new ClientGoalsService();
+      const mealProgramMappingService = new MealProgramMappingService();
+      
+      // 1. Get client's active goals
+      const goalsResponse = await clientGoalsService.getActiveClientGoal(clientId, userId!);
+      if (!goalsResponse.success || !goalsResponse.data) {
+        throw new Error('No active client goals found. Please set client goals first.');
+      }
+      
+      const clientGoal = goalsResponse.data;
+      console.log('🎯 Meal Planning Service - Client goals:', JSON.stringify(clientGoal, null, 2));
+      
+      // 2. Get client's active meal program
+      const { data: mealProgram, error: programError } = await supabase
+        .from('meal_programs')
+        .select(`
+          *,
+          meals:meal_program_meals(*)
+        `)
+        .eq('client_id', clientId)
+        .eq('is_active', true)
+        .single();
+      
+      if (programError || !mealProgram) {
+        throw new Error('No active meal program found. Please create a meal program first.');
+      }
+      
+      console.log('🎯 Meal Planning Service - Meal program:', JSON.stringify(mealProgram, null, 2));
+      
+      // 3. Calculate meal distribution based on goals and program
+      const mealDistribution = mealProgramMappingService.calculateMealDistribution(
+        clientGoal,
+        {
+          id: mealProgram.id,
+          clientId: mealProgram.client_id,
+          nutritionistId: mealProgram.nutritionist_id,
+          name: mealProgram.name,
+          description: mealProgram.description,
+          isActive: mealProgram.is_active,
+          createdAt: mealProgram.created_at,
+          updatedAt: mealProgram.updated_at,
+          meals: mealProgram.meals.map((meal: any) => ({
+            id: meal.id,
+            mealProgramId: meal.meal_program_id,
+            mealOrder: meal.meal_order,
+            mealName: meal.meal_name,
+            mealTime: meal.meal_time,
+            targetCalories: meal.target_calories,
+            mealType: meal.meal_type,
+            createdAt: meal.created_at,
+            updatedAt: meal.updated_at
+          }))
+        }
+      );
+      
+      console.log('🎯 Meal Planning Service - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
+      
+      // 4. Create Edamam meal plan request
+      const edamamRequest = mealProgramMappingService.createEdamamMealPlanRequest(
+        mealDistribution,
+        dietaryRestrictions,
+        cuisinePreferences,
+        clientGoal,
+        uiOverrideMeals
+      );
+      
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM REQUEST 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - EDAMAM REQUEST BODY:', JSON.stringify(edamamRequest, null, 2));
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM REQUEST END 🚨🚨🚨');
+      
+      // 5. Call Edamam API
+      console.log('🚨🚨🚨 MEAL PLANNING - CALLING EDAMAM API 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - About to call Edamam with request above');
+      const edamamResponse = await this.edamamService.generateMealPlanV1(edamamRequest, undefined);
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM API CALL COMPLETED 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - EDAMAM RESPONSE RECEIVED:', JSON.stringify(edamamResponse, null, 2));
+      
+      // 6. Map response back to meal program structure
+      console.log('🎯 Meal Planning Service - ===== MAPPING EDAMAM RESPONSE =====');
+      const mappedResponse = mealProgramMappingService.mapEdamamResponseToMealProgram(
+        edamamResponse,
+        mealDistribution
+      );
+      console.log('🎯 Meal Planning Service - Mapped response:', JSON.stringify(mappedResponse, null, 2));
+      console.log('🎯 Meal Planning Service - ===== END MAPPING =====');
+      
+      // 7. Fetch recipe details for each meal that has a recipe URI (in parallel for speed)
+      console.log('🎯 Meal Planning Service - Fetching recipe details for meals in parallel...');
+      const recipeFetchPromises = mappedResponse.meals
+        .filter(meal => meal.recipe?.uri)
+        .map(async (meal) => {
+          try {
+            console.log(`🎯 Meal Planning Service - Fetching details for meal: ${meal.mealName} (Order: ${meal.mealOrder || 'N/A'})`);
+            const recipeDetails = await this.edamamService.getRecipeDetails(meal.recipe.uri, userId);
+            meal.recipe.details = recipeDetails;
+            
+            // Calculate per-serving nutrition summary
+            if (recipeDetails?.recipe) {
+              const recipe = recipeDetails.recipe;
+              const servings = recipe.yield || 1;
+              
+              meal.recipe.nutritionSummary = {
+                calories: Math.round((recipe.calories || 0) / servings * 100) / 100,
+                protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
+                carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
+                fat: Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
+                fiber: Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+                sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
+                sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
+                servings: servings
+              };
+            }
+            
+            console.log(`✅ Meal Planning Service - Recipe details fetched for: ${meal.mealName}`);
+          } catch (error) {
+            console.error(`❌ Meal Planning Service - Failed to fetch recipe details for ${meal.mealName}:`, error);
+            meal.recipe.details = null;
+            meal.recipe.error = 'Failed to fetch recipe details';
+          }
+        });
+      
+      // Wait for all recipe fetches to complete
+      if (recipeFetchPromises.length > 0) {
+        console.log(`🎯 Meal Planning Service - Waiting for ${recipeFetchPromises.length} recipe fetches to complete...`);
+        await Promise.all(recipeFetchPromises);
+        console.log('✅ Meal Planning Service - All recipe fetches completed');
+      } else {
+        console.log('🎯 Meal Planning Service - No recipes to fetch details for');
+      }
+      
+      // Calculate consolidated daily nutrition totals AFTER all recipe details have been fetched
+      console.log('🎯 Meal Planning Service - ===== CALCULATING DAILY NUTRITION =====');
+      const dailyNutrition = {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        totalFiber: 0,
+        totalSodium: 0,
+        totalSugar: 0,
+        totalCholesterol: 0,
+        totalCalcium: 0,
+        totalIron: 0
+      };
+
+      // Calculate totals from actual recipe nutrition (now that details are populated)
+      mappedResponse.meals.forEach(meal => {
+        console.log(`🎯 Meal Planning Service - Processing meal: ${meal.mealName}`);
+        console.log(`🎯 Meal Planning Service - Has recipe: ${!!meal.recipe}`);
+        console.log(`🎯 Meal Planning Service - Has details: ${!!meal.recipe?.details}`);
+        console.log(`🎯 Meal Planning Service - Has recipe data: ${!!meal.recipe?.details?.recipe}`);
+        
+        if (meal.recipe?.details?.recipe) {
+          const recipe = meal.recipe.details.recipe;
+          
+          // Get per-serving values (divide by yield)
+          const servings = recipe.yield || 1;
+          const perServingCalories = (recipe.calories || 0) / servings;
+          const perServingProtein = (recipe.totalNutrients?.PROCNT?.quantity || 0) / servings;
+          const perServingCarbs = (recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings;
+          const perServingFat = (recipe.totalNutrients?.FAT?.quantity || 0) / servings;
+          const perServingFiber = (recipe.totalNutrients?.FIBTG?.quantity || 0) / servings;
+          const perServingSodium = (recipe.totalNutrients?.NA?.quantity || 0) / servings;
+          const perServingSugar = (recipe.totalNutrients?.SUGAR?.quantity || 0) / servings;
+          const perServingCholesterol = (recipe.totalNutrients?.CHOLE?.quantity || 0) / servings;
+          const perServingCalcium = (recipe.totalNutrients?.CA?.quantity || 0) / servings;
+          const perServingIron = (recipe.totalNutrients?.FE?.quantity || 0) / servings;
+
+          console.log(`🎯 Meal Planning Service - Per-serving values for ${meal.mealName}:`);
+          console.log(`  - Calories: ${perServingCalories}`);
+          console.log(`  - Protein: ${perServingProtein}g`);
+          console.log(`  - Carbs: ${perServingCarbs}g`);
+          console.log(`  - Fat: ${perServingFat}g`);
+          console.log(`  - Fiber: ${perServingFiber}g`);
+          
+          dailyNutrition.totalCalories += perServingCalories;
+          dailyNutrition.totalProtein += perServingProtein;
+          dailyNutrition.totalCarbs += perServingCarbs;
+          dailyNutrition.totalFat += perServingFat;
+          dailyNutrition.totalFiber += perServingFiber;
+          dailyNutrition.totalSodium += perServingSodium;
+          dailyNutrition.totalSugar += perServingSugar;
+          dailyNutrition.totalCholesterol += perServingCholesterol;
+          dailyNutrition.totalCalcium += perServingCalcium;
+          dailyNutrition.totalIron += perServingIron;
+          
+          console.log(`🎯 Meal Planning Service - Added nutrition from ${meal.mealName}: Calories=${perServingCalories}, Protein=${perServingProtein}, Carbs=${perServingCarbs}, Fat=${perServingFat}`);
+        } else {
+          // Use meal distribution estimates for meals without recipes
+          dailyNutrition.totalCalories += meal.targetCalories || 0;
+          console.log(`🎯 Meal Planning Service - Added estimated calories from ${meal.mealName}: ${meal.targetCalories || 0}`);
+        }
+      });
+
+      // Add dailyNutrition to the mappedResponse
+      mappedResponse.dailyNutrition = {
+        ...dailyNutrition,
+        // Round to 2 decimal places for readability
+        totalCalories: Math.round(dailyNutrition.totalCalories * 100) / 100,
+        totalProtein: Math.round(dailyNutrition.totalProtein * 100) / 100,
+        totalCarbs: Math.round(dailyNutrition.totalCarbs * 100) / 100,
+        totalFat: Math.round(dailyNutrition.totalFat * 100) / 100,
+        totalFiber: Math.round(dailyNutrition.totalFiber * 100) / 100,
+        totalSodium: Math.round(dailyNutrition.totalSodium * 100) / 100,
+        totalSugar: Math.round(dailyNutrition.totalSugar * 100) / 100,
+        totalCholesterol: Math.round(dailyNutrition.totalCholesterol * 100) / 100,
+        totalCalcium: Math.round(dailyNutrition.totalCalcium * 100) / 100,
+        totalIron: Math.round(dailyNutrition.totalIron * 100) / 100
+      };
+      
+      console.log('🎯 Meal Planning Service - Final daily nutrition totals:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
+      console.log('🎯 Meal Planning Service - ===== END CALCULATING DAILY NUTRITION =====');
+      
+      return {
+        success: true,
+        data: {
+          mealPlan: mappedResponse,
+          clientGoals: clientGoal,
+          mealProgram: {
+            id: mealProgram.id,
+            name: mealProgram.name,
+            description: mealProgram.description
+          },
+          planDate,
+          dietaryRestrictions,
+          cuisinePreferences,
+          uiOverrideMeals
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Meal Planning Service - Error generating meal plan from program:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to generate meal plan from program'
+      };
     }
   }
 }
