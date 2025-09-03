@@ -71,11 +71,11 @@ export class MealProgramMappingService {
   ): MealDistribution {
     const distribution: MealDistribution = {};
     
-    // Calculate total daily targets from client goal
+    // Calculate total daily targets from client goal (use mid-point of ranges)
     const dailyCalories = clientGoal.eerGoalCalories;
-    const dailyProtein = clientGoal.proteinGoalGrams;
-    const dailyCarbs = clientGoal.carbsGoalGrams;
-    const dailyFat = clientGoal.fatGoalGrams;
+    const dailyProtein = Math.round((clientGoal.proteinGoalMin + clientGoal.proteinGoalMax) / 2);
+    const dailyCarbs = Math.round((clientGoal.carbsGoalMin + clientGoal.carbsGoalMax) / 2);
+    const dailyFat = Math.round((clientGoal.fatGoalMin + clientGoal.fatGoalMax) / 2);
     
     mealProgram.meals.forEach(meal => {
       const mealKey = `meal_${meal.mealOrder}`;
@@ -186,16 +186,16 @@ export class MealProgramMappingService {
             max: Math.round(totalCalories * 1.2)  // Allow 20% flexibility for daily total
           },
           PROCNT: {
-            min: Math.round(clientGoal.proteinGoalGrams * 0.7), // Allow 30% flexibility for protein
-            max: Math.round(clientGoal.proteinGoalGrams * 1.3)  // Allow 30% flexibility for protein
+            min: clientGoal.proteinGoalMin, // Use actual min from client goals
+            max: clientGoal.proteinGoalMax  // Use actual max from client goals
           },
           FAT: {
-            min: Math.round(clientGoal.fatGoalGrams * 0.7), // Allow 30% flexibility for fat
-            max: Math.round(clientGoal.fatGoalGrams * 1.3)  // Allow 30% flexibility for fat
+            min: clientGoal.fatGoalMin, // Use actual min from client goals
+            max: clientGoal.fatGoalMax  // Use actual max from client goals
           },
           CHOCDF: {
-            min: Math.round(clientGoal.carbsGoalGrams * 0.7), // Allow 30% flexibility for carbs
-            max: Math.round(clientGoal.carbsGoalGrams * 1.3)  // Allow 30% flexibility for carbs
+            min: clientGoal.carbsGoalMin, // Use actual min from client goals
+            max: clientGoal.carbsGoalMax  // Use actual max from client goals
           }
         }
       }
@@ -224,9 +224,13 @@ export class MealProgramMappingService {
       }
     }
 
-    console.log('🎯 Meal Program Mapping Service - Final Edamam request (WITH CONSTRAINTS):', JSON.stringify(request, null, 2));
+    console.log('🎯 Meal Program Mapping Service - Final Edamam request (WITH RANGE CONSTRAINTS):', JSON.stringify(request, null, 2));
     console.log('🎯 Meal Program Mapping Service - Sections created:', Object.keys(sections));
     console.log('🎯 Meal Program Mapping Service - Total calories:', totalCalories);
+    console.log('🎯 Meal Program Mapping Service - Macro ranges sent to Edamam:');
+    console.log('🎯   - Protein:', clientGoal.proteinGoalMin, '-', clientGoal.proteinGoalMax, 'g');
+    console.log('🎯   - Carbs:', clientGoal.carbsGoalMin, '-', clientGoal.carbsGoalMax, 'g');
+    console.log('🎯   - Fat:', clientGoal.fatGoalMin, '-', clientGoal.fatGoalMax, 'g');
     return request;
   }
 

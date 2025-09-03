@@ -25,7 +25,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     try {
       const {
         type = 'meal-plan', // 'meal-plan' or 'meal-program'
-        action = 'save', // 'preview' or 'save' (for meal-plan type)
+        action = 'save', // 'preview', 'save', 'update', 'activate' (for meal-plan type)
         clientId,
         planDate,
         planType = 'daily',
@@ -37,7 +37,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Meal program fields
         name,
         description,
-        meals
+        meals,
+        // Edit fields
+        mealProgramId, // For editing meal programs
+        mealPlanId, // For editing meal plans
+        isActive // For meal program activation
       } = req.body;
 
       // Validate type
@@ -73,113 +77,238 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // Handle different types
       if (type === 'meal-program') {
-        // Validate meal program fields
-        if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
-          return res.status(400).json({
-            error: 'Missing required fields',
-            message: 'name and meals array are required for meal programs'
+        // Handle edit operations
+        if (action === 'update' && mealProgramId) {
+          // Update existing meal program
+          if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
+            return res.status(400).json({
+              error: 'Missing required fields',
+              message: 'name and meals array are required for updating meal programs'
+            });
+          }
+
+          if (meals.length > 10) {
+            return res.status(400).json({
+              error: 'Too many meals',
+              message: 'Maximum 10 meals allowed per program'
+            });
+          }
+
+          // Check for duplicate meal orders
+          const mealOrders = meals.map(m => m.mealOrder);
+          if (new Set(mealOrders).size !== mealOrders.length) {
+            return res.status(400).json({
+              error: 'Duplicate meal orders',
+              message: 'Each meal must have a unique order number'
+            });
+          }
+
+          const result = await mealProgramService.updateMealProgram(mealProgramId, user.id, {
+            name,
+            description,
+            meals
+          });
+
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to update meal program',
+              message: result.error
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            data: result.data,
+            message: 'Meal program updated successfully'
+          });
+        } else if (action === 'activate' && mealProgramId) {
+          // Activate meal program
+          const result = await mealProgramService.activateMealProgram(mealProgramId, user.id);
+          
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to activate meal program',
+              message: result.error
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            data: result.data,
+            message: 'Meal program activated successfully'
+          });
+        } else if (action === 'delete' && mealProgramId) {
+          // Delete meal program
+          const result = await mealProgramService.deleteMealProgram(mealProgramId, user.id);
+          
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to delete meal program',
+              message: result.error
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: 'Meal program deleted successfully'
+          });
+        } else {
+          // Create new meal program (default action)
+          // Validate meal program fields
+          if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
+            return res.status(400).json({
+              error: 'Missing required fields',
+              message: 'name and meals array are required for meal programs'
+            });
+          }
+
+          if (meals.length > 10) {
+            return res.status(400).json({
+              error: 'Too many meals',
+              message: 'Maximum 10 meals allowed per program'
+            });
+          }
+
+          // Check for duplicate meal orders
+          const mealOrders = meals.map(m => m.mealOrder);
+          if (new Set(mealOrders).size !== mealOrders.length) {
+            return res.status(400).json({
+              error: 'Duplicate meal orders',
+              message: 'Each meal must have a unique order number'
+            });
+          }
+
+                    // Create meal program
+          const result = await mealProgramService.createMealProgram(
+            { clientId, name, description, meals },
+            user.id
+          );
+
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to create meal program',
+              message: result.error
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            data: result.data,
+            message: result.message || 'Meal program created successfully'
           });
         }
-
-        if (meals.length > 10) {
-          return res.status(400).json({
-            error: 'Too many meals',
-            message: 'Maximum 10 meals allowed per program'
-          });
-        }
-
-        // Check for duplicate meal orders
-        const mealOrders = meals.map(m => m.mealOrder);
-        if (new Set(mealOrders).size !== mealOrders.length) {
-          return res.status(400).json({
-            error: 'Duplicate meal orders',
-            message: 'Each meal must have a unique order number'
-          });
-        }
-
-        // Create meal program
-        const result = await mealProgramService.createMealProgram(
-          { clientId, name, description, meals },
-          user.id
-        );
-
-        if (!result.success) {
-          return res.status(400).json({
-            error: 'Failed to create meal program',
-            message: result.error
-          });
-        }
-
-        return res.status(201).json({
-          success: true,
-          data: result.data,
-          message: result.message || 'Meal program created successfully'
-        });
       } else if (type === 'client-goal') {
-        // Validate client goal fields
-        const {
-          eerGoalCalories,
-          bmrGoalCalories,
-          proteinGoalGrams,
-          carbsGoalGrams,
-          fatGoalGrams,
-          proteinGoalPercentage,
-          carbsGoalPercentage,
-          fatGoalPercentage,
-          fiberGoalGrams,
-          waterGoalLiters,
-          goalStartDate,
-          goalEndDate,
-          notes
-        } = req.body;
-
-        if (!eerGoalCalories || !bmrGoalCalories || !proteinGoalGrams || !carbsGoalGrams || !fatGoalGrams) {
-          return res.status(400).json({
-            error: 'Missing required fields',
-            message: 'eerGoalCalories, bmrGoalCalories, proteinGoalGrams, carbsGoalGrams, and fatGoalGrams are required'
-          });
-        }
-
-        if (!proteinGoalPercentage || !carbsGoalPercentage || !fatGoalPercentage) {
-          return res.status(400).json({
-            error: 'Missing required fields',
-            message: 'proteinGoalPercentage, carbsGoalPercentage, and fatGoalPercentage are required'
-          });
-        }
-
-        // Create client goal
-        const result = await clientGoalsService.createClientGoal(
-          {
-            clientId,
+        // Handle client goal operations
+        if (action === 'update' && req.body.goalId) {
+          // Update existing client goal
+          const {
+            goalId,
             eerGoalCalories,
             bmrGoalCalories,
-            proteinGoalGrams,
-            carbsGoalGrams,
-            fatGoalGrams,
-            proteinGoalPercentage,
-            carbsGoalPercentage,
-            fatGoalPercentage,
+            proteinGoalMin,
+            proteinGoalMax,
+            carbsGoalMin,
+            carbsGoalMax,
+            fatGoalMin,
+            fatGoalMax,
             fiberGoalGrams,
             waterGoalLiters,
             goalStartDate,
             goalEndDate,
             notes
-          },
-          user.id
-        );
+          } = req.body;
 
-        if (!result.success) {
-          return res.status(400).json({
-            error: 'Failed to create client goal',
-            message: result.error
+          const result = await clientGoalsService.updateClientGoal(
+            goalId,
+            {
+              eerGoalCalories,
+              bmrGoalCalories,
+              proteinGoalMin,
+              proteinGoalMax,
+              carbsGoalMin,
+              carbsGoalMax,
+              fatGoalMin,
+              fatGoalMax,
+              fiberGoalGrams,
+              waterGoalLiters,
+              goalStartDate,
+              goalEndDate,
+              notes
+            },
+            user.id
+          );
+
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to update client goal',
+              message: result.error
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            data: result.data,
+            message: 'Client goal updated successfully'
+          });
+        } else {
+          // Create new client goal
+          const {
+            eerGoalCalories,
+            bmrGoalCalories,
+            proteinGoalMin,
+            proteinGoalMax,
+            carbsGoalMin,
+            carbsGoalMax,
+            fatGoalMin,
+            fatGoalMax,
+            fiberGoalGrams,
+            waterGoalLiters,
+            goalStartDate,
+            goalEndDate,
+            notes
+          } = req.body;
+
+          if (!eerGoalCalories || !bmrGoalCalories || !proteinGoalMin || !proteinGoalMax || !carbsGoalMin || !carbsGoalMax || !fatGoalMin || !fatGoalMax) {
+            return res.status(400).json({
+              error: 'Missing required fields',
+              message: 'eerGoalCalories, bmrGoalCalories, proteinGoalMin, proteinGoalMax, carbsGoalMin, carbsGoalMax, fatGoalMin, and fatGoalMax are required'
+            });
+          }
+
+          // Create client goal
+          const result = await clientGoalsService.createClientGoal(
+            {
+              clientId,
+              eerGoalCalories,
+              bmrGoalCalories,
+              proteinGoalMin,
+              proteinGoalMax,
+              carbsGoalMin,
+              carbsGoalMax,
+              fatGoalMin,
+              fatGoalMax,
+              fiberGoalGrams,
+              waterGoalLiters,
+              goalStartDate,
+              goalEndDate,
+              notes
+            },
+            user.id
+          );
+
+          if (!result.success) {
+            return res.status(400).json({
+              error: 'Failed to create client goal',
+              message: result.error
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            data: result.data,
+            message: 'Client goal created successfully'
           });
         }
-
-        return res.status(201).json({
-          success: true,
-          data: result.data,
-          message: 'Client goal created successfully'
-        });
       } else {
         // Meal plan type - validate action
         if (!['preview', 'save'].includes(action)) {

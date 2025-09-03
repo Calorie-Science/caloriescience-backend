@@ -7,15 +7,13 @@ export interface ClientGoal {
   eerGoalCalories: number;
   bmrGoalCalories: number;
   
-  // Macro Goals (grams)
-  proteinGoalGrams: number;
-  carbsGoalGrams: number;
-  fatGoalGrams: number;
-  
-  // Macro Percentages
-  proteinGoalPercentage: number;
-  carbsGoalPercentage: number;
-  fatGoalPercentage: number;
+  // Macro Goals (min/max ranges in grams)
+  proteinGoalMin: number;
+  proteinGoalMax: number;
+  carbsGoalMin: number;
+  carbsGoalMax: number;
+  fatGoalMin: number;
+  fatGoalMax: number;
   
   // Additional Goals
   fiberGoalGrams?: number;
@@ -36,12 +34,12 @@ export interface CreateClientGoalRequest {
   clientId: string;
   eerGoalCalories: number;
   bmrGoalCalories: number;
-  proteinGoalGrams: number;
-  carbsGoalGrams: number;
-  fatGoalGrams: number;
-  proteinGoalPercentage: number;
-  carbsGoalPercentage: number;
-  fatGoalPercentage: number;
+  proteinGoalMin: number;
+  proteinGoalMax: number;
+  carbsGoalMin: number;
+  carbsGoalMax: number;
+  fatGoalMin: number;
+  fatGoalMax: number;
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
   goalStartDate?: string;
@@ -52,12 +50,12 @@ export interface CreateClientGoalRequest {
 export interface UpdateClientGoalRequest {
   eerGoalCalories?: number;
   bmrGoalCalories?: number;
-  proteinGoalGrams?: number;
-  carbsGoalGrams?: number;
-  fatGoalGrams?: number;
-  proteinGoalPercentage?: number;
-  carbsGoalPercentage?: number;
-  fatGoalPercentage?: number;
+  proteinGoalMin?: number;
+  proteinGoalMax?: number;
+  carbsGoalMin?: number;
+  carbsGoalMax?: number;
+  fatGoalMin?: number;
+  fatGoalMax?: number;
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
   goalStartDate?: string;
@@ -80,37 +78,50 @@ export interface ClientGoalsResponse {
 }
 
 // Validation helpers
-export const validateMacroPercentages = (protein: number, carbs: number, fat: number): boolean => {
-  const total = protein + carbs + fat;
-  return Math.abs(total - 100) < 0.01; // Allow small floating point differences
+export const validateMacroRanges = (
+  proteinMin: number, proteinMax: number,
+  carbsMin: number, carbsMax: number,
+  fatMin: number, fatMax: number
+): boolean => {
+  // Check that min values are less than max values
+  if (proteinMin >= proteinMax || carbsMin >= carbsMax || fatMin >= fatMax) {
+    return false;
+  }
+  
+  // Check that all values are positive
+  if (proteinMin <= 0 || proteinMax <= 0 || carbsMin <= 0 || carbsMax <= 0 || fatMin <= 0 || fatMax <= 0) {
+    return false;
+  }
+  
+  return true;
 };
 
-export const calculateMacroGramsFromPercentages = (
-  totalCalories: number,
-  proteinPercentage: number,
-  carbsPercentage: number,
-  fatPercentage: number
-): { protein: number; carbs: number; fat: number } => {
-  return {
-    protein: Math.round((totalCalories * proteinPercentage / 100) / 4), // 4 cal per gram
-    carbs: Math.round((totalCalories * carbsPercentage / 100) / 4),   // 4 cal per gram
-    fat: Math.round((totalCalories * fatPercentage / 100) / 9)        // 9 cal per gram
-  };
-};
-
-export const calculateMacroPercentagesFromGrams = (
+export const calculateMacroCaloriesFromGrams = (
   proteinGrams: number,
   carbsGrams: number,
   fatGrams: number
-): { protein: number; carbs: number; fat: number } => {
-  const proteinCalories = proteinGrams * 4;
-  const carbsCalories = carbsGrams * 4;
-  const fatCalories = fatGrams * 9;
+): { protein: number; carbs: number; fat: number; total: number } => {
+  const proteinCalories = proteinGrams * 4; // 4 cal per gram
+  const carbsCalories = carbsGrams * 4;     // 4 cal per gram
+  const fatCalories = fatGrams * 9;         // 9 cal per gram
   const totalCalories = proteinCalories + carbsCalories + fatCalories;
   
   return {
-    protein: Math.round((proteinCalories / totalCalories) * 100 * 100) / 100,
-    carbs: Math.round((carbsCalories / totalCalories) * 100 * 100) / 100,
-    fat: Math.round((fatCalories / totalCalories) * 100 * 100) / 100
+    protein: proteinCalories,
+    carbs: carbsCalories,
+    fat: fatCalories,
+    total: totalCalories
+  };
+};
+
+export const calculateMacroGramsFromCalories = (
+  proteinCalories: number,
+  carbsCalories: number,
+  fatCalories: number
+): { protein: number; carbs: number; fat: number } => {
+  return {
+    protein: Math.round(proteinCalories / 4), // 4 cal per gram
+    carbs: Math.round(carbsCalories / 4),     // 4 cal per gram
+    fat: Math.round(fatCalories / 9)          // 9 cal per gram
   };
 };

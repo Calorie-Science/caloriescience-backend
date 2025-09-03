@@ -1605,4 +1605,122 @@ export class MealPlanningService {
       };
     }
   }
+
+  /**
+   * Update an existing meal plan
+   */
+  async updateMealPlan(mealPlanId: string, nutritionistId: string, updateData: {
+    planName?: string;
+    planDate?: string;
+    dietaryRestrictions?: string[];
+    cuisinePreferences?: string[];
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🎯 Meal Planning Service - Updating meal plan:', mealPlanId);
+      console.log('🎯 Meal Planning Service - Update data:', JSON.stringify(updateData, null, 2));
+
+      // Validate that the user is actually a nutritionist
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id, role')
+        .eq('id', nutritionistId)
+        .eq('role', 'nutritionist')
+        .single();
+
+      if (userError || !user) {
+        return {
+          success: false,
+          error: 'Access denied. Only nutritionists can update meal plans.'
+        };
+      }
+
+      // Check if meal plan exists and belongs to nutritionist
+      const { data: existingMealPlan, error: checkError } = await supabase
+        .from('meal_plans')
+        .select('id, nutritionist_id')
+        .eq('id', mealPlanId)
+        .eq('nutritionist_id', nutritionistId)
+        .single();
+
+      if (checkError || !existingMealPlan) {
+        return {
+          success: false,
+          error: 'Meal plan not found or access denied'
+        };
+      }
+
+      // Validate plan date if provided
+      if (updateData.planDate) {
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(updateData.planDate)) {
+          return {
+            success: false,
+            error: 'Invalid date format. planDate must be in YYYY-MM-DD format'
+          };
+        }
+
+        // Check if plan date is not in the past
+        const planDateObj = new Date(updateData.planDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (planDateObj < today) {
+          return {
+            success: false,
+            error: 'Plan date cannot be in the past'
+          };
+        }
+      }
+
+      // Update meal plan
+      const updateFields: any = {
+        updated_at: new Date().toISOString()
+      };
+
+      if (updateData.planName) updateFields.plan_name = updateData.planName;
+      if (updateData.planDate) updateFields.plan_date = updateData.planDate;
+      if (updateData.dietaryRestrictions) updateFields.dietary_restrictions = updateData.dietaryRestrictions;
+      if (updateData.cuisinePreferences) updateFields.cuisine_preferences = updateData.cuisinePreferences;
+
+      const { error: updateError } = await supabase
+        .from('meal_plans')
+        .update(updateFields)
+        .eq('id', mealPlanId);
+
+      if (updateError) {
+        console.error('❌ Meal Planning Service - Error updating meal plan:', updateError);
+        return {
+          success: false,
+          error: 'Failed to update meal plan'
+        };
+      }
+
+      // Fetch updated meal plan
+      const { data: updatedMealPlan, error: fetchError } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('id', mealPlanId)
+        .single();
+
+      if (fetchError || !updatedMealPlan) {
+        return {
+          success: false,
+          error: 'Failed to fetch updated meal plan'
+        };
+      }
+
+      console.log('✅ Meal Planning Service - Meal plan updated successfully');
+      return {
+        success: true,
+        data: updatedMealPlan
+      };
+
+    } catch (error) {
+      console.error('❌ Meal Planning Service - Error in updateMealPlan:', error);
+      return {
+        success: false,
+        error: 'Internal server error'
+      };
+    }
+  }
 }

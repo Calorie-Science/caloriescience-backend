@@ -87,14 +87,15 @@ export class MealProgramService {
         .eq('client_id', request.clientId)
         .eq('is_active', true);
 
-      // Create new meal program
+      // Create new meal program (inactive by default)
       const { data: mealProgram, error: programError } = await supabase
         .from('meal_programs')
         .insert({
           client_id: request.clientId,
           nutritionist_id: nutritionistId,
           name: request.name,
-          description: request.description
+          description: request.description,
+          is_active: false
         })
         .select()
         .single();
@@ -344,144 +345,7 @@ export class MealProgramService {
     }
   }
 
-  /**
-   * Update an existing meal program
-   */
-  async updateMealProgram(programId: string, request: UpdateMealProgramRequest, nutritionistId: string): Promise<MealProgramResponse> {
-    try {
-      console.log('🍽️ Meal Program Service - Updating meal program:', programId, JSON.stringify(request, null, 2));
 
-      // Validate that the user is actually a nutritionist
-      const { data: user, error: userError } = await supabase
-        .from('users')
-        .select('id, role')
-        .eq('id', nutritionistId)
-        .eq('role', 'nutritionist')
-        .single();
-
-      if (userError || !user) {
-        return {
-          success: false,
-          error: 'Access denied. Only nutritionists can access meal programs.'
-        };
-      }
-
-      // Check if program exists and belongs to nutritionist
-      const { data: existingProgram, error: checkError } = await supabase
-        .from('meal_programs')
-        .select('id')
-        .eq('id', programId)
-        .eq('nutritionist_id', nutritionistId)
-        .single();
-
-      if (checkError || !existingProgram) {
-        return {
-          success: false,
-          error: 'Meal program not found or access denied'
-        };
-      }
-
-      // Update program details if provided
-      if (request.name || request.description !== undefined) {
-        const updateData: any = {};
-        if (request.name) updateData.name = request.name;
-        if (request.description !== undefined) updateData.description = request.description;
-
-        const { error: updateError } = await supabase
-          .from('meal_programs')
-          .update(updateData)
-          .eq('id', programId);
-
-        if (updateError) {
-          console.error('❌ Meal Program Service - Error updating program:', updateError);
-          return {
-            success: false,
-            error: 'Failed to update meal program'
-          };
-        }
-      }
-
-      // Update meals if provided
-      if (request.meals) {
-        // Validate meals
-        for (const meal of request.meals) {
-          if (!meal.mealName || !meal.mealTime || meal.mealOrder <= 0 || meal.mealOrder > 10) {
-            return {
-              success: false,
-              error: `Invalid meal data: meal ${meal.mealOrder} has invalid data`
-            };
-          }
-
-          if (!isValidTimeFormat(meal.mealTime)) {
-            return {
-              success: false,
-              error: `Invalid time format for meal ${meal.mealOrder}: ${meal.mealTime}. Use 24-hour format (HH:MM)`
-            };
-          }
-
-          if (meal.targetCalories && meal.targetCalories <= 0) {
-            return {
-              success: false,
-              error: `Invalid target calories for meal ${meal.mealOrder}: must be positive`
-            };
-          }
-        }
-
-        // Delete existing meals
-        const { error: deleteError } = await supabase
-          .from('meal_program_meals')
-          .delete()
-          .eq('meal_program_id', programId);
-
-        if (deleteError) {
-          console.error('❌ Meal Program Service - Error deleting existing meals:', deleteError);
-          return {
-            success: false,
-            error: 'Failed to update meals'
-          };
-        }
-
-        // Create new meals
-        const mealsData = request.meals.map(meal => ({
-          meal_program_id: programId,
-          meal_order: meal.mealOrder,
-          meal_name: meal.mealName,
-          meal_time: meal.mealTime,
-          target_calories: meal.targetCalories,
-          meal_type: meal.mealType
-        }));
-
-        const { error: mealsError } = await supabase
-          .from('meal_program_meals')
-          .insert(mealsData);
-
-        if (mealsError) {
-          console.error('❌ Meal Program Service - Error creating new meals:', mealsError);
-          return {
-            success: false,
-            error: 'Failed to update meals'
-          };
-        }
-      }
-
-      // Fetch updated program
-      const updatedProgram = await this.getMealProgramById(programId, nutritionistId);
-      
-      console.log('✅ Meal Program Service - Meal program updated successfully');
-      return {
-        success: true,
-        data: updatedProgram.data,
-        message: 'Meal program updated successfully'
-      };
-
-    } catch (error) {
-      console.error('❌ Meal Program Service - Error in updateMealProgram:', error);
-      return {
-        success: false,
-        error: 'Internal server error'
-      };
-    }
-  }
 
   /**
    * Delete a meal program
@@ -554,6 +418,147 @@ export class MealProgramService {
 
     } catch (error) {
       console.error('❌ Meal Program Service - Error in deleteMealProgram:', error);
+      return {
+        success: false,
+        error: 'Internal server error'
+      };
+    }
+  }
+
+  /**
+   * Update an existing meal program
+   */
+  async updateMealProgram(programId: string, nutritionistId: string, updateData: UpdateMealProgramRequest): Promise<MealProgramResponse> {
+    try {
+      console.log('🍽️ Meal Program Service - Updating meal program:', programId);
+      console.log('🍽️ Meal Program Service - Update data:', JSON.stringify(updateData, null, 2));
+
+      // Validate that the user is actually a nutritionist
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id, role')
+        .eq('id', nutritionistId)
+        .eq('role', 'nutritionist')
+        .single();
+
+      if (userError || !user) {
+        return {
+          success: false,
+          error: 'Access denied. Only nutritionists can update meal programs.'
+        };
+      }
+
+      // Check if program exists and belongs to nutritionist
+      const { data: existingProgram, error: checkError } = await supabase
+        .from('meal_programs')
+        .select('id, client_id')
+        .eq('id', programId)
+        .eq('nutritionist_id', nutritionistId)
+        .single();
+
+      if (checkError || !existingProgram) {
+        return {
+          success: false,
+          error: 'Meal program not found or access denied'
+        };
+      }
+
+      // Validate meals
+      if (updateData.meals) {
+        for (const meal of updateData.meals) {
+          if (!meal.mealName || !meal.mealTime || meal.mealOrder <= 0 || meal.mealOrder > 10) {
+            return {
+              success: false,
+              error: `Invalid meal data: meal ${meal.mealOrder} has invalid data`
+            };
+          }
+
+          if (!isValidTimeFormat(meal.mealTime)) {
+            return {
+              success: false,
+              error: `Invalid time format for meal ${meal.mealOrder}: ${meal.mealTime}. Use 24-hour format (HH:MM)`
+            };
+          }
+
+          if (meal.targetCalories && meal.targetCalories <= 0) {
+            return {
+              success: false,
+              error: `Invalid target calories for meal ${meal.mealOrder}: must be positive`
+            };
+          }
+        }
+      }
+
+      // Start a transaction
+      const { error: updateProgramError } = await supabase
+        .from('meal_programs')
+        .update({
+          name: updateData.name,
+          description: updateData.description,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', programId);
+
+      if (updateProgramError) {
+        console.error('❌ Meal Program Service - Error updating meal program:', updateProgramError);
+        return {
+          success: false,
+          error: 'Failed to update meal program'
+        };
+      }
+
+      // Delete existing meals
+      const { error: deleteMealsError } = await supabase
+        .from('meal_program_meals')
+        .delete()
+        .eq('meal_program_id', programId);
+
+      if (deleteMealsError) {
+        console.error('❌ Meal Program Service - Error deleting existing meals:', deleteMealsError);
+        return {
+          success: false,
+          error: 'Failed to update meal program meals'
+        };
+      }
+
+      // Insert new meals
+      if (updateData.meals) {
+        const mealsToInsert = updateData.meals.map(meal => ({
+          meal_program_id: programId,
+          meal_order: meal.mealOrder,
+          meal_name: meal.mealName,
+          meal_time: meal.mealTime,
+          target_calories: meal.targetCalories,
+          meal_type: meal.mealType
+        }));
+
+        const { error: insertMealsError } = await supabase
+          .from('meal_program_meals')
+          .insert(mealsToInsert);
+
+        if (insertMealsError) {
+          console.error('❌ Meal Program Service - Error inserting new meals:', insertMealsError);
+          return {
+            success: false,
+            error: 'Failed to update meal program meals'
+          };
+        }
+      }
+
+
+
+      // Fetch updated program
+      const updatedProgram = await this.getMealProgramById(programId, nutritionistId);
+      
+      console.log('✅ Meal Program Service - Meal program updated successfully');
+      return {
+        success: true,
+        data: updatedProgram.data,
+        message: 'Meal program updated successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ Meal Program Service - Error in updateMealProgram:', error);
       return {
         success: false,
         error: 'Internal server error'

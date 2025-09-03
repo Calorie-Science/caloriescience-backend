@@ -5,7 +5,7 @@ import {
   UpdateClientGoalRequest,
   ClientGoalResponse,
   ClientGoalsResponse,
-  validateMacroPercentages
+  validateMacroRanges
 } from '../types/clientGoals';
 
 export class ClientGoalsService {
@@ -25,11 +25,15 @@ export class ClientGoalsService {
         };
       }
 
-      // Validate macro percentages
-      if (!validateMacroPercentages(request.proteinGoalPercentage, request.carbsGoalPercentage, request.fatGoalPercentage)) {
+      // Validate macro ranges
+      if (!validateMacroRanges(
+        request.proteinGoalMin, request.proteinGoalMax,
+        request.carbsGoalMin, request.carbsGoalMax,
+        request.fatGoalMin, request.fatGoalMax
+      )) {
         return {
           success: false,
-          error: 'Invalid macro percentages: protein + carbs + fat must equal 100%'
+          error: 'Invalid macro ranges: min values must be less than max values and all values must be positive'
         };
       }
 
@@ -78,12 +82,12 @@ export class ClientGoalsService {
           nutritionist_id: nutritionistId,
           eer_goal_calories: request.eerGoalCalories,
           bmr_goal_calories: request.bmrGoalCalories,
-          protein_goal_grams: request.proteinGoalGrams,
-          carbs_goal_grams: request.carbsGoalGrams,
-          fat_goal_grams: request.fatGoalGrams,
-          protein_goal_percentage: request.proteinGoalPercentage,
-          carbs_goal_percentage: request.carbsGoalPercentage,
-          fat_goal_percentage: request.fatGoalPercentage,
+          protein_goal_min: request.proteinGoalMin,
+          protein_goal_max: request.proteinGoalMax,
+          carbs_goal_min: request.carbsGoalMin,
+          carbs_goal_max: request.carbsGoalMax,
+          fat_goal_min: request.fatGoalMin,
+          fat_goal_max: request.fatGoalMax,
           fiber_goal_grams: request.fiberGoalGrams,
           water_goal_liters: request.waterGoalLiters,
           goal_start_date: request.goalStartDate || new Date().toISOString().split('T')[0],
@@ -107,12 +111,12 @@ export class ClientGoalsService {
         nutritionistId: clientGoal.nutritionist_id,
         eerGoalCalories: clientGoal.eer_goal_calories,
         bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalGrams: clientGoal.protein_goal_grams,
-        carbsGoalGrams: clientGoal.carbs_goal_grams,
-        fatGoalGrams: clientGoal.fat_goal_grams,
-        proteinGoalPercentage: clientGoal.protein_goal_percentage,
-        carbsGoalPercentage: clientGoal.carbs_goal_percentage,
-        fatGoalPercentage: clientGoal.fat_goal_percentage,
+        proteinGoalMin: clientGoal.protein_goal_min,
+        proteinGoalMax: clientGoal.protein_goal_max,
+        carbsGoalMin: clientGoal.carbs_goal_min,
+        carbsGoalMax: clientGoal.carbs_goal_max,
+        fatGoalMin: clientGoal.fat_goal_min,
+        fatGoalMax: clientGoal.fat_goal_max,
         fiberGoalGrams: clientGoal.fiber_goal_grams,
         waterGoalLiters: clientGoal.water_goal_liters,
         isActive: clientGoal.is_active,
@@ -180,12 +184,12 @@ export class ClientGoalsService {
         nutritionistId: clientGoal.nutritionist_id,
         eerGoalCalories: clientGoal.eer_goal_calories,
         bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalGrams: clientGoal.protein_goal_grams,
-        carbsGoalGrams: clientGoal.carbs_goal_grams,
-        fatGoalGrams: clientGoal.fat_goal_grams,
-        proteinGoalPercentage: clientGoal.protein_goal_percentage,
-        carbsGoalPercentage: clientGoal.carbs_goal_percentage,
-        fatGoalPercentage: clientGoal.fat_goal_percentage,
+        proteinGoalMin: clientGoal.protein_goal_min,
+        proteinGoalMax: clientGoal.protein_goal_max,
+        carbsGoalMin: clientGoal.carbs_goal_min,
+        carbsGoalMax: clientGoal.carbs_goal_max,
+        fatGoalMin: clientGoal.fat_goal_min,
+        fatGoalMax: clientGoal.fat_goal_max,
         fiberGoalGrams: clientGoal.fiber_goal_grams,
         waterGoalLiters: clientGoal.water_goal_liters,
         isActive: clientGoal.is_active,
@@ -251,12 +255,12 @@ export class ClientGoalsService {
         nutritionistId: clientGoal.nutritionist_id,
         eerGoalCalories: clientGoal.eer_goal_calories,
         bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalGrams: clientGoal.protein_goal_grams,
-        carbsGoalGrams: clientGoal.carbs_goal_grams,
-        fatGoalGrams: clientGoal.fat_goal_grams,
-        proteinGoalPercentage: clientGoal.protein_goal_percentage,
-        carbsGoalPercentage: clientGoal.carbs_goal_percentage,
-        fatGoalPercentage: clientGoal.fat_goal_percentage,
+        proteinGoalMin: clientGoal.protein_goal_min,
+        proteinGoalMax: clientGoal.protein_goal_max,
+        carbsGoalMin: clientGoal.carbs_goal_min,
+        carbsGoalMax: clientGoal.carbs_goal_max,
+        fatGoalMin: clientGoal.fat_goal_min,
+        fatGoalMax: clientGoal.fat_goal_max,
         fiberGoalGrams: clientGoal.fiber_goal_grams,
         waterGoalLiters: clientGoal.water_goal_liters,
         isActive: clientGoal.is_active,
@@ -274,6 +278,132 @@ export class ClientGoalsService {
 
     } catch (error) {
       console.error('❌ Client Goals Service - Error in getClientGoals:', error);
+      return {
+        success: false,
+        error: 'Internal server error'
+      };
+    }
+  }
+
+  /**
+   * Update an existing client goal
+   */
+  async updateClientGoal(goalId: string, request: UpdateClientGoalRequest, nutritionistId: string): Promise<ClientGoalResponse> {
+    try {
+      console.log('🎯 Client Goals Service - Updating client goal:', goalId);
+      console.log('🎯 Client Goals Service - Update data:', JSON.stringify(request, null, 2));
+
+      // Validate that the user is actually a nutritionist
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id, role')
+        .eq('id', nutritionistId)
+        .eq('role', 'nutritionist')
+        .single();
+
+      if (userError || !user) {
+        return {
+          success: false,
+          error: 'Access denied. Only nutritionists can update client goals.'
+        };
+      }
+
+      // Check if goal exists and belongs to nutritionist
+      const { data: existingGoal, error: checkError } = await supabase
+        .from('client_goals')
+        .select('id, client_id')
+        .eq('id', goalId)
+        .eq('nutritionist_id', nutritionistId)
+        .single();
+
+      if (checkError || !existingGoal) {
+        return {
+          success: false,
+          error: 'Client goal not found or access denied'
+        };
+      }
+
+      // Validate macro ranges if provided
+      if (request.proteinGoalMin && request.proteinGoalMax && 
+          request.carbsGoalMin && request.carbsGoalMax && 
+          request.fatGoalMin && request.fatGoalMax) {
+        if (!validateMacroRanges(
+          request.proteinGoalMin, request.proteinGoalMax,
+          request.carbsGoalMin, request.carbsGoalMax,
+          request.fatGoalMin, request.fatGoalMax
+        )) {
+          return {
+            success: false,
+            error: 'Invalid macro ranges: min values must be less than max values and all values must be positive'
+          };
+        }
+      }
+
+      // Update client goal
+      const updateData: any = {};
+      
+      if (request.eerGoalCalories !== undefined) updateData.eer_goal_calories = request.eerGoalCalories;
+      if (request.bmrGoalCalories !== undefined) updateData.bmr_goal_calories = request.bmrGoalCalories;
+      if (request.proteinGoalMin !== undefined) updateData.protein_goal_min = request.proteinGoalMin;
+      if (request.proteinGoalMax !== undefined) updateData.protein_goal_max = request.proteinGoalMax;
+      if (request.carbsGoalMin !== undefined) updateData.carbs_goal_min = request.carbsGoalMin;
+      if (request.carbsGoalMax !== undefined) updateData.carbs_goal_max = request.carbsGoalMax;
+      if (request.fatGoalMin !== undefined) updateData.fat_goal_min = request.fatGoalMin;
+      if (request.fatGoalMax !== undefined) updateData.fat_goal_max = request.fatGoalMax;
+      if (request.fiberGoalGrams !== undefined) updateData.fiber_goal_grams = request.fiberGoalGrams;
+      if (request.waterGoalLiters !== undefined) updateData.water_goal_liters = request.waterGoalLiters;
+      if (request.goalStartDate !== undefined) updateData.goal_start_date = request.goalStartDate;
+      if (request.goalEndDate !== undefined) updateData.goal_end_date = request.goalEndDate;
+      if (request.notes !== undefined) updateData.notes = request.notes;
+      
+      updateData.updated_at = new Date().toISOString();
+
+      const { data: updatedGoal, error: updateError } = await supabase
+        .from('client_goals')
+        .update(updateData)
+        .eq('id', goalId)
+        .select()
+        .single();
+
+      if (updateError || !updatedGoal) {
+        console.error('❌ Client Goals Service - Error updating client goal:', updateError);
+        return {
+          success: false,
+          error: 'Failed to update client goal'
+        };
+      }
+
+      const goal: ClientGoal = {
+        id: updatedGoal.id,
+        clientId: updatedGoal.client_id,
+        nutritionistId: updatedGoal.nutritionist_id,
+        eerGoalCalories: updatedGoal.eer_goal_calories,
+        bmrGoalCalories: updatedGoal.bmr_goal_calories,
+        proteinGoalMin: updatedGoal.protein_goal_min,
+        proteinGoalMax: updatedGoal.protein_goal_max,
+        carbsGoalMin: updatedGoal.carbs_goal_min,
+        carbsGoalMax: updatedGoal.carbs_goal_max,
+        fatGoalMin: updatedGoal.fat_goal_min,
+        fatGoalMax: updatedGoal.fat_goal_max,
+        fiberGoalGrams: updatedGoal.fiber_goal_grams,
+        waterGoalLiters: updatedGoal.water_goal_liters,
+        isActive: updatedGoal.is_active,
+        goalStartDate: updatedGoal.goal_start_date,
+        goalEndDate: updatedGoal.goal_end_date,
+        notes: updatedGoal.notes,
+        createdAt: updatedGoal.created_at,
+        updatedAt: updatedGoal.updated_at
+      };
+
+      console.log('✅ Client Goals Service - Client goal updated successfully');
+      return {
+        success: true,
+        data: goal,
+        message: 'Client goal updated successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ Client Goals Service - Error in updateClientGoal:', error);
       return {
         success: false,
         error: 'Internal server error'
