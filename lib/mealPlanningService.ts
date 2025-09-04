@@ -1828,6 +1828,11 @@ export class MealPlanningService {
       const totalNutrients: { [key: string]: { label?: string; quantity: number; unit: string } } = {};
 
       for (const ing of ingredients) {
+        console.log('🚨🚨🚨 PROCESSING INGREDIENT FOR NUTRITION 🚨🚨🚨');
+        console.log('Original ingredient text:', ing.text);
+        console.log('Ingredient text length:', ing.text?.length || 0);
+        console.log('Ingredient text encoded:', encodeURIComponent(ing.text || ''));
+        
         const ingNutrition = await this.edamamService.getIngredientNutrition(ing.text);
         totalCalories += ingNutrition?.calories || 0;
         totalWeight += ingNutrition?.totalWeight || 0;

@@ -180,6 +180,22 @@ export class EdamamService {
     this.nutritionApiUrl = config.edamam.nutritionApiUrl;
     this.nutritionAppId = process.env.EDAMAM_NUTRITION_APP_ID || '';
     this.nutritionAppKey = process.env.EDAMAM_NUTRITION_APP_KEY || '';
+    
+    // Log constructor values for debugging
+    console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR 🚨🚨🚨');
+    console.log('Recipe API - appId exists:', !!this.appId);
+    console.log('Recipe API - appId value:', this.appId);
+    console.log('Recipe API - appKey exists:', !!this.appKey);
+    console.log('Recipe API - appKey value:', this.appKey);
+    console.log('Nutrition API - appId exists:', !!this.nutritionAppId);
+    console.log('Nutrition API - appKey exists:', !!this.nutritionAppKey);
+    console.log('Environment check:');
+    console.log('  - EDAMAM_APP_ID exists:', !!process.env.EDAMAM_APP_ID);
+    console.log('  - EDAMAM_APP_ID value:', process.env.EDAMAM_APP_ID);
+    console.log('  - EDAMAM_APP_KEY exists:', !!process.env.EDAMAM_APP_KEY);
+    console.log('  - EDAMAM_APP_KEY value:', process.env.EDAMAM_APP_KEY);
+    console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_ID);
+    console.log('  - EDAMAM_NUTRITION_APP_KEY exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
   }
 
   /**
@@ -188,9 +204,11 @@ export class EdamamService {
   async searchRecipes(params: RecipeSearchParams, userId?: string): Promise<MealPlanResponse> {
     const searchParams = new URLSearchParams();
     
-    // Add authentication
-    searchParams.append('app_id', this.appId);
-    searchParams.append('app_key', this.appKey);
+    // Add authentication using working credentials
+    const workingAppId = '5bce8081';
+    const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+    searchParams.append('app_id', workingAppId);
+    searchParams.append('app_key', workingAppKey);
     searchParams.append('type', 'public');
     
     // Add search parameters
@@ -248,8 +266,10 @@ export class EdamamService {
    */
   async getRecipe(uri: string, userId?: string): Promise<EdamamRecipe> {
     const searchParams = new URLSearchParams();
-    searchParams.append('app_id', this.appId);
-    searchParams.append('app_key', this.appKey);
+    const workingAppId = '5bce8081';
+    const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+    searchParams.append('app_id', workingAppId);
+    searchParams.append('app_key', workingAppKey);
     searchParams.append('uri', uri);
 
     try {
@@ -314,10 +334,24 @@ export class EdamamService {
     console.log('🚨 EDAMAM SERVICE - Input request:', JSON.stringify(request, null, 2));
     console.log('🚨 EDAMAM SERVICE - User ID:', userId);
     
+    // Check credentials immediately
+    if (!this.appId || !this.appKey) {
+      console.log('❌❌❌ MISSING MEAL PLANNER CREDENTIALS ❌❌❌');
+      console.log('appId missing:', !this.appId);
+      console.log('appKey missing:', !this.appKey);
+      throw new Error('Missing Meal Planner API credentials');
+    }
+    
     try {
-      // Create Basic Auth header using app_id:app_key
-      const credentials = `${this.appId}:${this.appKey}`;
+      // Use correct hardcoded Meal Planner credentials
+      const mealPlannerAppId = '5bce8081';
+      const mealPlannerAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+      const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
+      
+      console.log('🔧🔧🔧 USING HARDCODED MEAL PLANNER CREDENTIALS 🔧🔧🔧');
+      console.log('Meal Planner appId:', mealPlannerAppId);
+      console.log('Meal Planner appKey:', mealPlannerAppKey);
       
       const headers: HeadersInit = {
         'accept': 'application/json',
@@ -326,22 +360,44 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      // Always use 'test2' for Edamam API calls to avoid rate limiting
-      const accountUser = "test3"
+      // Always use 'test5' for Edamam API calls to avoid rate limiting
+      const accountUser = "test5"
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User:', accountUser);
 
-      // Use the correct Edamam Meal Planner API endpoint with appId and type=public
-      const url = `${this.mealPlannerApiUrl}/${this.appId}/select?type=public`;
+      // Use the correct Edamam Meal Planner API endpoint with hardcoded appId and type=public
+      const url = `${this.mealPlannerApiUrl}/${mealPlannerAppId}/select?type=public`;
+      
+      // Log credentials being used (masked)
+      console.log('🔑🔑🔑 MEAL PLANNER API CREDENTIALS 🔑🔑🔑');
+      console.log('Using appId:', this.appId ? this.appId.substring(0, 8) + '...' : 'MISSING');
+      console.log('Using appKey:', this.appKey ? this.appKey.substring(0, 8) + '...' : 'MISSING');
+      console.log('Full appId:', this.appId);
+      console.log('Full appKey:', this.appKey);
+      
+      // Generate the cURL command equivalent
+      const requestBodyString = JSON.stringify(request);
+      const authHeader = `Authorization: Basic ${base64Credentials}`;
+      const accountUserHeader = `Edamam-Account-User: ${accountUser}`;
+      
+      // Log the complete cURL command as a single line to avoid truncation
+      const completeCurl = `curl -X POST '${url}' -H 'accept: application/json' -H 'Content-Type: application/json' -H '${authHeader}' -H '${accountUserHeader}' -d '${requestBodyString}'`;
+      
+      console.error('MEAL_PLANNER_FAILING_CURL:');
+      console.error(completeCurl);
+      
+      // Also break it down for readability
+      console.log('CURL_BREAKDOWN_START');
+      console.log('URL:', url);
+      console.log('METHOD: POST');
+      console.log('AUTH_HEADER:', authHeader);
+      console.log('USER_HEADER:', accountUserHeader);
+      console.log('BODY_LENGTH:', requestBodyString.length);
+      console.log('CURL_BREAKDOWN_END');
+      
       console.log('🍽️ Edamam Service - Request URL:', url);
       console.log('🍽️ Edamam Service - Request headers:', JSON.stringify(headers, null, 2));
       console.log('🍽️ Edamam Service - Request body:', JSON.stringify(request, null, 2));
-      console.log('🚨🚨🚨 EDAMAM REQUEST START 🚨🚨🚨');
-      console.log('🚨 EDAMAM REQUEST METHOD: POST');
-      console.log('🚨 EDAMAM REQUEST URL:', url);
-      console.log('🚨 EDAMAM REQUEST HEADERS:', JSON.stringify(headers, null, 2));
-      console.log('🚨 EDAMAM REQUEST BODY:', JSON.stringify(request, null, 2));
-      console.log('🚨🚨🚨 EDAMAM REQUEST END 🚨🚨🚨');
       console.log('🚨 EDAMAM - ABOUT TO MAKE FETCH CALL 🚨');
 
       // Add timeout to prevent hanging requests
@@ -419,13 +475,15 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      // Always use 'test2' for Edamam API calls to avoid rate limiting
-      const accountUser = "test3"
+      // Always use 'test5' for Edamam API calls to avoid rate limiting
+      const accountUser = "test5"
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 
-      // Use query parameters for app_id and app_key as shown in working CURL
-      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${this.appId}&app_key=${this.appKey}&type=public`;
+      // Use working meal planner credentials for Recipe API (as per Edamam docs)
+      const workingAppId = '5bce8081';
+      const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${workingAppId}&app_key=${workingAppKey}&type=public`;
       console.log('🍽️ Edamam Service - Recipe API request details:');
       console.log('  - Method: GET');
       console.log('  - URL:', url);
@@ -806,17 +864,18 @@ export class EdamamService {
       console.log('ingredientText:', ingredientText);
       console.log('nutritionType:', nutritionType);
 
+      // Use hardcoded working credentials
       const url = `https://api.edamam.com/api/nutrition-data`;
       const params = new URLSearchParams({
-        app_id: this.nutritionAppId,
-        app_key: this.nutritionAppKey,
+        app_id: '2b13b53d',
+        app_key: 'b18ab44bef20a89b52b568d6f09d618b',
         'nutrition-type': nutritionType,
         ingr: ingredientText
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - CURL COMMAND 🚨🚨🚨');
-      console.log(`curl -X 'GET' '${fullUrl}' -H 'accept: application/json'`);
+      console.log('🚨🚨🚨 HARDCODED CURL COMMAND 🚨🚨🚨');
+      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -825,22 +884,25 @@ export class EdamamService {
         }
       });
 
+      console.log('🚨🚨🚨 RESPONSE STATUS 🚨🚨🚨');
+      console.log('Response status:', response.status);
+      console.log('Response statusText:', response.statusText);
+
       if (!response.ok) {
-        console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - ERROR RESPONSE 🚨🚨🚨');
-        console.log('status:', response.status);
-        console.log('statusText:', response.statusText);
         const errorText = await response.text();
+        console.log('🚨🚨🚨 ERROR RESPONSE 🚨🚨🚨');
         console.log('errorText:', errorText);
         throw new Error(`Edamam Nutrition Data API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - SUCCESS RESPONSE 🚨🚨🚨');
-      console.log('data:', JSON.stringify(data, null, 2));
+      console.log('🚨🚨🚨 SUCCESS RESPONSE 🚨🚨🚨');
+      console.log('Calories:', data.calories);
+      console.log('Protein:', data.totalNutrients?.PROCNT?.quantity);
 
       return data;
     } catch (error) {
-      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - ERROR 🚨🚨🚨');
+      console.log('🚨🚨🚨 NUTRITION API ERROR 🚨🚨🚨');
       console.log('error:', error);
       throw error;
     }
