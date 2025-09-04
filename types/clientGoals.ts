@@ -5,7 +5,6 @@ export interface ClientGoal {
   
   // Energy Goals
   eerGoalCalories: number;
-  bmrGoalCalories: number;
   
   // Macro Goals (min/max ranges in grams)
   proteinGoalMin: number;
@@ -33,7 +32,6 @@ export interface ClientGoal {
 export interface CreateClientGoalRequest {
   clientId: string;
   eerGoalCalories: number;
-  bmrGoalCalories: number;
   proteinGoalMin: number;
   proteinGoalMax: number;
   carbsGoalMin: number;
@@ -49,7 +47,6 @@ export interface CreateClientGoalRequest {
 
 export interface UpdateClientGoalRequest {
   eerGoalCalories?: number;
-  bmrGoalCalories?: number;
   proteinGoalMin?: number;
   proteinGoalMax?: number;
   carbsGoalMin?: number;

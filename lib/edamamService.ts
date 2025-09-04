@@ -169,6 +169,8 @@ export class EdamamService {
   private recipeApiUrl: string;
   private mealPlannerApiUrl: string;
   private nutritionApiUrl: string;
+  private nutritionAppId: string;
+  private nutritionAppKey: string;
 
   constructor() {
     this.appId = config.edamam.appId;
@@ -176,6 +178,8 @@ export class EdamamService {
     this.recipeApiUrl = config.edamam.recipeApiUrl;
     this.mealPlannerApiUrl = config.edamam.mealPlannerApiUrl;
     this.nutritionApiUrl = config.edamam.nutritionApiUrl;
+    this.nutritionAppId = process.env.EDAMAM_NUTRITION_APP_ID || '';
+    this.nutritionAppKey = process.env.EDAMAM_NUTRITION_APP_KEY || '';
   }
 
   /**
@@ -481,6 +485,144 @@ export class EdamamService {
       console.log('  - Calories:', data.calories);
       console.log('  - Ingredients count:', data.ingredients ? data.ingredients.length : 0);
       console.log('  - Total nutrients:', data.totalNutrients ? Object.keys(data.totalNutrients).length : 0);
+      
+      // Log detailed ingredient information and fix problematic measures
+      if (data.ingredients && data.ingredients.length > 0) {
+        console.log('🔍 EDAMAM RECIPE INGREDIENTS - Detailed ingredient analysis:');
+        
+        // Fix ingredients using Nutrition Data API for better parsing
+        const fixedIngredients = await Promise.all(data.ingredients.map(async (ingredient: any, index: number) => {
+          console.log(`  🔍 INGREDIENT ${index + 1} STRUCTURE:`, JSON.stringify(ingredient, null, 2));
+          console.log(`  Ingredient ${index + 1}:`, {
+            text: ingredient.text,
+            quantity: ingredient.quantity,
+            measure: ingredient.measure,
+            food: ingredient.food,
+            weight: ingredient.weight,
+            foodCategory: ingredient.foodCategory,
+            foodId: ingredient.foodId,
+            image: ingredient.image
+          });
+          
+          // Check for problematic measure values and fix them using Nutrition Data API
+          if (ingredient.measure === '<unit>' || ingredient.measure === '<unit>') {
+            console.log(`  ⚠️  PROBLEMATIC MEASURE DETECTED: "${ingredient.measure}" for ingredient: "${ingredient.text}"`);
+            console.log(`  ⚠️  ORIGINAL EDAMAM PARSING:`, {
+              quantity: ingredient.quantity,
+              measure: ingredient.measure,
+              food: ingredient.food,
+              weight: ingredient.weight,
+              foodCategory: ingredient.foodCategory
+            });
+            
+            try {
+              // Use Nutrition Data API to get properly parsed ingredient
+              console.log(`  🔧  FETCHING NUTRITION DATA FOR: "${ingredient.text}"`);
+              const nutritionData = await this.getIngredientNutrition(ingredient.text);
+              
+              console.log(`  🔧  NUTRITION DATA RESPONSE:`, JSON.stringify(nutritionData, null, 2));
+              
+              if (nutritionData.ingredients && nutritionData.ingredients.length > 0) {
+                const parsedIngredient = nutritionData.ingredients[0];
+                console.log(`  🔧  PARSED INGREDIENT:`, JSON.stringify(parsedIngredient, null, 2));
+                
+                if (parsedIngredient.parsed && parsedIngredient.parsed.length > 0) {
+                  const parsed = parsedIngredient.parsed[0];
+                  
+                  console.log(`  🔧  NUTRITION DATA PARSED:`, parsed);
+                  console.log(`  🔧  BEFORE REPLACEMENT:`, {
+                    quantity: ingredient.quantity,
+                    measure: ingredient.measure,
+                    food: ingredient.food,
+                    weight: ingredient.weight,
+                    foodCategory: ingredient.foodCategory
+                  });
+                  
+                  // Update ALL the ingredient fields with Nutrition Data API values
+                  ingredient.quantity = parsed.quantity;
+                  ingredient.measure = parsed.measure;
+                  ingredient.food = parsed.food;
+                  ingredient.weight = parsed.weight;
+                  ingredient.foodId = parsed.foodId;
+                  
+                  // Update food category based on the food name
+                  if (parsed.food.toLowerCase().includes('flour')) ingredient.foodCategory = 'Grains';
+                  else if (parsed.food.toLowerCase().includes('milk') || parsed.food.toLowerCase().includes('cheese')) ingredient.foodCategory = 'Dairy';
+                  else if (parsed.food.toLowerCase().includes('oil')) ingredient.foodCategory = 'Oils';
+                  else if (parsed.food.toLowerCase().includes('sugar') || parsed.food.toLowerCase().includes('honey')) ingredient.foodCategory = 'Sweeteners';
+                  else ingredient.foodCategory = 'Other';
+                  
+                  console.log(`  ✅  AFTER REPLACEMENT:`, {
+                    quantity: ingredient.quantity,
+                    measure: ingredient.measure,
+                    food: ingredient.food,
+                    weight: ingredient.weight,
+                    foodCategory: ingredient.foodCategory
+                  });
+                } else {
+                  console.log(`  ⚠️  NO PARSED DATA FOUND IN NUTRITION RESPONSE`);
+                }
+              } else {
+                console.log(`  ⚠️  NO INGREDIENTS FOUND IN NUTRITION RESPONSE`);
+              }
+            } catch (error) {
+              console.error(`  ❌  FAILED TO FETCH NUTRITION DATA:`, error);
+              
+              // Fallback to our own parsing
+              const parsed = this.parseIngredientText(ingredient.text);
+              console.log(`  🔧  FALLBACK PARSED INGREDIENT:`, parsed);
+              
+              // Update the ingredient fields with our parsed values
+              ingredient.quantity = parsed.quantity;
+              ingredient.measure = parsed.measure;
+              ingredient.food = parsed.food;
+              
+              // Estimate weight based on common conversions
+              let estimatedWeight = ingredient.weight; // Keep original as fallback
+              if (parsed.measure === 'cup') {
+                if (parsed.food.toLowerCase().includes('flour')) estimatedWeight = parsed.quantity * 120;
+                else if (parsed.food.toLowerCase().includes('sugar')) estimatedWeight = parsed.quantity * 200;
+                else if (parsed.food.toLowerCase().includes('milk')) estimatedWeight = parsed.quantity * 240;
+                else if (parsed.food.toLowerCase().includes('oil')) estimatedWeight = parsed.quantity * 216;
+                else estimatedWeight = parsed.quantity * 150;
+              } else if (parsed.measure === 'tbsp') {
+                estimatedWeight = parsed.quantity * 15;
+              } else if (parsed.measure === 'tsp') {
+                estimatedWeight = parsed.quantity * 5;
+              } else if (parsed.measure === 'g') {
+                estimatedWeight = parsed.quantity;
+              } else if (parsed.measure === 'oz') {
+                estimatedWeight = parsed.quantity * 28.35;
+              } else if (parsed.measure === 'lb') {
+                estimatedWeight = parsed.quantity * 453.59;
+              }
+              
+              ingredient.weight = Math.round(estimatedWeight);
+              
+              // Update food category
+              if (parsed.food.toLowerCase().includes('flour')) ingredient.foodCategory = 'Grains';
+              else if (parsed.food.toLowerCase().includes('milk') || parsed.food.toLowerCase().includes('cheese')) ingredient.foodCategory = 'Dairy';
+              else if (parsed.food.toLowerCase().includes('oil')) ingredient.foodCategory = 'Oils';
+              else if (parsed.food.toLowerCase().includes('sugar') || parsed.food.toLowerCase().includes('honey')) ingredient.foodCategory = 'Sweeteners';
+              else ingredient.foodCategory = 'Other';
+              
+              console.log(`  ✅  FALLBACK FIXED INGREDIENT:`, {
+                quantity: ingredient.quantity,
+                measure: ingredient.measure,
+                food: ingredient.food,
+                weight: ingredient.weight,
+                foodCategory: ingredient.foodCategory
+              });
+            }
+          }
+          
+          return ingredient;
+        }));
+        
+        // Replace the ingredients array with the fixed one
+        data.ingredients = fixedIngredients;
+      }
+      
       console.log('🍽️ Edamam Service - ===== getRecipeDetails END =====');
       
       return data;
@@ -553,6 +695,154 @@ export class EdamamService {
     } catch (error) {
       console.error('Error fetching food nutrition:', error);
       throw new Error(`Failed to fetch food nutrition: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Parse ingredient text to extract quantity, measure, and food
+   */
+  private parseIngredientText(ingredientText: string): { quantity: number; measure: string; food: string } {
+    const text = ingredientText.trim();
+    console.log(`🔍 PARSING INGREDIENT TEXT: "${text}"`);
+    
+    // Common measurement patterns
+    const patterns = [
+      // "1 cup almond flour" -> quantity: 1, measure: "cup", food: "almond flour"
+      /^(\d+(?:\.\d+)?)\s+(cup|cups)\s+(.+)$/i,
+      // "2 tbsp olive oil" -> quantity: 2, measure: "tbsp", food: "olive oil"
+      /^(\d+(?:\.\d+)?)\s+(tbsp|tablespoon|tablespoons)\s+(.+)$/i,
+      // "1 tsp salt" -> quantity: 1, measure: "tsp", food: "salt"
+      /^(\d+(?:\.\d+)?)\s+(tsp|teaspoon|teaspoons)\s+(.+)$/i,
+      // "100g chicken" -> quantity: 100, measure: "g", food: "chicken"
+      /^(\d+(?:\.\d+)?)\s*(g|gram|grams)\s+(.+)$/i,
+      // "1 oz cheese" -> quantity: 1, measure: "oz", food: "cheese"
+      /^(\d+(?:\.\d+)?)\s*(oz|ounce|ounces)\s+(.+)$/i,
+      // "1 lb beef" -> quantity: 1, measure: "lb", food: "beef"
+      /^(\d+(?:\.\d+)?)\s*(lb|pound|pounds)\s+(.+)$/i,
+      // "1/2 cup milk" -> quantity: 0.5, measure: "cup", food: "milk"
+      /^(\d+\/\d+)\s+(cup|cups)\s+(.+)$/i,
+      // "1/4 tsp vanilla" -> quantity: 0.25, measure: "tsp", food: "vanilla"
+      /^(\d+\/\d+)\s+(tsp|teaspoon|teaspoons)\s+(.+)$/i,
+      // "5 cup almond flour" -> quantity: 5, measure: "cup", food: "almond flour"
+      /^(\d+)\s+(cup|cups)\s+(.+)$/i,
+      // "3 tbsp olive oil" -> quantity: 3, measure: "tbsp", food: "olive oil"
+      /^(\d+)\s+(tbsp|tablespoon|tablespoons)\s+(.+)$/i,
+      // "2 tsp salt" -> quantity: 2, measure: "tsp", food: "salt"
+      /^(\d+)\s+(tsp|teaspoon|teaspoons)\s+(.+)$/i
+    ];
+    
+    for (let i = 0; i < patterns.length; i++) {
+      const pattern = patterns[i];
+      const match = text.match(pattern);
+      if (match) {
+        console.log(`🔍 PATTERN ${i + 1} MATCHED:`, pattern.source);
+        
+        let quantity = parseFloat(match[1]);
+        
+        // Handle fractions
+        if (match[1].includes('/')) {
+          const [num, den] = match[1].split('/').map(Number);
+          quantity = num / den;
+          console.log(`🔍 FRACTION DETECTED: ${match[1]} = ${quantity}`);
+        }
+        
+        let measure = match[2].toLowerCase();
+        // Normalize measure names
+        if (measure === 'tablespoon' || measure === 'tablespoons') measure = 'tbsp';
+        if (measure === 'teaspoon' || measure === 'teaspoons') measure = 'tsp';
+        if (measure === 'gram' || measure === 'grams') measure = 'g';
+        if (measure === 'ounce' || measure === 'ounces') measure = 'oz';
+        if (measure === 'pound' || measure === 'pounds') measure = 'lb';
+        
+        const food = match[3].trim();
+        
+        const result = { quantity, measure, food };
+        console.log(`✅ PARSED RESULT:`, result);
+        return result;
+      }
+    }
+    
+    // If no pattern matches, return default values
+    console.log(`⚠️  NO PATTERN MATCHED, USING DEFAULT VALUES`);
+    return { quantity: 1, measure: 'unit', food: text };
+  }
+
+  /**
+   * Format ingredient text for better Edamam parsing
+   */
+  private formatIngredientForEdamam(ingredientText: string): string {
+    let formatted = ingredientText.trim();
+    
+    // Common measurement unit improvements
+    const unitPatterns = [
+      { pattern: /(\d+\s+cup)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+tbsp)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+tsp)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+teaspoon)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+tablespoon)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+ounce)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+oz)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+pound)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+lb)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+gram)\s+/, replacement: '$1 of ' },
+      { pattern: /(\d+\s+g)\s+/, replacement: '$1 of ' }
+    ];
+    
+    unitPatterns.forEach(({ pattern, replacement }) => {
+      if (pattern.test(formatted) && !formatted.includes(' of ')) {
+        formatted = formatted.replace(pattern, replacement);
+      }
+    });
+    
+    return formatted;
+  }
+
+  /**
+   * Get detailed nutrition for an ingredient using Nutrition Data API
+   */
+  async getIngredientNutrition(ingredientText: string, nutritionType: 'cooking' | 'logging' = 'cooking'): Promise<any> {
+    try {
+      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - START 🚨🚨🚨');
+      console.log('ingredientText:', ingredientText);
+      console.log('nutritionType:', nutritionType);
+
+      const url = `https://api.edamam.com/api/nutrition-data`;
+      const params = new URLSearchParams({
+        app_id: this.nutritionAppId,
+        app_key: this.nutritionAppKey,
+        'nutrition-type': nutritionType,
+        ingr: ingredientText
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - CURL COMMAND 🚨🚨🚨');
+      console.log(`curl -X 'GET' '${fullUrl}' -H 'accept: application/json'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - ERROR RESPONSE 🚨🚨🚨');
+        console.log('status:', response.status);
+        console.log('statusText:', response.statusText);
+        const errorText = await response.text();
+        console.log('errorText:', errorText);
+        throw new Error(`Edamam Nutrition Data API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - SUCCESS RESPONSE 🚨🚨🚨');
+      console.log('data:', JSON.stringify(data, null, 2));
+
+      return data;
+    } catch (error) {
+      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - ERROR 🚨🚨🚨');
+      console.log('error:', error);
+      throw error;
     }
   }
 

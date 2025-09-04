@@ -2,7 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
 import { validateAndTransformClient } from '../../lib/validation';
-import { transformWithMapping, FIELD_MAPPINGS } from '../../lib/caseTransform';
+import { transformWithMapping, FIELD_MAPPINGS, objectToCamelCase } from '../../lib/caseTransform';
 import { calculateHealthMetrics, calculateBMI } from '../../lib/healthMetrics';
 import { categorizeMicronutrients } from '../../lib/micronutrientCategorization';
 import { calculateEER, calculateMacros } from '../../lib/calculations';
@@ -55,6 +55,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .order('created_at', { ascending: false })
         .limit(1);
 
+      // Fetch client goal data
+      const { data: clientGoalData } = await supabase
+        .from('client_goals')
+        .select('*')
+        .eq('client_id', id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .single();
+
       // Format response to include EER and Macros data at top level
       const nutritionReq = nutritionRequirements?.[0] || null;
       const micronutrientReq = micronutrientRequirements?.[0] || null;
@@ -65,7 +74,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       const response = {
         ...clientWithoutSystemFields,
         // EER data
-        eerCalories: nutritionReq?.eer_calories || null,
+        eerCalories: nutritionReq?.eer_calories ?? null,
         nutritionistNotes: nutritionReq?.nutritionist_notes || null,
         eerLastUpdated: nutritionReq?.updated_at || null,
         
@@ -75,10 +84,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         guidelineNotes: nutritionReq?.guideline_notes || null,
         
         // Target Macros data
-        proteinGrams: nutritionReq?.protein_grams || null,
-        carbsGrams: nutritionReq?.carbs_grams || null,
-        fatGrams: nutritionReq?.fat_grams || null,
-        fiberGrams: nutritionReq?.fiber_grams || null,
+        proteinGrams: nutritionReq?.protein_grams ?? null,
+        carbsGrams: nutritionReq?.carbs_grams ?? null,
+        fatGrams: nutritionReq?.fat_grams ?? null,
+        fiberGrams: nutritionReq?.fiber_grams ?? null,
         proteinPercentage: nutritionReq?.protein_percentage || null,
         carbsPercentage: nutritionReq?.carbs_percentage || null,
         fatPercentage: nutritionReq?.fat_percentage || null,
@@ -142,7 +151,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null,
         
         // Micronutrient data - categorized into vitamins, minerals, and miscellaneous
-        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq.micronutrient_recommendations, true) : {
+        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq.micronutrient_recommendations || {}, true) : {
           vitamins: {},
           minerals: {},
           miscellaneous: {}
@@ -153,15 +162,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         micronutrientCalculationFactors: micronutrientReq?.calculation_factors || null,
         
         // AI calculation metadata
-        calculationMethod: nutritionReq?.calculation_method || null
+        calculationMethod: nutritionReq?.calculation_method || null,
+        clientNutritionRequirements: nutritionRequirements,
+        clientMicronutrientRequirements: micronutrientRequirements,
+        clientGoal: clientGoalData ?? null,
+        eerGuideline: eer_guideline,
+        healthMetrics: calculateHealthMetrics(client.height_cm, client.weight_kg),
+        categorizedMicronutrients: categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations || {}, true)
       };
 
       // Remove the nested nutrition_requirements array
       delete response.nutrition_requirements;
       delete response.micronutrient_requirements;
 
-      // Transform response to camelCase
-      const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+      // Transform response to camelCase using general conversion
+      const transformedResponse = objectToCamelCase(response);
 
       res.status(200).json({ client: transformedResponse });
     } catch (error) {
@@ -1447,6 +1462,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .order('created_at', { ascending: false })
         .limit(1);
 
+      // Fetch client goal data
+      const { data: clientGoalData } = await supabase
+        .from('client_goals')
+        .select('*')
+        .eq('client_id', id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .single();
+
       // Format response to include all nutrition data at top level
       const nutritionReq = nutritionRequirements?.[0] || null;
       const micronutrientReq = micronutrientRequirements?.[0] || null;
@@ -1545,15 +1569,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         micronutrientCalculationFactors: micronutrientReq?.calculation_factors || null,
         
         // AI calculation metadata
-        calculationMethod: nutritionReq?.calculation_method || null
+        calculationMethod: nutritionReq?.calculation_method || null,
+        clientNutritionRequirements: nutritionRequirements,
+        clientMicronutrientRequirements: micronutrientRequirements,
+        clientGoal: clientGoalData ?? null,
+        eerGuideline: eer_guideline,
+        healthMetrics: calculateHealthMetrics(updatedClient.height_cm, updatedClient.weight_kg),
+        categorizedMicronutrients: categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations, true)
       };
 
       // Remove nested arrays
       delete response.nutrition_requirements;
       delete response.micronutrient_requirements;
 
-      // Transform response to camelCase
-      const transformedResponse = transformWithMapping(response, FIELD_MAPPINGS.snakeToCamel);
+      // Transform response to camelCase using general conversion
+      const transformedResponse = objectToCamelCase(response);
 
       res.status(200).json({
         message: 'Client updated successfully',

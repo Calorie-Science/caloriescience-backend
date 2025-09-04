@@ -44,6 +44,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         isActive // For meal program activation
       } = req.body;
 
+      if (req.body.action === 'cleanup') {
+        if (req.body.secret !== process.env.CLEANUP_SECRET) {
+          return res.status(403).json({ error: 'Invalid cleanup secret' });
+        }
+
+        const result = await mealPlanningService.cleanupOldDrafts();
+
+        if (!result.success) {
+          return res.status(500).json({ error: result.error });
+        }
+
+        return res.status(200).json({
+          message: `Cleanup successful: ${result.deletedCount} old drafts deleted`
+        });
+      }
+
       // Validate type
       if (!['meal-plan', 'meal-program', 'client-goal'].includes(type)) {
         return res.status(400).json({
@@ -52,27 +68,33 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Validate clientId
-      if (!clientId) {
+      // Validate clientId for operations that need it
+      const needsClientId = type === 'meal-program' || 
+                           type === 'client-goal' || 
+                           (type === 'meal-plan' && ['preview', 'save'].includes(action));
+      
+      if (needsClientId && !clientId) {
         return res.status(400).json({
           error: 'Missing required field',
           message: 'clientId is required'
         });
       }
 
-      // Check if client exists and belongs to the authenticated nutritionist
-      const { data: client, error: clientError } = await require('../../lib/supabase').supabase
-        .from('clients')
-        .select('id, nutritionist_id')
-        .eq('id', clientId)
-        .eq('nutritionist_id', user.id)
-        .single();
+      // Check if client exists and belongs to the authenticated nutritionist (only if clientId is needed)
+      if (needsClientId && clientId) {
+        const { data: client, error: clientError } = await require('../../lib/supabase').supabase
+          .from('clients')
+          .select('id, nutritionist_id')
+          .eq('id', clientId)
+          .eq('nutritionist_id', user.id)
+          .single();
 
-      if (clientError || !client) {
-        return res.status(404).json({
-          error: 'Client not found',
-          message: 'The specified client does not exist or you do not have access to it'
-        });
+        if (clientError || !client) {
+          return res.status(404).json({
+            error: 'Client not found',
+            message: 'The specified client does not exist or you do not have access to it'
+          });
+        }
       }
 
       // Handle different types
@@ -204,7 +226,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           const {
             goalId,
             eerGoalCalories,
-            bmrGoalCalories,
             proteinGoalMin,
             proteinGoalMax,
             carbsGoalMin,
@@ -222,7 +243,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             goalId,
             {
               eerGoalCalories,
-              bmrGoalCalories,
               proteinGoalMin,
               proteinGoalMax,
               carbsGoalMin,
@@ -254,7 +274,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // Create new client goal
           const {
             eerGoalCalories,
-            bmrGoalCalories,
             proteinGoalMin,
             proteinGoalMax,
             carbsGoalMin,
@@ -268,10 +287,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             notes
           } = req.body;
 
-          if (!eerGoalCalories || !bmrGoalCalories || !proteinGoalMin || !proteinGoalMax || !carbsGoalMin || !carbsGoalMax || !fatGoalMin || !fatGoalMax) {
+          if (!eerGoalCalories || !proteinGoalMin || !proteinGoalMax || !carbsGoalMin || !carbsGoalMax || !fatGoalMin || !fatGoalMax) {
             return res.status(400).json({
               error: 'Missing required fields',
-              message: 'eerGoalCalories, bmrGoalCalories, proteinGoalMin, proteinGoalMax, carbsGoalMin, carbsGoalMax, fatGoalMin, and fatGoalMax are required'
+              message: 'eerGoalCalories, proteinGoalMin, proteinGoalMax, carbsGoalMin, carbsGoalMax, fatGoalMin, and fatGoalMax are required'
             });
           }
 
@@ -280,7 +299,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             {
               clientId,
               eerGoalCalories,
-              bmrGoalCalories,
               proteinGoalMin,
               proteinGoalMax,
               carbsGoalMin,
@@ -311,43 +329,46 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       } else {
         // Meal plan type - validate action
-        if (!['preview', 'save'].includes(action)) {
+        if (!['preview', 'save', 'preview-edit-ingredient', 'preview-delete-ingredient', 'save-from-preview'].includes(action)) {
           return res.status(400).json({
             error: 'Invalid action',
-            message: 'action must be either "preview" or "save"'
+            message: 'action must be one of: "preview", "save", "preview-edit-ingredient", "preview-delete-ingredient", "save-from-preview"'
           });
         }
 
-        if (!planDate) {
-          return res.status(400).json({
-            error: 'Missing required field',
-            message: 'planDate is required (YYYY-MM-DD format)'
-          });
+        // Only validate planDate for preview and save actions
+        if (['preview', 'save'].includes(action)) {
+          if (!planDate) {
+            return res.status(400).json({
+              error: 'Missing required field',
+              message: 'planDate is required (YYYY-MM-DD format)'
+            });
+          }
+
+          // Validate date format
+          const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+          if (!dateRegex.test(planDate)) {
+            return res.status(400).json({
+              error: 'Invalid date format',
+              message: 'planDate must be in YYYY-MM-DD format'
+            });
+          }
+
+          // Check if plan date is not in the past
+          const planDateObj = new Date(planDate);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          if (planDateObj < today) {
+            return res.status(400).json({
+              error: 'Invalid date',
+              message: 'Plan date cannot be in the past'
+            });
+          }
         }
 
-        // Validate date format
-        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-        if (!dateRegex.test(planDate)) {
-          return res.status(400).json({
-            error: 'Invalid date format',
-            message: 'planDate must be in YYYY-MM-DD format'
-          });
-        }
-
-        // Check if plan date is not in the past
-        const planDateObj = new Date(planDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        if (planDateObj < today) {
-          return res.status(400).json({
-            error: 'Invalid date',
-            message: 'Plan date cannot be in the past'
-          });
-        }
-
-        // Validate macro targets if provided
-        if (macroTargets) {
+        // Validate macro targets if provided (only for preview and save actions)
+        if (['preview', 'save'].includes(action) && macroTargets) {
           if (typeof macroTargets !== 'object' || macroTargets === null) {
             return res.status(400).json({
               error: 'Invalid macro targets format',
@@ -384,89 +405,193 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
         }
 
-        // Check if client has a meal program - if yes, use it for meal planning
-        const { data: activeMealProgram } = await require('../../lib/supabase').supabase
-          .from('meal_programs')
-          .select('id')
-          .eq('client_id', clientId)
-          .eq('is_active', true)
-          .single();
-
+        // Handle different meal plan actions
         let generatedMealPlan;
         
-        if (activeMealProgram) {
-          console.log('🎯 API - Client has active meal program, using program-based meal planning');
+        if (['preview', 'save'].includes(action)) {
+          // Check if client has a meal program - if yes, use it for meal planning
+          const { data: activeMealProgram } = await require('../../lib/supabase').supabase
+            .from('meal_programs')
+            .select('id')
+            .eq('client_id', clientId)
+            .eq('is_active', true)
+            .single();
           
-          // Check if UI is sending meal program overrides
-          const uiOverrideMeals = req.body.uiOverrideMeals || null;
-          
-          // Generate meal plan based on meal program
-          generatedMealPlan = await mealPlanningService.generateMealPlanFromProgram(
-            clientId,
-            planDate,
-            dietaryRestrictions,
-            cuisinePreferences,
-            uiOverrideMeals,
-            user.id
-          );
-          
-          if (!generatedMealPlan.success) {
-            return res.status(400).json({
-              error: 'Meal plan generation failed',
-              message: generatedMealPlan.error
-            });
+          if (activeMealProgram) {
+            console.log('🎯 API - Client has active meal program, using program-based meal planning');
+            
+            // Check if UI is sending meal program overrides
+            const uiOverrideMeals = req.body.uiOverrideMeals || null;
+            
+            // Generate meal plan based on meal program
+            generatedMealPlan = await mealPlanningService.generateMealPlanFromProgram(
+              clientId,
+              planDate,
+              dietaryRestrictions,
+              cuisinePreferences,
+              uiOverrideMeals,
+              user.id
+            );
+            
+            if (!generatedMealPlan.success) {
+              return res.status(400).json({
+                error: 'Meal plan generation failed',
+                message: generatedMealPlan.error
+              });
+            }
+            
+            // Return the program-based meal plan
+            if (action === 'preview') {
+              console.log('🎯 API - Returning preview response with data:', JSON.stringify(generatedMealPlan.data, null, 2));
+              console.log('🎯 API - PreviewId in mealPlan:', generatedMealPlan.data?.mealPlan?.previewId);
+              return res.status(200).json({
+                success: true,
+                message: 'Meal plan preview generated successfully',
+                data: {
+                  mealPlan: generatedMealPlan.data.mealPlan,
+                  clientGoals: generatedMealPlan.data.clientGoals,
+                  mealProgram: generatedMealPlan.data.mealProgram,
+                  planDate: generatedMealPlan.data.planDate,
+                  dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
+                  cuisinePreferences: generatedMealPlan.data.cuisinePreferences
+                }
+              });
+            } else {
+              // For save action, you might want to store this differently
+              return res.status(200).json({
+                success: true,
+                message: 'Meal plan saved successfully',
+                data: {
+                  mealPlan: generatedMealPlan.data.mealPlan,
+                  clientGoals: generatedMealPlan.data.clientGoals,
+                  mealProgram: generatedMealPlan.data.mealProgram,
+                  planDate: generatedMealPlan.data.planDate,
+                  dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
+                  cuisinePreferences: generatedMealPlan.data.cuisinePreferences
+                }
+              });
+            }
+          } else {
+            console.log('🎯 API - No active meal program, using standard meal planning');
+            
+            // Generate meal plan using standard method
+            const mealPlanRequest: MealPlanGenerationRequest = {
+              clientId,
+              planDate,
+              planType,
+              dietaryRestrictions,
+              cuisinePreferences,
+              mealPreferences,
+              targetCalories,
+              macroTargets
+            };
+
+            console.log('🔍 API Debug - User ID from JWT:', user.id);
+            console.log('🔍 API Debug - User object:', JSON.stringify(user, null, 2));
+            
+            // Use a simple user ID for Edamam instead of the UUID
+            const edamamUserId = 'nutritionist1';
+            console.log('🔍 API Debug - Using Edamam User ID:', edamamUserId);
+            console.log('🚨 TEST DEBUG - This should appear in logs!');
+            
+            generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, edamamUserId);
           }
-          
-          // Return the program-based meal plan
+
+          // Handle based on action
           if (action === 'preview') {
+            // Return preview without saving
             return res.status(200).json({
-              message: 'Meal plan preview generated from program successfully',
-              data: generatedMealPlan.data
+              success: true,
+              message: 'Meal plan preview generated successfully',
+              data: {
+                mealPlan: {
+                  ...generatedMealPlan,
+                  id: 'preview-' + Date.now(), // Temporary ID for preview
+                  status: 'preview'
+                }
+              }
             });
           } else {
-            // For save action, you might want to store this differently
-            return res.status(200).json({
-              message: 'Meal plan saved from program successfully',
-              data: generatedMealPlan.data
+            // Save to database
+            const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
+
+            // Return the generated meal plan with the new ID
+            const savedMealPlan = await mealPlanningService.getMealPlan(planId);
+
+            return res.status(201).json({
+              success: true,
+              message: 'Meal plan generated and saved successfully',
+              data: {
+                mealPlan: savedMealPlan
+              }
             });
           }
-        } else {
-          console.log('🎯 API - No active meal program, using standard meal planning');
-          
-          // Generate meal plan using standard method
-          const mealPlanRequest: MealPlanGenerationRequest = {
-            clientId,
-            planDate,
-            planType,
-            dietaryRestrictions,
-            cuisinePreferences,
-            mealPreferences,
-            targetCalories,
-            macroTargets
-          };
-
-          console.log('🔍 API Debug - User ID from JWT:', user.id);
-          console.log('🔍 API Debug - User object:', JSON.stringify(user, null, 2));
-          
-          // Use a simple user ID for Edamam instead of the UUID
-          const edamamUserId = 'nutritionist1';
-          console.log('🔍 API Debug - Using Edamam User ID:', edamamUserId);
-          console.log('🚨 TEST DEBUG - This should appear in logs!');
-          
-          generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, edamamUserId);
         }
 
         // Handle based on action
         if (action === 'preview') {
           // Return preview without saving
           return res.status(200).json({
+            success: true,
             message: 'Meal plan preview generated successfully',
-            action: 'preview',
-            mealPlan: {
-              ...generatedMealPlan,
-              id: 'preview-' + Date.now(), // Temporary ID for preview
-              status: 'preview'
+            data: {
+              mealPlan: {
+                ...generatedMealPlan,
+                id: 'preview-' + Date.now(), // Temporary ID for preview
+                status: 'preview'
+              }
             }
+          });
+        } else if (action === 'preview-edit-ingredient') {
+          const { previewId, mealIndex, ingredientIndex, newIngredientText } = req.body;
+
+          if (!previewId || mealIndex === undefined || ingredientIndex === undefined || !newIngredientText) {
+            return res.status(400).json({ error: 'Missing required fields for edit' });
+          }
+
+          const result = await mealPlanningService.editPreviewIngredient(previewId, mealIndex, ingredientIndex, newIngredientText);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient edited successfully',
+            data: result.data
+          });
+        } else if (action === 'preview-delete-ingredient') {
+          const { previewId, mealIndex, ingredientIndex } = req.body;
+
+          if (!previewId || mealIndex === undefined || ingredientIndex === undefined) {
+            return res.status(400).json({ error: 'Missing required fields for delete' });
+          }
+
+          const result = await mealPlanningService.deletePreviewIngredient(previewId, mealIndex, ingredientIndex);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient deleted successfully',
+            data: result.data
+          });
+        } else if (action === 'save-from-preview') {
+          const { previewId, planName, isActive } = req.body;
+
+          if (!previewId || !planName) {
+            return res.status(400).json({ error: 'Missing required fields for save' });
+          }
+
+          const result = await mealPlanningService.saveFromPreview(previewId, planName, isActive);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Meal plan saved from preview successfully',
+            data: result.data
           });
         } else {
           // Save to database

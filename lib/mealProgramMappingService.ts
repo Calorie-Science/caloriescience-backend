@@ -42,6 +42,20 @@ export interface MealPlanRequest {
 export class MealProgramMappingService {
   
   /**
+   * Normalize time format to HH:MM (remove seconds if present)
+   */
+  private normalizeTimeFormat(timeString: string): string {
+    // If time is in HH:MM:SS format, convert to HH:MM
+    if (timeString.includes(':')) {
+      const parts = timeString.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0]}:${parts[1]}`;
+      }
+    }
+    return timeString;
+  }
+
+  /**
    * Map custom meal names to Edamam meal types
    */
   mapMealNameToEdamamType(mealName: string): EdamamMealType {
@@ -103,7 +117,7 @@ export class MealProgramMappingService {
         carbs: mealCarbs,
         fat: mealFat,
         mealName: meal.mealName,
-        mealTime: meal.mealTime,
+        mealTime: this.normalizeTimeFormat(meal.mealTime),
         edamamMealType,
         targetCalories: meal.targetCalories || mealCalories
       };
@@ -301,17 +315,7 @@ export class MealProgramMappingService {
         edamamMealType: meal.edamamMealType,
         recipe: recipeUri ? {
           uri: recipeUri,
-          recipeId: recipeUri.split('#recipe_')[1],
-          _links: {
-            self: {
-              href: `https://api.edamam.com/api/recipes/v2/${recipeUri.split('#recipe_')[1]}`,
-              title: "Recipe details"
-            }
-          },
-          details: null, // Will be populated by meal planning service
-          error: null,
-          // Add per-serving nutrition summary
-          nutritionSummary: null // Will be populated after recipe details are fetched
+          id: recipeUri.split('#recipe_')[1]
         } : null
       });
     });
@@ -320,13 +324,7 @@ export class MealProgramMappingService {
     console.log('🎯 Meal Program Mapping Service - ===== END MAPPING =====');
     
     return {
-      meals: mappedMeals,
-      // Keep old totals for backward compatibility
-      totalCalories: Object.values(mealDistribution).reduce((sum, meal) => sum + meal.calories, 0),
-      totalProtein: Object.values(mealDistribution).reduce((sum, meal) => sum + meal.protein, 0),
-      totalCarbs: Object.values(mealDistribution).reduce((sum, meal) => sum + meal.carbs, 0),
-      totalFat: Object.values(mealDistribution).reduce((sum, meal) => sum + meal.fat, 0),
-      edamamResponse: edamamResponse // Include full response for debugging
+      meals: mappedMeals
     };
   }
 }

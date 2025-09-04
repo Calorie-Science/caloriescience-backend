@@ -191,7 +191,52 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans?clientId=b
 --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImZjZjg4ZTQ0LWRiOTctNDk0ZC05YTQ5LThjYzkxZTcxNjczNCIsImVtYWlsIjoibXJpbmFsQGNhbG9yaWVzY2llbmNlLmFpIiwicm9sZSI6Im51dHJpdGlvbmlzdCIsImlhdCI6MTc1NjQ1NDQ0NSwiZXhwIjoxNzU3MDU5MjQ1fQ.HRq66KWqeuXizzupfUjr0QQhZj4Eyjlhi045t9r80tE'
 ```
 
-## 8. CREATE/UPDATE CLIENT GOALS (New Range-Based Structure)
+## 8. MEAL PLAN PREVIEW INGREDIENT OPERATIONS
+
+### Edit Ingredient Portion/Text
+```bash
+curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImZjZjg4ZTQ0LWRiOTctNDk0ZC05YTQ5LThjYzkxZTcxNjczNCIsImVtYWlsIjoibXJpbmFsQGNhbG9yaWVzY2llbmNlLmFpIiwicm9sZSI6Im51dHJpdGlvbmlzdCIsImlhdCI6MTc1NjQ1NDQ0NSwiZXhwIjoxNzU3MDU5MjQ1fQ.HRq66KWqeuXizzupfUjr0QQhZj4Eyjlhi045t9r80tE' \
+--data '{
+    "type": "meal-plan",
+    "action": "preview-edit-ingredient",
+    "previewId": "YOUR_PREVIEW_ID",
+    "mealIndex": 0,
+    "ingredientIndex": 0,
+    "newIngredientText": "1 cup almond flour"
+}'
+```
+
+### Delete Ingredient
+```bash
+curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImZjZjg4ZTQ0LWRiOTctNDk0ZC05YTQ5LThjYzkxZTcxNjczNCIsImVtYWlsIjoibXJpbmFsQGNhbG9yaWVzY2llbmNlLmFpIiwicm9sZSI6Im51dHJpdGlvbmlzdCIsImlhdCI6MTc1NjQ1NDQ0NSwiZXhwIjoxNzU3MDU5MjQ1fQ.HRq66KWqeuXizzupfUjr0QQhZj4Eyjlhi045t9r80tE' \
+--data '{
+    "type": "meal-plan",
+    "action": "preview-delete-ingredient",
+    "previewId": "YOUR_PREVIEW_ID",
+    "mealIndex": 0,
+    "ingredientIndex": 2
+}'
+```
+
+### Save Final Meal Plan from Preview
+```bash
+curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImZjZjg4ZTQ0LWRiOTctNDk0ZC05YTQ5LThjYzkxZTcxNjczNCIsImVtYWlsIjoibXJpbmFsQGNhbG9yaWVzY2llbmNlLmFpIiwicm9sZSI6Im51dHJpdGlvbmlzdCIsImlhdCI6MTc1NjQ1NDQ0NSwiZXhwIjoxNzU3MDU5MjQ1fQ.HRq66KWqeuXizzupfUjr0QQhZj4Eyjlhi045t9r80tE' \
+--data '{
+    "type": "meal-plan",
+    "action": "save-from-preview",
+    "previewId": "YOUR_PREVIEW_ID",
+    "planName": "My Final Meal Plan",
+    "isActive": true
+}'
+```
+
+## 9. CREATE/UPDATE CLIENT GOALS (Range-Based Structure - No BMR)
 
 ```bash
 curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
@@ -201,7 +246,6 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
     "type": "client-goal",
     "clientId": "b543f1f8-87f9-4d84-835e-78385546321a",
     "eerGoalCalories": 2200,
-    "bmrGoalCalories": 1800,
     "proteinGoalMin": 140,
     "proteinGoalMax": 180,
     "carbsGoalMin": 200,
@@ -228,7 +272,6 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
     "clientId": "b543f1f8-87f9-4d84-835e-78385546321a",
     "goalId": "YOUR_GOAL_ID",
     "eerGoalCalories": 2400,
-    "bmrGoalCalories": 1900,
     "proteinGoalMin": 160,
     "proteinGoalMax": 200,
     "carbsGoalMin": 220,
@@ -258,8 +301,9 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
 
 - **Removed**: `proteinGoalPercentage`, `carbsGoalPercentage`, `fatGoalPercentage`
 - **Removed**: `proteinGoalGrams`, `carbsGoalGrams`, `fatGoalGrams` (single values)
+- **Removed**: `bmrGoalCalories` (not needed for meal planning)
 - **Added**: `proteinGoalMin`, `proteinGoalMax`, `carbsGoalMin`, `carbsGoalMax`, `fatGoalMin`, `fatGoalMax`
-- **Benefits**: More flexible macro targeting with ranges instead of rigid percentages
+- **Benefits**: More flexible macro targeting with ranges instead of rigid percentages, simplified energy goals
 
 ## Example Response Structure:
 
@@ -291,7 +335,6 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
     "clientId": "client-uuid",
     "nutritionistId": "nutritionist-uuid",
     "eerGoalCalories": 2200,
-    "bmrGoalCalories": 1800,
     "proteinGoalMin": 140,
     "proteinGoalMax": 180,
     "carbsGoalMin": 200,

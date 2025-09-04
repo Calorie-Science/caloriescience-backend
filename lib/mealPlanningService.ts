@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { EdamamService, EdamamRecipe, RecipeSearchParams } from './edamamService';
 import { MealProgramMappingService } from './mealProgramMappingService';
 import { ClientGoalsService } from './clientGoalsService';
+import { objectToCamelCase } from './caseTransform';
 
 export interface MealPlanGenerationRequest {
   clientId: string;
@@ -1461,29 +1462,35 @@ export class MealPlanningService {
           try {
             console.log(`🎯 Meal Planning Service - Fetching details for meal: ${meal.mealName} (Order: ${meal.mealOrder || 'N/A'})`);
             const recipeDetails = await this.edamamService.getRecipeDetails(meal.recipe.uri, userId);
-            meal.recipe.details = recipeDetails;
             
-            // Calculate per-serving nutrition summary
+            // Flatten the structure: merge recipeDetails.recipe into meal.recipe
             if (recipeDetails?.recipe) {
               const recipe = recipeDetails.recipe;
               const servings = recipe.yield || 1;
               
-              meal.recipe.nutritionSummary = {
-                calories: Math.round((recipe.calories || 0) / servings * 100) / 100,
-                protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
-                carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
-                fat: Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
-                fiber: Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
-                sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
-                sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
-                servings: servings
+              meal.recipe = {
+                ...(meal.recipe as object),  // Type assertion to allow spread
+                ...(recipe as object),       // Type assertion to allow spread
+                nutritionSummary: {
+                  calories: Math.round((recipe.calories || 0) / servings * 100) / 100,
+                  protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
+                  carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
+                  fat: Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
+                  fiber: Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+                  sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
+                  sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
+                  servings: servings
+                }
               };
+              // Remove the now redundant 'details' if it was set
+              delete meal.recipe.details;
+            } else {
+              meal.recipe.error = 'Failed to fetch recipe details';
             }
             
-            console.log(`✅ Meal Planning Service - Recipe details fetched for: ${meal.mealName}`);
+            console.log(`✅ Meal Planning Service - Recipe details fetched and flattened for: ${meal.mealName}`);
           } catch (error) {
             console.error(`❌ Meal Planning Service - Failed to fetch recipe details for ${meal.mealName}:`, error);
-            meal.recipe.details = null;
             meal.recipe.error = 'Failed to fetch recipe details';
           }
         });
@@ -1516,13 +1523,9 @@ export class MealPlanningService {
       mappedResponse.meals.forEach(meal => {
         console.log(`🎯 Meal Planning Service - Processing meal: ${meal.mealName}`);
         console.log(`🎯 Meal Planning Service - Has recipe: ${!!meal.recipe}`);
-        console.log(`🎯 Meal Planning Service - Has details: ${!!meal.recipe?.details}`);
-        console.log(`🎯 Meal Planning Service - Has recipe data: ${!!meal.recipe?.details?.recipe}`);
         
-        if (meal.recipe?.details?.recipe) {
-          const recipe = meal.recipe.details.recipe;
-          
-          // Get per-serving values (divide by yield)
+        if (meal.recipe && meal.recipe.totalNutrients) {  // Use flattened structure
+          const recipe = meal.recipe;
           const servings = recipe.yield || 1;
           const perServingCalories = (recipe.calories || 0) / servings;
           const perServingProtein = (recipe.totalNutrients?.PROCNT?.quantity || 0) / servings;
@@ -1564,7 +1567,6 @@ export class MealPlanningService {
       // Add dailyNutrition to the mappedResponse
       mappedResponse.dailyNutrition = {
         ...dailyNutrition,
-        // Round to 2 decimal places for readability
         totalCalories: Math.round(dailyNutrition.totalCalories * 100) / 100,
         totalProtein: Math.round(dailyNutrition.totalProtein * 100) / 100,
         totalCarbs: Math.round(dailyNutrition.totalCarbs * 100) / 100,
@@ -1580,6 +1582,41 @@ export class MealPlanningService {
       console.log('🎯 Meal Planning Service - Final daily nutrition totals:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
       console.log('🎯 Meal Planning Service - ===== END CALCULATING DAILY NUTRITION =====');
       
+      // Insert as draft meal plan
+      const { data: draftPlan, error: draftError } = await supabase
+        .from('meal_plans')
+        .insert({
+          client_id: clientId,
+          nutritionist_id: userId || '', // Assuming userId is nutritionist
+          plan_name: 'Preview Meal Plan',
+          plan_date: planDate,
+          plan_type: 'daily',
+          status: 'draft',
+          target_calories: clientGoal.eerGoalCalories,
+          target_protein_grams: (clientGoal.proteinGoalMin + clientGoal.proteinGoalMax) / 2,
+          target_carbs_grams: (clientGoal.carbsGoalMin + clientGoal.carbsGoalMax) / 2,
+          target_fat_grams: (clientGoal.fatGoalMin + clientGoal.fatGoalMax) / 2,
+          target_fiber_grams: 0, // Add if available
+          dietary_restrictions: dietaryRestrictions,
+          cuisine_preferences: cuisinePreferences,
+          generated_meals: mappedResponse.meals, // Store meals array in JSONB
+          nutrition_summary: mappedResponse.dailyNutrition
+        })
+        .select('id')
+        .single();
+
+      if (draftError || !draftPlan) {
+        console.error('❌ Meal Planning Service - Draft creation error:', draftError);
+        throw new Error('Failed to create draft preview');
+      }
+
+      const previewId = draftPlan.id;
+      console.log('🎯 Meal Planning Service - Created draft preview with ID:', previewId);
+
+      // Add previewId to response
+      mappedResponse.previewId = previewId;
+      console.log('🎯 Meal Planning Service - Added previewId to mappedResponse:', mappedResponse.previewId);
+
       return {
         success: true,
         data: {
@@ -1721,6 +1758,477 @@ export class MealPlanningService {
         success: false,
         error: 'Internal server error'
       };
+    }
+  }
+
+  /**
+   * Edit an ingredient in a preview meal plan
+   */
+  async editPreviewIngredient(
+    previewId: string,
+    mealIndex: number,
+    ingredientIndex: number,
+    newIngredientText: string
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🚨🚨🚨 EDIT PREVIEW INGREDIENT - START 🚨🚨🚨');
+      console.log('previewId:', previewId);
+      console.log('mealIndex:', mealIndex);
+      console.log('ingredientIndex:', ingredientIndex);
+      console.log('newIngredientText:', newIngredientText);
+
+      // Fetch the draft meal plan
+      const { data: mealPlan, error } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('id', previewId)
+        .eq('status', 'draft')
+        .single();
+
+      if (error || !mealPlan) {
+        console.log('🚨🚨🚨 ERROR: Meal plan not found or not draft 🚨🚨🚨');
+        return { success: false, error: 'Meal plan not found or not in draft status' };
+      }
+
+      const generatedMeals = mealPlan.generated_meals as any[];
+      if (!generatedMeals || mealIndex >= generatedMeals.length) {
+        console.log('🚨🚨🚨 ERROR: Invalid meal index 🚨🚨🚨');
+        return { success: false, error: 'Invalid meal index' };
+      }
+
+      const meal = generatedMeals[mealIndex];
+    
+      // Check if meal has recipe structure with ingredients (handle both old and new structures)
+      let ingredients: any[] = [];
+      if (meal.recipe?.ingredients) {
+        // New flattened structure
+        ingredients = meal.recipe.ingredients;
+      } else if (meal.recipe?.details?.recipe?.ingredients) {
+        // Old nested structure
+        ingredients = meal.recipe.details.recipe.ingredients;
+      } else {
+        console.log('🚨🚨🚨 ERROR: Meal does not have recipe with ingredients 🚨🚨🚨');
+        console.log('meal:', JSON.stringify(meal, null, 2));
+        return { success: false, error: 'Meal does not have recipe with ingredients' };
+      }
+    
+      if (ingredientIndex >= ingredients.length) {
+        console.log('🚨🚨🚨 ERROR: Invalid ingredient index 🚨🚨🚨');
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const oldIngredient = ingredients[ingredientIndex];
+
+      // Update the ingredient text
+      ingredients[ingredientIndex].text = newIngredientText;
+
+      // Recalculate totals from all ingredients
+      let totalCalories: number = 0;
+      let totalWeight: number = 0;
+      const totalNutrients: { [key: string]: { label?: string; quantity: number; unit: string } } = {};
+
+      for (const ing of ingredients) {
+        const ingNutrition = await this.edamamService.getIngredientNutrition(ing.text);
+        totalCalories += ingNutrition?.calories || 0;
+        totalWeight += ingNutrition?.totalWeight || 0;
+        Object.entries(ingNutrition?.totalNutrients || {}).forEach(([nutrient, data]) => {
+          const nutrientData = data as { label?: string; quantity: number; unit: string };
+          if (!totalNutrients[nutrient]) {
+            totalNutrients[nutrient] = { ...nutrientData, quantity: 0 };
+          }
+          totalNutrients[nutrient].quantity += nutrientData.quantity || 0;
+        });
+      }
+
+      // Update recipe fields based on structure
+      if (meal.recipe.ingredients) {
+        // New flattened structure
+        meal.recipe.calories = totalCalories;
+        meal.recipe.totalWeight = totalWeight;
+        meal.recipe.totalNutrients = totalNutrients;
+        
+        // Recalculate nutritionSummary
+        const servings = meal.recipe.yield || 1;
+        meal.recipe.nutritionSummary = {
+          calories: totalCalories / servings,
+          protein: (totalNutrients['PROCNT']?.quantity || 0) / servings,
+          carbs: (totalNutrients['CHOCDF']?.quantity || 0) / servings,
+          fat: (totalNutrients['FAT']?.quantity || 0) / servings,
+          fiber: (totalNutrients['FIBTG']?.quantity || 0) / servings,
+          sodium: (totalNutrients['NA']?.quantity || 0) / servings,
+          sugar: (totalNutrients['SUGAR']?.quantity || 0) / servings,
+          servings: servings
+        };
+      } else {
+        // Old nested structure
+        meal.recipe.details.recipe.calories = totalCalories;
+        meal.recipe.details.recipe.totalWeight = totalWeight;
+        meal.recipe.details.recipe.totalNutrients = totalNutrients;
+        
+        // Recalculate nutritionSummary
+        const servings = meal.recipe.details.recipe.yield || 1;
+        meal.recipe.nutritionSummary = {
+          calories: totalCalories / servings,
+          protein: (totalNutrients['PROCNT']?.quantity || 0) / servings,
+          carbs: (totalNutrients['CHOCDF']?.quantity || 0) / servings,
+          fat: (totalNutrients['FAT']?.quantity || 0) / servings,
+          fiber: (totalNutrients['FIBTG']?.quantity || 0) / servings,
+          sodium: (totalNutrients['NA']?.quantity || 0) / servings,
+          sugar: (totalNutrients['SUGAR']?.quantity || 0) / servings,
+          servings: servings
+        };
+      }
+
+      // Update database
+      const { error: updateError } = await supabase
+        .from('meal_plans')
+        .update({ generated_meals: generatedMeals })
+        .eq('id', previewId);
+
+      if (updateError) {
+        return { success: false, error: 'Failed to update meal plan' };
+      }
+
+      // Recalculate daily nutrition
+      const dailyNutrition = {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        totalFiber: 0,
+        totalSodium: 0,
+        totalSugar: 0,
+        totalCholesterol: 0,
+        totalCalcium: 0,
+        totalIron: 0
+      };
+
+      generatedMeals.forEach(m => {
+        if (m.recipe?.nutritionSummary) {
+          dailyNutrition.totalCalories += m.recipe.nutritionSummary.calories;
+          dailyNutrition.totalProtein += m.recipe.nutritionSummary.protein;
+          dailyNutrition.totalCarbs += m.recipe.nutritionSummary.carbs;
+          dailyNutrition.totalFat += m.recipe.nutritionSummary.fat;
+          dailyNutrition.totalFiber += m.recipe.nutritionSummary.fiber;
+          dailyNutrition.totalSodium += m.recipe.nutritionSummary.sodium;
+          dailyNutrition.totalSugar += m.recipe.nutritionSummary.sugar;
+        } else {
+          dailyNutrition.totalCalories += m.targetCalories || 0;
+        }
+      });
+
+      // Round daily nutrition
+      Object.keys(dailyNutrition).forEach(key => {
+        dailyNutrition[key] = Math.round(dailyNutrition[key] * 100) / 100;
+      });
+
+      await supabase.from('meal_plans').update({ nutrition_summary: dailyNutrition }).eq('id', previewId);
+
+      // Return the same structure as preview meal plan
+      return { 
+        success: true, 
+        data: { 
+          mealPlan: {
+            meals: generatedMeals,
+            dailyNutrition: dailyNutrition
+          }
+        } 
+      };
+    } catch (error) {
+      console.log('🚨🚨🚨 EDIT PREVIEW INGREDIENT - ERROR 🚨🚨🚨');
+      console.log('error:', error);
+      return { success: false, error: 'Failed to edit ingredient' };
+    }
+  }
+
+  /**
+   * Delete an ingredient from a meal in the preview
+   */
+  async deletePreviewIngredient(
+    previewId: string,
+    mealIndex: number,
+    ingredientIndex: number
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🚨🚨🚨 DELETE PREVIEW INGREDIENT - START 🚨🚨🚨');
+      console.log('previewId:', previewId);
+      console.log('mealIndex:', mealIndex);
+      console.log('ingredientIndex:', ingredientIndex);
+
+      // Fetch the draft meal plan
+      const { data: mealPlan, error } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('id', previewId)
+        .eq('status', 'draft')
+        .single();
+
+      if (error || !mealPlan) {
+        console.log('🚨🚨🚨 ERROR: Meal plan not found or not draft 🚨🚨🚨');
+        return { success: false, error: 'Meal plan not found or not in draft status' };
+      }
+
+      const generatedMeals = mealPlan.generated_meals as any[];
+      if (!generatedMeals || mealIndex >= generatedMeals.length) {
+        console.log('🚨🚨🚨 ERROR: Invalid meal index 🚨🚨🚨');
+        return { success: false, error: 'Invalid meal index' };
+      }
+
+      const meal = generatedMeals[mealIndex];
+      
+      // Check if meal has recipe structure with ingredients (handle both old and new structures)
+      let ingredients: any[] = [];
+      if (meal.recipe?.ingredients) {
+        // New flattened structure
+        ingredients = meal.recipe.ingredients;
+      } else if (meal.recipe?.details?.recipe?.ingredients) {
+        // Old nested structure
+        ingredients = meal.recipe.details.recipe.ingredients;
+      } else {
+        console.log('🚨🚨🚨 ERROR: Meal does not have recipe with ingredients 🚨🚨🚨');
+        console.log('meal:', JSON.stringify(meal, null, 2));
+        return { success: false, error: 'Meal does not have recipe with ingredients' };
+      }
+
+      if (ingredientIndex >= ingredients.length) {
+        console.log('🚨🚨🚨 ERROR: Invalid ingredient index 🚨🚨🚨');
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const deletedIngredient = ingredients[ingredientIndex];
+      console.log('🚨🚨🚨 DELETED INGREDIENT 🚨🚨🚨');
+      console.log('deletedIngredient:', JSON.stringify(deletedIngredient, null, 2));
+
+      // Remove the ingredient
+      ingredients.splice(ingredientIndex, 1);
+
+      // Recalculate totals from remaining ingredients
+      let totalCalories: number = 0;
+      let totalWeight: number = 0;
+      const totalNutrients: { [key: string]: { label?: string; quantity: number; unit: string } } = {};
+
+      for (const ing of ingredients) {
+        const ingNutrition = await this.edamamService.getIngredientNutrition(ing.text);
+        totalCalories += ingNutrition?.calories || 0;
+        totalWeight += ingNutrition?.totalWeight || 0;
+        Object.entries(ingNutrition?.totalNutrients || {}).forEach(([nutrient, data]) => {
+          const nutrientData = data as { label?: string; quantity: number; unit: string };
+          if (!totalNutrients[nutrient]) {
+            totalNutrients[nutrient] = { ...nutrientData, quantity: 0 };
+          }
+          totalNutrients[nutrient].quantity += nutrientData.quantity || 0;
+        });
+      }
+
+      // Update recipe fields based on structure
+      if (meal.recipe.ingredients) {
+        // New flattened structure
+        meal.recipe.calories = totalCalories;
+        meal.recipe.totalWeight = totalWeight;
+        meal.recipe.totalNutrients = totalNutrients;
+        
+        // Recalculate nutritionSummary
+        const servings = meal.recipe.yield || 1;
+        meal.recipe.nutritionSummary = {
+          calories: totalCalories / servings,
+          protein: (totalNutrients['PROCNT']?.quantity || 0) / servings,
+          carbs: (totalNutrients['CHOCDF']?.quantity || 0) / servings,
+          fat: (totalNutrients['FAT']?.quantity || 0) / servings,
+          fiber: (totalNutrients['FIBTG']?.quantity || 0) / servings,
+          sodium: (totalNutrients['NA']?.quantity || 0) / servings,
+          sugar: (totalNutrients['SUGAR']?.quantity || 0) / servings,
+          servings: servings
+        };
+      } else {
+        // Old nested structure
+        meal.recipe.details.recipe.calories = totalCalories;
+        meal.recipe.details.recipe.totalWeight = totalWeight;
+        meal.recipe.details.recipe.totalNutrients = totalNutrients;
+        
+        // Recalculate nutritionSummary
+        const servings = meal.recipe.details.recipe.yield || 1;
+        meal.recipe.nutritionSummary = {
+          calories: totalCalories / servings,
+          protein: (totalNutrients['PROCNT']?.quantity || 0) / servings,
+          carbs: (totalNutrients['CHOCDF']?.quantity || 0) / servings,
+          fat: (totalNutrients['FAT']?.quantity || 0) / servings,
+          fiber: (totalNutrients['FIBTG']?.quantity || 0) / servings,
+          sodium: (totalNutrients['NA']?.quantity || 0) / servings,
+          sugar: (totalNutrients['SUGAR']?.quantity || 0) / servings,
+          servings: servings
+        };
+      }
+
+      // Update database
+      const { error: updateError } = await supabase
+        .from('meal_plans')
+        .update({ generated_meals: generatedMeals })
+        .eq('id', previewId);
+
+      if (updateError) {
+        return { success: false, error: 'Failed to update meal plan' };
+      }
+
+      // Recalculate daily nutrition
+      const dailyNutrition = {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        totalFiber: 0,
+        totalSodium: 0,
+        totalSugar: 0,
+        totalCholesterol: 0,
+        totalCalcium: 0,
+        totalIron: 0
+      };
+
+      generatedMeals.forEach(m => {
+        if (m.recipe?.nutritionSummary) {
+          dailyNutrition.totalCalories += m.recipe.nutritionSummary.calories;
+          dailyNutrition.totalProtein += m.recipe.nutritionSummary.protein;
+          dailyNutrition.totalCarbs += m.recipe.nutritionSummary.carbs;
+          dailyNutrition.totalFat += m.recipe.nutritionSummary.fat;
+          dailyNutrition.totalFiber += m.recipe.nutritionSummary.fiber;
+          dailyNutrition.totalSodium += m.recipe.nutritionSummary.sodium;
+          dailyNutrition.totalSugar += m.recipe.nutritionSummary.sugar;
+        } else {
+          dailyNutrition.totalCalories += m.targetCalories || 0;
+        }
+      });
+
+      // Round daily nutrition
+      Object.keys(dailyNutrition).forEach(key => {
+        dailyNutrition[key] = Math.round(dailyNutrition[key] * 100) / 100;
+      });
+
+      await supabase.from('meal_plans').update({ nutrition_summary: dailyNutrition }).eq('id', previewId);
+
+      // Return the same structure as preview meal plan
+      return { 
+        success: true, 
+        data: { 
+          mealPlan: {
+            meals: generatedMeals,
+            dailyNutrition: dailyNutrition
+          }
+        } 
+      };
+    } catch (error) {
+      console.log('🚨🚨🚨 DELETE PREVIEW INGREDIENT - ERROR 🚨🚨🚨');
+      console.log('error:', error);
+      return { success: false, error: 'Failed to delete ingredient' };
+    }
+  }
+
+  /**
+   * Save a preview as a final meal plan
+   */
+  async saveFromPreview(previewId: string, planName: string, isActive: boolean = false): Promise<any> {
+    try {
+      // Fetch the draft
+      const { data: plan, error: fetchError } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('id', previewId)
+        .eq('status', 'draft')
+        .single();
+
+      if (fetchError || !plan) {
+        throw new Error('Preview not found or not in draft status');
+      }
+
+      // Update to active if isActive, else completed or something
+      const newStatus = isActive ? 'active' : 'completed';
+
+      const { data: updatedPlan, error: updateError } = await supabase
+        .from('meal_plans')
+        .update({
+          plan_name: planName,
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', previewId)
+        .select('*')
+        .single();
+
+      if (updateError || !updatedPlan) {
+        throw new Error('Failed to save preview');
+      }
+
+      return { success: true, data: updatedPlan };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // Helper to calculate daily nutrition from meals array
+  private calculateDailyNutrition(meals: any[]): any {
+    console.log('🔍 CALCULATE DAILY NUTRITION - Starting calculation');
+    console.log('🔍 CALCULATE DAILY NUTRITION - Number of meals:', meals.length);
+    
+    const dailyNutrition = meals.reduce((acc, meal, index) => {
+      console.log(`🔍 CALCULATE DAILY NUTRITION - Processing meal ${index + 1}:`, meal.mealKey);
+      console.log(`🔍 CALCULATE DAILY NUTRITION - Meal has recipe:`, !!meal.recipe);
+      console.log(`🔍 CALCULATE DAILY NUTRITION - Recipe has nutritionSummary:`, !!meal.recipe?.nutritionSummary);
+      
+      // Handle case where nutritionSummary might be undefined
+      // The nutritionSummary is stored in meal.recipe.nutritionSummary, not meal.nutritionSummary
+      const nutritionSummary = meal.recipe?.nutritionSummary || {};
+      
+      console.log(`🔍 CALCULATE DAILY NUTRITION - Meal nutritionSummary:`, nutritionSummary);
+      
+      acc.totalCalories += nutritionSummary.calories || 0;
+      acc.totalProtein += nutritionSummary.protein || 0;
+      acc.totalCarbs += nutritionSummary.carbs || 0;
+      acc.totalFat += nutritionSummary.fat || 0;
+      acc.totalFiber += nutritionSummary.fiber || 0;
+      acc.totalSugar += nutritionSummary.sugar || 0;
+      acc.totalSodium += nutritionSummary.sodium || 0;
+      
+      console.log(`🔍 CALCULATE DAILY NUTRITION - Running totals:`, {
+        totalCalories: acc.totalCalories,
+        totalProtein: acc.totalProtein,
+        totalCarbs: acc.totalCarbs,
+        totalFat: acc.totalFat,
+        totalFiber: acc.totalFiber,
+        totalSugar: acc.totalSugar,
+        totalSodium: acc.totalSodium
+      });
+      
+      return acc;
+    }, { 
+      totalCalories: 0, 
+      totalProtein: 0, 
+      totalCarbs: 0, 
+      totalFat: 0, 
+      totalFiber: 0,
+      totalSugar: 0,
+      totalSodium: 0
+    });
+    
+    console.log('✅ CALCULATE DAILY NUTRITION - Final daily nutrition:', dailyNutrition);
+    return dailyNutrition;
+  }
+
+  /**
+   * Cleanup old draft previews
+   */
+  async cleanupOldDrafts(): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+    try {
+      const { data, error, count } = await supabase
+        .from('meal_plans')
+        .delete()
+        .eq('status', 'draft')
+        .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .select() // To enable counting
+        .then(result => ({ data: result.data, error: result.error, count: result.data?.length || 0 }));
+
+      if (error) throw error;
+
+      return { success: true, deletedCount: count };
+    } catch (error) {
+      return { success: false, deletedCount: 0, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }

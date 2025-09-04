@@ -87,7 +87,7 @@ export class MealProgramService {
         .eq('client_id', request.clientId)
         .eq('is_active', true);
 
-      // Create new meal program (inactive by default)
+      // Create new meal program (active by default - latest one becomes active)
       const { data: mealProgram, error: programError } = await supabase
         .from('meal_programs')
         .insert({
@@ -95,7 +95,7 @@ export class MealProgramService {
           nutritionist_id: nutritionistId,
           name: request.name,
           description: request.description,
-          is_active: false
+          is_active: true
         })
         .select()
         .single();
@@ -113,7 +113,7 @@ export class MealProgramService {
         meal_program_id: mealProgram.id,
         meal_order: meal.mealOrder,
         meal_name: meal.mealName,
-        meal_time: meal.mealTime,
+        meal_time: this.normalizeTimeFormat(meal.mealTime),
         target_calories: meal.targetCalories,
         meal_type: meal.mealType
       }));
@@ -154,6 +154,27 @@ export class MealProgramService {
         error: 'Internal server error'
       };
     }
+  }
+
+  /**
+   * Normalize time format to HH:MM (remove seconds if present)
+   */
+  private normalizeTimeFormat(timeString: string): string {
+    // If time is in HH:MM:SS format, convert to HH:MM
+    if (timeString.includes(':')) {
+      const parts = timeString.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0]}:${parts[1]}`;
+      }
+    }
+    return timeString;
+  }
+
+  /**
+   * Format time for API response (ensure HH:MM format)
+   */
+  private formatTimeForResponse(timeString: string): string {
+    return this.normalizeTimeFormat(timeString);
   }
 
   /**
@@ -219,7 +240,7 @@ export class MealProgramService {
           mealProgramId: meal.meal_program_id,
           mealOrder: meal.meal_order,
           mealName: meal.meal_name,
-          mealTime: meal.meal_time,
+          mealTime: this.formatTimeForResponse(meal.meal_time),
           targetCalories: meal.target_calories,
           mealType: meal.meal_type,
           createdAt: meal.created_at,

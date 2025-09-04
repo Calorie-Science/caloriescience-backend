@@ -18,10 +18,10 @@ export class ClientGoalsService {
       console.log('🎯 Client Goals Service - Creating client goal:', JSON.stringify(request, null, 2));
       
       // Validate request
-      if (!request.clientId || !request.eerGoalCalories || !request.bmrGoalCalories) {
+      if (!request.clientId || !request.eerGoalCalories) {
         return {
           success: false,
-          error: 'Missing required fields: clientId, eerGoalCalories, and bmrGoalCalories are required'
+          error: 'Missing required fields: clientId and eerGoalCalories are required'
         };
       }
 
@@ -67,35 +67,60 @@ export class ClientGoalsService {
         };
       }
 
-      // Deactivate any existing active goal for this client
-      await supabase
-        .from('client_goals')
-        .update({ is_active: false })
-        .eq('client_id', request.clientId)
-        .eq('is_active', true);
+      // Try to create the goal with retry logic to handle race conditions
+      let clientGoal: any = null;
+      let goalError: any = null;
+      let retryCount = 0;
+      const maxRetries = 3;
 
-      // Create new client goal
-      const { data: clientGoal, error: goalError } = await supabase
-        .from('client_goals')
-        .insert({
-          client_id: request.clientId,
-          nutritionist_id: nutritionistId,
-          eer_goal_calories: request.eerGoalCalories,
-          bmr_goal_calories: request.bmrGoalCalories,
-          protein_goal_min: request.proteinGoalMin,
-          protein_goal_max: request.proteinGoalMax,
-          carbs_goal_min: request.carbsGoalMin,
-          carbs_goal_max: request.carbsGoalMax,
-          fat_goal_min: request.fatGoalMin,
-          fat_goal_max: request.fatGoalMax,
-          fiber_goal_grams: request.fiberGoalGrams,
-          water_goal_liters: request.waterGoalLiters,
-          goal_start_date: request.goalStartDate || new Date().toISOString().split('T')[0],
-          goal_end_date: request.goalEndDate,
-          notes: request.notes
-        })
-        .select()
-        .single();
+      while (retryCount < maxRetries) {
+        try {
+          // Deactivate any existing active goal for this client
+          await supabase
+            .from('client_goals')
+            .update({ is_active: false })
+            .eq('client_id', request.clientId)
+            .eq('is_active', true);
+
+          // Create new client goal
+          const result = await supabase
+            .from('client_goals')
+            .insert({
+              client_id: request.clientId,
+              nutritionist_id: nutritionistId,
+              eer_goal_calories: request.eerGoalCalories,
+              protein_goal_min: request.proteinGoalMin,
+              protein_goal_max: request.proteinGoalMax,
+              carbs_goal_min: request.carbsGoalMin,
+              carbs_goal_max: request.carbsGoalMax,
+              fat_goal_min: request.fatGoalMin,
+              fat_goal_max: request.fatGoalMax,
+              fiber_goal_grams: request.fiberGoalGrams,
+              water_goal_liters: request.waterGoalLiters,
+              goal_start_date: request.goalStartDate || new Date().toISOString().split('T')[0],
+              goal_end_date: request.goalEndDate,
+              notes: request.notes
+            })
+            .select()
+            .single();
+
+          clientGoal = result.data;
+          goalError = result.error;
+          break; // Success, exit retry loop
+        } catch (error: any) {
+          // Check if it's a unique constraint violation
+          if (error.code === '23505' && error.message.includes('client_goals_client_id_is_active_key')) {
+            retryCount++;
+            if (retryCount < maxRetries) {
+              console.log(`🔄 Client Goals Service - Retry ${retryCount} due to constraint violation`);
+              await new Promise(resolve => setTimeout(resolve, 100 * retryCount)); // Exponential backoff
+              continue;
+            }
+          }
+          goalError = error;
+          break;
+        }
+      }
 
       if (goalError || !clientGoal) {
         console.error('❌ Client Goals Service - Error creating client goal:', goalError);
@@ -106,25 +131,24 @@ export class ClientGoalsService {
       }
 
       const goal: ClientGoal = {
-        id: clientGoal.id,
-        clientId: clientGoal.client_id,
-        nutritionistId: clientGoal.nutritionist_id,
-        eerGoalCalories: clientGoal.eer_goal_calories,
-        bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalMin: clientGoal.protein_goal_min,
-        proteinGoalMax: clientGoal.protein_goal_max,
-        carbsGoalMin: clientGoal.carbs_goal_min,
-        carbsGoalMax: clientGoal.carbs_goal_max,
-        fatGoalMin: clientGoal.fat_goal_min,
-        fatGoalMax: clientGoal.fat_goal_max,
-        fiberGoalGrams: clientGoal.fiber_goal_grams,
-        waterGoalLiters: clientGoal.water_goal_liters,
-        isActive: clientGoal.is_active,
-        goalStartDate: clientGoal.goal_start_date,
-        goalEndDate: clientGoal.goal_end_date,
-        notes: clientGoal.notes,
-        createdAt: clientGoal.created_at,
-        updatedAt: clientGoal.updated_at
+        id: clientGoal?.id || '',
+        clientId: clientGoal?.client_id || '',
+        nutritionistId: clientGoal?.nutritionist_id || '',
+        eerGoalCalories: clientGoal?.eer_goal_calories || 0,
+        proteinGoalMin: clientGoal?.protein_goal_min || 0,
+        proteinGoalMax: clientGoal?.protein_goal_max || 0,
+        carbsGoalMin: clientGoal?.carbs_goal_min || 0,
+        carbsGoalMax: clientGoal?.carbs_goal_max || 0,
+        fatGoalMin: clientGoal?.fat_goal_min || 0,
+        fatGoalMax: clientGoal?.fat_goal_max || 0,
+        fiberGoalGrams: clientGoal?.fiber_goal_grams,
+        waterGoalLiters: clientGoal?.water_goal_liters,
+        isActive: clientGoal?.is_active || false,
+        goalStartDate: clientGoal?.goal_start_date || '',
+        goalEndDate: clientGoal?.goal_end_date,
+        notes: clientGoal?.notes,
+        createdAt: clientGoal?.created_at || '',
+        updatedAt: clientGoal?.updated_at || ''
       };
 
       console.log('✅ Client Goals Service - Client goal created successfully');
@@ -179,25 +203,24 @@ export class ClientGoalsService {
       }
 
       const goal: ClientGoal = {
-        id: clientGoal.id,
-        clientId: clientGoal.client_id,
-        nutritionistId: clientGoal.nutritionist_id,
-        eerGoalCalories: clientGoal.eer_goal_calories,
-        bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalMin: clientGoal.protein_goal_min,
-        proteinGoalMax: clientGoal.protein_goal_max,
-        carbsGoalMin: clientGoal.carbs_goal_min,
-        carbsGoalMax: clientGoal.carbs_goal_max,
-        fatGoalMin: clientGoal.fat_goal_min,
-        fatGoalMax: clientGoal.fat_goal_max,
-        fiberGoalGrams: clientGoal.fiber_goal_grams,
-        waterGoalLiters: clientGoal.water_goal_liters,
-        isActive: clientGoal.is_active,
-        goalStartDate: clientGoal.goal_start_date,
-        goalEndDate: clientGoal.goal_end_date,
-        notes: clientGoal.notes,
-        createdAt: clientGoal.created_at,
-        updatedAt: clientGoal.updated_at
+        id: clientGoal?.id || '',
+        clientId: clientGoal?.client_id || '',
+        nutritionistId: clientGoal?.nutritionist_id || '',
+        eerGoalCalories: clientGoal?.eer_goal_calories || 0,
+        proteinGoalMin: clientGoal?.protein_goal_min || 0,
+        proteinGoalMax: clientGoal?.protein_goal_max || 0,
+        carbsGoalMin: clientGoal?.carbs_goal_min || 0,
+        carbsGoalMax: clientGoal?.carbs_goal_max || 0,
+        fatGoalMin: clientGoal?.fat_goal_min || 0,
+        fatGoalMax: clientGoal?.fat_goal_max || 0,
+        fiberGoalGrams: clientGoal?.fiber_goal_grams,
+        waterGoalLiters: clientGoal?.water_goal_liters,
+        isActive: clientGoal?.is_active || false,
+        goalStartDate: clientGoal?.goal_start_date || '',
+        goalEndDate: clientGoal?.goal_end_date,
+        notes: clientGoal?.notes,
+        createdAt: clientGoal?.created_at || '',
+        updatedAt: clientGoal?.updated_at || ''
       };
 
       return {
@@ -250,25 +273,24 @@ export class ClientGoalsService {
       }
 
       const goals: ClientGoal[] = clientGoals.map(clientGoal => ({
-        id: clientGoal.id,
-        clientId: clientGoal.client_id,
-        nutritionistId: clientGoal.nutritionist_id,
-        eerGoalCalories: clientGoal.eer_goal_calories,
-        bmrGoalCalories: clientGoal.bmr_goal_calories,
-        proteinGoalMin: clientGoal.protein_goal_min,
-        proteinGoalMax: clientGoal.protein_goal_max,
-        carbsGoalMin: clientGoal.carbs_goal_min,
-        carbsGoalMax: clientGoal.carbs_goal_max,
-        fatGoalMin: clientGoal.fat_goal_min,
-        fatGoalMax: clientGoal.fat_goal_max,
-        fiberGoalGrams: clientGoal.fiber_goal_grams,
-        waterGoalLiters: clientGoal.water_goal_liters,
-        isActive: clientGoal.is_active,
-        goalStartDate: clientGoal.goal_start_date,
-        goalEndDate: clientGoal.goal_end_date,
-        notes: clientGoal.notes,
-        createdAt: clientGoal.created_at,
-        updatedAt: clientGoal.updated_at
+        id: clientGoal?.id || '',
+        clientId: clientGoal?.client_id || '',
+        nutritionistId: clientGoal?.nutritionist_id || '',
+        eerGoalCalories: clientGoal?.eer_goal_calories || 0,
+        proteinGoalMin: clientGoal?.protein_goal_min || 0,
+        proteinGoalMax: clientGoal?.protein_goal_max || 0,
+        carbsGoalMin: clientGoal?.carbs_goal_min || 0,
+        carbsGoalMax: clientGoal?.carbs_goal_max || 0,
+        fatGoalMin: clientGoal?.fat_goal_min || 0,
+        fatGoalMax: clientGoal?.fat_goal_max || 0,
+        fiberGoalGrams: clientGoal?.fiber_goal_grams,
+        waterGoalLiters: clientGoal?.water_goal_liters,
+        isActive: clientGoal?.is_active || false,
+        goalStartDate: clientGoal?.goal_start_date || '',
+        goalEndDate: clientGoal?.goal_end_date,
+        notes: clientGoal?.notes,
+        createdAt: clientGoal?.created_at || '',
+        updatedAt: clientGoal?.updated_at || ''
       }));
 
       return {
@@ -343,7 +365,6 @@ export class ClientGoalsService {
       const updateData: any = {};
       
       if (request.eerGoalCalories !== undefined) updateData.eer_goal_calories = request.eerGoalCalories;
-      if (request.bmrGoalCalories !== undefined) updateData.bmr_goal_calories = request.bmrGoalCalories;
       if (request.proteinGoalMin !== undefined) updateData.protein_goal_min = request.proteinGoalMin;
       if (request.proteinGoalMax !== undefined) updateData.protein_goal_max = request.proteinGoalMax;
       if (request.carbsGoalMin !== undefined) updateData.carbs_goal_min = request.carbsGoalMin;
@@ -374,25 +395,24 @@ export class ClientGoalsService {
       }
 
       const goal: ClientGoal = {
-        id: updatedGoal.id,
-        clientId: updatedGoal.client_id,
-        nutritionistId: updatedGoal.nutritionist_id,
-        eerGoalCalories: updatedGoal.eer_goal_calories,
-        bmrGoalCalories: updatedGoal.bmr_goal_calories,
-        proteinGoalMin: updatedGoal.protein_goal_min,
-        proteinGoalMax: updatedGoal.protein_goal_max,
-        carbsGoalMin: updatedGoal.carbs_goal_min,
-        carbsGoalMax: updatedGoal.carbs_goal_max,
-        fatGoalMin: updatedGoal.fat_goal_min,
-        fatGoalMax: updatedGoal.fat_goal_max,
-        fiberGoalGrams: updatedGoal.fiber_goal_grams,
-        waterGoalLiters: updatedGoal.water_goal_liters,
-        isActive: updatedGoal.is_active,
-        goalStartDate: updatedGoal.goal_start_date,
-        goalEndDate: updatedGoal.goal_end_date,
-        notes: updatedGoal.notes,
-        createdAt: updatedGoal.created_at,
-        updatedAt: updatedGoal.updated_at
+        id: updatedGoal?.id || '',
+        clientId: updatedGoal?.client_id || '',
+        nutritionistId: updatedGoal?.nutritionist_id || '',
+        eerGoalCalories: updatedGoal?.eer_goal_calories || 0,
+        proteinGoalMin: updatedGoal?.protein_goal_min || 0,
+        proteinGoalMax: updatedGoal?.protein_goal_max || 0,
+        carbsGoalMin: updatedGoal?.carbs_goal_min || 0,
+        carbsGoalMax: updatedGoal?.carbs_goal_max || 0,
+        fatGoalMin: updatedGoal?.fat_goal_min || 0,
+        fatGoalMax: updatedGoal?.fat_goal_max || 0,
+        fiberGoalGrams: updatedGoal?.fiber_goal_grams,
+        waterGoalLiters: updatedGoal?.water_goal_liters,
+        isActive: updatedGoal?.is_active || false,
+        goalStartDate: updatedGoal?.goal_start_date || '',
+        goalEndDate: updatedGoal?.goal_end_date,
+        notes: updatedGoal?.notes,
+        createdAt: updatedGoal?.created_at || '',
+        updatedAt: updatedGoal?.updated_at || ''
       };
 
       console.log('✅ Client Goals Service - Client goal updated successfully');
