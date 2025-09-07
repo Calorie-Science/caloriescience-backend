@@ -329,10 +329,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       } else {
         // Meal plan type - validate action
-        if (!['preview', 'save', 'preview-edit-ingredient', 'preview-delete-ingredient', 'save-from-preview'].includes(action)) {
+        if (!['preview', 'save', 'preview-edit-ingredient', 'preview-delete-ingredient', 'save-from-preview', 'saved-edit-ingredient', 'saved-delete-ingredient', 'create-manual', 'add-manual-meal', 'add-manual-ingredient', 'remove-manual-ingredient', 'delete-manual-meal'].includes(action)) {
           return res.status(400).json({
             error: 'Invalid action',
-            message: 'action must be one of: "preview", "save", "preview-edit-ingredient", "preview-delete-ingredient", "save-from-preview"'
+            message: 'action must be one of: "preview", "save", "preview-edit-ingredient", "preview-delete-ingredient", "save-from-preview", "saved-edit-ingredient", "saved-delete-ingredient", "create-manual", "add-manual-meal", "add-manual-ingredient", "remove-manual-ingredient", "delete-manual-meal"'
           });
         }
 
@@ -591,6 +591,125 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
           return res.status(200).json({
             message: 'Meal plan saved from preview successfully',
+            data: result.data
+          });
+        } else if (action === 'saved-edit-ingredient') {
+          const { mealPlanId, mealIndex, ingredientIndex, newIngredientText } = req.body;
+
+          if (!mealPlanId || mealIndex === undefined || ingredientIndex === undefined || !newIngredientText) {
+            return res.status(400).json({ error: 'Missing required fields for saved meal edit' });
+          }
+
+          const result = await mealPlanningService.editSavedMealIngredient(mealPlanId, mealIndex, ingredientIndex, newIngredientText);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient edited successfully in saved meal',
+            data: result.data
+          });
+        } else if (action === 'saved-delete-ingredient') {
+          const { mealPlanId, mealIndex, ingredientIndex } = req.body;
+
+          if (!mealPlanId || mealIndex === undefined || ingredientIndex === undefined) {
+            return res.status(400).json({ error: 'Missing required fields for saved meal delete' });
+          }
+
+          const result = await mealPlanningService.deleteSavedMealIngredient(mealPlanId, mealIndex, ingredientIndex);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient deleted successfully from saved meal',
+            data: result.data
+          });
+        } else if (action === 'create-manual') {
+          const { planName, planDate, planType } = req.body;
+
+          if (!planName || !planDate) {
+            return res.status(400).json({ error: 'planName and planDate are required for manual meal plan creation' });
+          }
+
+          const result = await mealPlanningService.createManualMealPlan(clientId, user.id, planName, planDate, planType);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(201).json({
+            message: 'Manual meal plan created successfully',
+            data: result.data
+          });
+        } else if (action === 'add-manual-meal') {
+          const { mealPlanId, mealType, recipeName, servings, cookingInstructions } = req.body;
+
+          if (!mealPlanId || !mealType || !recipeName) {
+            return res.status(400).json({ error: 'mealPlanId, mealType, and recipeName are required' });
+          }
+
+          const result = await mealPlanningService.addManualMeal(mealPlanId, mealType, recipeName, servings, cookingInstructions);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Manual meal added successfully',
+            data: result.data
+          });
+        } else if (action === 'add-manual-ingredient') {
+          const { mealPlanId, mealId, ingredientText } = req.body;
+
+          if (!mealPlanId || !mealId || !ingredientText) {
+            return res.status(400).json({ error: 'mealPlanId, mealId, and ingredientText are required' });
+          }
+
+          const result = await mealPlanningService.addIngredientToManualMeal(mealPlanId, mealId, ingredientText);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient added to manual meal successfully',
+            data: result.data
+          });
+        } else if (action === 'remove-manual-ingredient') {
+          const { mealPlanId, mealId, ingredientIndex } = req.body;
+
+          if (!mealPlanId || !mealId || ingredientIndex === undefined) {
+            return res.status(400).json({ error: 'mealPlanId, mealId, and ingredientIndex are required' });
+          }
+
+          const result = await mealPlanningService.removeIngredientFromManualMeal(mealPlanId, mealId, ingredientIndex);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Ingredient removed from manual meal successfully',
+            data: result.data
+          });
+        } else if (action === 'delete-manual-meal') {
+          const { mealPlanId, mealId } = req.body;
+
+          if (!mealPlanId || !mealId) {
+            return res.status(400).json({ error: 'mealPlanId and mealId are required' });
+          }
+
+          const result = await mealPlanningService.deleteManualMeal(mealPlanId, mealId);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Manual meal deleted successfully',
             data: result.data
           });
         } else {

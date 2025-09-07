@@ -164,3 +164,4 @@ curl --location 'https://caloriescience-api.vercel.app/api/meal-plans' \
 - ✅ Properly handles both old and new recipe data structures
 
 **No additional implementation is needed** - the nutrition update functionality is already working as requested.
+

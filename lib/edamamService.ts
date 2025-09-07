@@ -759,7 +759,7 @@ export class EdamamService {
   /**
    * Parse ingredient text to extract quantity, measure, and food
    */
-  private parseIngredientText(ingredientText: string): { quantity: number; measure: string; food: string } {
+  public parseIngredientText(ingredientText: string): { quantity: number; measure: string; food: string } {
     const text = ingredientText.trim();
     console.log(`🔍 PARSING INGREDIENT TEXT: "${text}"`);
     
@@ -905,6 +905,110 @@ export class EdamamService {
       console.log('🚨🚨🚨 NUTRITION API ERROR 🚨🚨🚨');
       console.log('error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get ingredient autocomplete suggestions
+   */
+  async getIngredientAutocomplete(query: string): Promise<string[]> {
+    try {
+      console.log('🔍 EDAMAM AUTOCOMPLETE API - START');
+      console.log('query:', query);
+
+      if (!query || query.trim().length === 0) {
+        return [];
+      }
+
+      // Use hardcoded working credentials for autocomplete
+      const url = 'https://api.edamam.com/auto-complete';
+      const params = new URLSearchParams({
+        app_id: '0a4da290',
+        app_key: '1312f27625c249fca57f5bdc433c94a0',
+        q: query.trim()
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🔍 AUTOCOMPLETE CURL COMMAND');
+      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+
+      console.log('🔍 AUTOCOMPLETE RESPONSE STATUS:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ AUTOCOMPLETE ERROR RESPONSE:', errorText);
+        throw new Error(`Edamam Autocomplete API error: ${response.status}`);
+      }
+
+      const suggestions = await response.json();
+      console.log('✅ AUTOCOMPLETE SUCCESS - Suggestions count:', suggestions?.length || 0);
+      console.log('✅ AUTOCOMPLETE SUGGESTIONS:', suggestions);
+
+      return Array.isArray(suggestions) ? suggestions : [];
+    } catch (error) {
+      console.log('❌ AUTOCOMPLETE API ERROR:', error);
+      // Return empty array instead of throwing error for better UX
+      return [];
+    }
+  }
+
+  /**
+   * Get detailed ingredient information including nutrition and serving sizes
+   */
+  async getIngredientDetails(ingredient: string, nutritionType: 'cooking' | 'logging' = 'cooking'): Promise<any> {
+    try {
+      console.log('🔍 EDAMAM FOOD DATABASE PARSER API - START');
+      console.log('ingredient:', ingredient);
+      console.log('nutritionType:', nutritionType);
+
+      if (!ingredient || ingredient.trim().length === 0) {
+        return null;
+      }
+
+      // Use hardcoded working credentials for food database parser
+      const url = 'https://api.edamam.com/api/food-database/v2/parser';
+      const params = new URLSearchParams({
+        app_id: '0a4da290',
+        app_key: '1312f27625c249fca57f5bdc433c94a0',
+        ingr: ingredient.trim(),
+        'nutrition-type': nutritionType
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🔍 FOOD PARSER CURL COMMAND');
+      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+
+      console.log('🔍 FOOD PARSER RESPONSE STATUS:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ FOOD PARSER ERROR RESPONSE:', errorText);
+        throw new Error(`Edamam Food Database Parser API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ FOOD PARSER SUCCESS - Results count:', data?.hints?.length || 0);
+      console.log('✅ FOOD PARSER PARSED COUNT:', data?.parsed?.length || 0);
+
+      return data;
+    } catch (error) {
+      console.log('❌ FOOD PARSER API ERROR:', error);
+      // Return null instead of throwing error for better UX
+      return null;
     }
   }
 
