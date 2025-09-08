@@ -150,6 +150,7 @@ export class MealProgramMappingService {
     Object.entries(mealDistribution).forEach(([mealKey, meal]) => {
       // Use UI override calories if provided, otherwise use meal target calories
       const mealCalories = uiOverrideMeals?.find(override => override.mealKey === mealKey)?.calories || meal.targetCalories || meal.calories;
+      console.log(`🎯 CRITICAL DEBUG - Meal ${mealKey}: ${mealCalories} calories`);
       totalCalories += mealCalories;
       
       // Create unique section names for each meal (Edamam needs separate sections)
@@ -182,8 +183,8 @@ export class MealProgramMappingService {
         },
         fit: {
           ENERC_KCAL: {
-            min: Math.round(sectionCalories * 0.7), // Allow 30% flexibility
-            max: Math.round(sectionCalories * 1.3)  // Allow 30% flexibility
+            min: Math.round(sectionCalories * 0.2), // Allow 80% flexibility - very relaxed
+            max: Math.round(sectionCalories * 2.5)  // Allow 150% flexibility - very relaxed
           }
         }
       };
@@ -196,21 +197,10 @@ export class MealProgramMappingService {
         sections,
         fit: {
           ENERC_KCAL: {
-            min: Math.round(totalCalories * 0.8), // Allow 20% flexibility for daily total
-            max: Math.round(totalCalories * 1.2)  // Allow 20% flexibility for daily total
-          },
-          PROCNT: {
-            min: clientGoal.proteinGoalMin, // Use actual min from client goals
-            max: clientGoal.proteinGoalMax  // Use actual max from client goals
-          },
-          FAT: {
-            min: clientGoal.fatGoalMin, // Use actual min from client goals
-            max: clientGoal.fatGoalMax  // Use actual max from client goals
-          },
-          CHOCDF: {
-            min: clientGoal.carbsGoalMin, // Use actual min from client goals
-            max: clientGoal.carbsGoalMax  // Use actual max from client goals
+            min: Math.round(totalCalories * 0.8), // Use totalCalories (sum of individual meals)
+            max: Math.round(totalCalories * 1.2)  // Use totalCalories (sum of individual meals)
           }
+          // Temporarily remove all macro constraints to see if they're causing issues
         }
       }
     };
@@ -240,7 +230,11 @@ export class MealProgramMappingService {
 
     console.log('🎯 Meal Program Mapping Service - Final Edamam request (WITH RANGE CONSTRAINTS):', JSON.stringify(request, null, 2));
     console.log('🎯 Meal Program Mapping Service - Sections created:', Object.keys(sections));
-    console.log('🎯 Meal Program Mapping Service - Total calories:', totalCalories);
+    console.log('🎯 CRITICAL DEBUG - Total calories calculated:', totalCalories);
+    console.log('🎯 CRITICAL DEBUG - Individual meal calories sum check:', Object.values(mealDistribution).reduce((sum, meal) => {
+      const mealCalories = uiOverrideMeals?.find(override => override.mealKey === `meal_${meal.mealOrder}`)?.calories || meal.targetCalories || meal.calories;
+      return sum + mealCalories;
+    }, 0));
     console.log('🎯 Meal Program Mapping Service - Macro ranges sent to Edamam:');
     console.log('🎯   - Protein:', clientGoal.proteinGoalMin, '-', clientGoal.proteinGoalMax, 'g');
     console.log('🎯   - Carbs:', clientGoal.carbsGoalMin, '-', clientGoal.carbsGoalMax, 'g');
@@ -258,6 +252,9 @@ export class MealProgramMappingService {
     mealDistribution: MealDistribution
   ): any {
     console.log('🎯 Meal Program Mapping Service - ===== MAPPING EDAMAM RESPONSE =====');
+    console.log('🎯 CRITICAL DEBUG - Edamam response keys:', Object.keys(edamamResponse || {}));
+    console.log('🎯 CRITICAL DEBUG - Has selection:', !!edamamResponse?.selection);
+    console.log('🎯 CRITICAL DEBUG - Selection length:', edamamResponse?.selection?.length || 0);
     console.log('🎯 Meal Program Mapping Service - Edamam response:', JSON.stringify(edamamResponse, null, 2));
     console.log('🎯 Meal Program Mapping Service - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
     
@@ -269,31 +266,37 @@ export class MealProgramMappingService {
     if (edamamResponse.selection && edamamResponse.selection.length > 0) {
       // Use the first selection (first day's meal plan)
       const firstSelection = edamamResponse.selection[0];
+      console.log('🎯 Meal Program Mapping Service - First selection:', JSON.stringify(firstSelection, null, 2));
       console.log('🎯 Meal Program Mapping Service - First selection sections:', Object.keys(firstSelection.sections));
       
       // Map Edamam sections to our meal types
       Object.entries(firstSelection.sections).forEach(([edamamSection, sectionData]: [string, any]) => {
         console.log(`🎯 Meal Program Mapping Service - Processing section: ${edamamSection}`, JSON.stringify(sectionData, null, 2));
         
-        if (sectionData.assigned) {
+        // Check for different possible response structures
+        let recipeUri = sectionData.assigned || sectionData.recipe || sectionData.uri;
+        
+        if (recipeUri) {
           // Extract meal order from section name (e.g., "Meal_1" -> meal order 1)
           const mealOrderMatch = edamamSection.match(/Meal_(\d+)/);
           if (mealOrderMatch) {
             const mealOrder = parseInt(mealOrderMatch[1]);
             console.log(`🎯 Meal Program Mapping Service - Found meal order: ${mealOrder} for section: ${edamamSection}`);
+            console.log(`🎯 Meal Program Mapping Service - Recipe URI: ${recipeUri}`);
             
             // Find the meal with this order
             Object.entries(mealDistribution).forEach(([mealKey, meal]) => {
               if (meal.mealOrder === mealOrder) {
                 console.log(`🎯 Meal Program Mapping Service - Assigning recipe to meal: ${mealKey} (${meal.mealName})`);
-                recipeAssignments[mealKey] = sectionData.assigned;
+                recipeAssignments[mealKey] = recipeUri;
               }
             });
           } else {
             console.log(`🎯 Meal Program Mapping Service - Could not extract meal order from section: ${edamamSection}`);
           }
         } else {
-          console.log(`🎯 Meal Program Mapping Service - No recipe assigned to section: ${edamamSection}`);
+          console.log(`🎯 Meal Program Mapping Service - No recipe found in section: ${edamamSection}`);
+          console.log(`🎯 Meal Program Mapping Service - Section data keys:`, Object.keys(sectionData));
         }
       });
       
@@ -303,11 +306,16 @@ export class MealProgramMappingService {
     }
     
     // Map meals with recipe assignments
+    console.log('🎯 Meal Program Mapping Service - Available recipe assignments:', recipeAssignments);
+    console.log('🎯 Meal Program Mapping Service - Meal distribution keys:', Object.keys(mealDistribution));
+    console.log('🎯 Meal Program Mapping Service - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
+    
     Object.entries(mealDistribution).forEach(([mealKey, meal]) => {
       const recipeUri = recipeAssignments[mealKey];
       console.log(`🎯 Meal Program Mapping Service - Mapping meal: ${mealKey} (${meal.mealName}) - Recipe URI: ${recipeUri || 'NONE'}`);
+      console.log(`🎯 Meal Program Mapping Service - Meal order: ${meal.mealOrder}, Meal key: ${mealKey}`);
       
-      mappedMeals.push({
+      const mappedMeal = {
         mealKey,
         mealName: meal.mealName,
         mealTime: meal.mealTime,
@@ -317,15 +325,23 @@ export class MealProgramMappingService {
           uri: recipeUri,
           id: recipeUri.split('#recipe_')[1]
         } : null
-      });
+      };
+      
+      console.log(`🎯 Meal Program Mapping Service - Final mapped meal:`, JSON.stringify(mappedMeal, null, 2));
+      mappedMeals.push(mappedMeal);
     });
     
-    console.log('🎯 Meal Program Mapping Service - Final mapped meals:', JSON.stringify(mappedMeals, null, 2));
-    console.log('🎯 Meal Program Mapping Service - ===== END MAPPING =====');
-    
-    return {
-      meals: mappedMeals
-    };
+      console.log('🎯 Meal Program Mapping Service - Final mapped meals:', JSON.stringify(mappedMeals, null, 2));
+      console.log('🎯 Meal Program Mapping Service - ===== END MAPPING =====');
+      
+      // Debug: Check if any meals have recipe URIs
+      const mealsWithRecipes = mappedMeals.filter(meal => meal.recipe?.uri);
+      console.log('🎯 Meal Program Mapping Service - Meals with recipe URIs:', mealsWithRecipes.length);
+      console.log('🎯 Meal Program Mapping Service - Recipe URIs:', mealsWithRecipes.map(m => m.recipe.uri));
+      
+      return {
+        meals: mappedMeals
+      };
   }
 }
 

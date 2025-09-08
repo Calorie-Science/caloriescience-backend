@@ -106,6 +106,7 @@ export interface MealPlannerRequest {
       };
       [key: string]: any;
     };
+    exclude?: string[]; // Array of recipe URIs to exclude
     sections: {
       [sectionName: string]: {
         accept?: {
@@ -209,8 +210,8 @@ export class EdamamService {
     const searchParams = new URLSearchParams();
     
     // Add authentication using working credentials
-    const workingAppId = '5bce8081';
-    const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+    const workingAppId = 'd58a8212';
+    const workingAppKey = 'acb8a2aefec9a5cafc2ccb65d7ccf401';
     searchParams.append('app_id', workingAppId);
     searchParams.append('app_key', workingAppKey);
     searchParams.append('type', 'public');
@@ -349,6 +350,91 @@ export class EdamamService {
   }
 
   /**
+   * Generate multi-day meal plans with recipe exclusion
+   */
+  async generateMultiDayMealPlan(
+    baseRequest: MealPlannerRequest, 
+    days: number, 
+    userId?: string
+  ): Promise<{ dayPlans: MealPlannerResponse[]; allExcludedRecipes: string[] }> {
+    console.log('🚨🚨🚨 EDAMAM SERVICE - MULTI-DAY MEAL PLAN START 🚨🚨🚨');
+    console.log('🚨 EDAMAM SERVICE - Base request:', JSON.stringify(baseRequest, null, 2));
+    console.log('🚨 EDAMAM SERVICE - Days requested:', days);
+    console.log('🚨 EDAMAM SERVICE - User ID:', userId);
+    
+    const dayPlans: MealPlannerResponse[] = [];
+    const allExcludedRecipes: string[] = [...(baseRequest.plan.exclude || [])];
+    
+    for (let day = 1; day <= days; day++) {
+      console.log(`🔄 EDAMAM SERVICE - Generating day ${day} of ${days}`);
+      
+      // Create request for this day with accumulated excluded recipes
+      const dayRequest: MealPlannerRequest = {
+        ...baseRequest,
+        plan: {
+          ...baseRequest.plan,
+          exclude: allExcludedRecipes.length > 0 ? [...allExcludedRecipes] : undefined
+        }
+      };
+      
+      console.log(`📝 EDAMAM SERVICE - Day ${day} request with ${allExcludedRecipes.length} excluded recipes:`, 
+        JSON.stringify(dayRequest, null, 2));
+      
+      try {
+        // Generate meal plan for this day
+        const dayPlan = await this.generateMealPlanV1(dayRequest, userId);
+        dayPlans.push(dayPlan);
+        
+        // Extract recipe URIs from this day's plan to exclude them from subsequent days
+        const dayRecipeUris = this.extractRecipeUrisFromResponse(dayPlan);
+        console.log(`🍽️ EDAMAM SERVICE - Day ${day} generated ${dayRecipeUris.length} recipes:`, dayRecipeUris);
+        
+        // Add these recipes to the exclusion list for next day
+        allExcludedRecipes.push(...dayRecipeUris);
+        
+        console.log(`✅ EDAMAM SERVICE - Day ${day} completed. Total excluded recipes: ${allExcludedRecipes.length}`);
+        
+        // Small delay between API calls to be respectful to the API
+        if (day < days) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+      } catch (error) {
+        console.error(`❌ EDAMAM SERVICE - Error generating day ${day}:`, error);
+        throw new Error(`Failed to generate meal plan for day ${day}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+    
+    console.log('🎉 EDAMAM SERVICE - Multi-day meal plan generation completed');
+    console.log(`📊 EDAMAM SERVICE - Generated ${dayPlans.length} day plans with ${allExcludedRecipes.length} total excluded recipes`);
+    
+    return {
+      dayPlans,
+      allExcludedRecipes
+    };
+  }
+
+  /**
+   * Extract recipe URIs from a meal planner response
+   */
+  private extractRecipeUrisFromResponse(response: MealPlannerResponse): string[] {
+    const recipeUris: string[] = [];
+    
+    if (response.selection && response.selection.length > 0) {
+      const firstSelection = response.selection[0];
+      
+      Object.values(firstSelection.sections).forEach(section => {
+        if (section.assigned) {
+          recipeUris.push(section.assigned);
+        }
+      });
+    }
+    
+    console.log('🔍 EDAMAM SERVICE - Extracted recipe URIs:', recipeUris);
+    return recipeUris;
+  }
+
+  /**
    * Generate a meal plan using the NEW Meal Planner API v1 with round-robin fallback
    */
   async generateMealPlanV1(request: MealPlannerRequest, userId?: string): Promise<MealPlannerResponse> {
@@ -366,8 +452,8 @@ export class EdamamService {
     
     try {
       // Use correct hardcoded Meal Planner credentials
-      const mealPlannerAppId = '5bce8081';
-      const mealPlannerAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+      const mealPlannerAppId = 'd58a8212';
+      const mealPlannerAppKey = 'acb8a2aefec9a5cafc2ccb65d7ccf401';
       const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
@@ -454,6 +540,21 @@ export class EdamamService {
             console.log('  - Selection count:', data.selection ? data.selection.length : 0);
             console.log('  - Status:', data.status);
             
+            // Log the full response structure for debugging
+            if (data.selection && data.selection.length > 0) {
+              console.log('✅ Edamam Service - First selection structure:');
+              console.log('  - Selection keys:', Object.keys(data.selection[0]));
+              if (data.selection[0].sections) {
+                console.log('  - Section keys:', Object.keys(data.selection[0].sections));
+                Object.entries(data.selection[0].sections).forEach(([key, value]) => {
+                  console.log(`  - Section ${key}:`, JSON.stringify(value, null, 2));
+                });
+              }
+            } else {
+              console.log('❌ Edamam Service - No selections in response');
+              console.log('❌ Edamam Service - Full response:', JSON.stringify(data, null, 2));
+            }
+            
             return data;
           }
           
@@ -505,6 +606,7 @@ export class EdamamService {
     console.log('🍽️ Edamam Service - ===== getRecipeDetails START =====');
     console.log('🍽️ Edamam Service - Input recipe URI:', recipeUri);
     console.log('🍽️ Edamam Service - User ID:', userId);
+    console.log('🍽️ CRITICAL DEBUG - Will use user ID:', userId || 'test2');
     
     try {
       // Extract recipe ID from URI (e.g., "recipe_f0ae5c39b8140a2523ebb1f45ebefdf3")
@@ -522,14 +624,14 @@ export class EdamamService {
       };
       
       // Add user ID header if provided (required for Active User Tracking)
-      // Always use 'test5' for Edamam API calls to avoid rate limiting
-      const accountUser = "test5"
+      // Always use 'test3' for Recipe API calls as per user requirement
+      const accountUser = "test3"
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 
       // Use working meal planner credentials for Recipe API (as per Edamam docs)
-      const workingAppId = '5bce8081';
-      const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+      const workingAppId = 'fb9b0e62';
+      const workingAppKey = '8a58a60fd0235f1bc39d3defab42922e';
       const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${workingAppId}&app_key=${workingAppKey}&type=public`;
       console.log('🍽️ Edamam Service - Recipe API request details:');
       console.log('  - Method: GET');
@@ -586,17 +688,17 @@ export class EdamamService {
       console.log('✅ Edamam Service - Recipe details fetched successfully');
       console.log('✅ Edamam Service - Recipe response data:', JSON.stringify(data, null, 2));
       console.log('✅ Edamam Service - Recipe response summary:');
-      console.log('  - Recipe label:', data.label);
-      console.log('  - Calories:', data.calories);
-      console.log('  - Ingredients count:', data.ingredients ? data.ingredients.length : 0);
-      console.log('  - Total nutrients:', data.totalNutrients ? Object.keys(data.totalNutrients).length : 0);
+      console.log('  - Recipe label:', data.recipe?.label);
+      console.log('  - Calories:', data.recipe?.calories);
+      console.log('  - Ingredients count:', data.recipe?.ingredients ? data.recipe.ingredients.length : 0);
+      console.log('  - Total nutrients:', data.recipe?.totalNutrients ? Object.keys(data.recipe.totalNutrients).length : 0);
       
       // Log detailed ingredient information and fix problematic measures
-      if (data.ingredients && data.ingredients.length > 0) {
+      if (data.recipe?.ingredients && data.recipe.ingredients.length > 0) {
         console.log('🔍 EDAMAM RECIPE INGREDIENTS - Detailed ingredient analysis:');
         
         // Fix ingredients using Nutrition Data API for better parsing
-        const fixedIngredients = await Promise.all(data.ingredients.map(async (ingredient: any, index: number) => {
+        const fixedIngredients = await Promise.all(data.recipe.ingredients.map(async (ingredient: any, index: number) => {
           console.log(`  🔍 INGREDIENT ${index + 1} STRUCTURE:`, JSON.stringify(ingredient, null, 2));
           console.log(`  Ingredient ${index + 1}:`, {
             text: ingredient.text,
@@ -725,12 +827,12 @@ export class EdamamService {
         }));
         
         // Replace the ingredients array with the fixed one
-        data.ingredients = fixedIngredients;
+        data.recipe.ingredients = fixedIngredients;
       }
       
       console.log('🍽️ Edamam Service - ===== getRecipeDetails END =====');
       
-      return data;
+      return data.recipe;
     } catch (error) {
       console.error('❌ Edamam Service - Error fetching recipe details:', error);
       
@@ -738,19 +840,17 @@ export class EdamamService {
       console.log('🍽️ Edamam Service - Creating mock recipe due to error');
       const recipeId = recipeUri.split('#recipe_')[1] || 'unknown';
       const mockRecipe = {
-        recipe: {
-          label: `Recipe ${recipeId.substring(0, 8)}`,
-          url: '',
-          image: '',
-          calories: 0,
-          totalNutrients: {
-            PROCNT: { quantity: 0, unit: 'g' },
-            CHOCDF: { quantity: 0, unit: 'g' },
-            FAT: { quantity: 0, unit: 'g' },
-            FIBTG: { quantity: 0, unit: 'g' }
-          },
-          ingredientLines: []
-        }
+        label: `Recipe ${recipeId.substring(0, 8)}`,
+        url: '',
+        image: '',
+        calories: 0,
+        totalNutrients: {
+          PROCNT: { quantity: 0, unit: 'g' },
+          CHOCDF: { quantity: 0, unit: 'g' },
+          FAT: { quantity: 0, unit: 'g' },
+          FIBTG: { quantity: 0, unit: 'g' }
+        },
+        ingredientLines: []
       };
       
       return mockRecipe;

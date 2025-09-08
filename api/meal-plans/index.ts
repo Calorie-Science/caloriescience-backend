@@ -34,6 +34,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           mealPreferences = {},
           targetCalories,
           macroTargets = null, // New field for macro targets
+          // Multi-day meal plan fields
+          days = 1, // Number of days for the meal plan (1-30)
+          startDate = planDate, // Start date for multi-day plans (defaults to planDate for backward compatibility)
           // Override fields for UI-driven meal plan generation
           overrideMealProgram = null, // Override meal program data from UI
           overrideClientGoals = null, // Override client goals data from UI
@@ -321,26 +324,31 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           });
         }
 
-        // Only validate planDate for preview and save actions
+        // Only validate planDate/startDate for preview and save actions
         if (['preview', 'save'].includes(action)) {
-          if (!planDate) {
+          // For multi-day plans, allow either planDate or startDate
+          const effectiveDate = startDate || planDate;
+          if (!effectiveDate) {
             return res.status(400).json({
               error: 'Missing required field',
-              message: 'planDate is required (YYYY-MM-DD format)'
+              message: 'planDate or startDate is required (YYYY-MM-DD format)'
             });
           }
 
           // Validate date format
           const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-          if (!dateRegex.test(planDate)) {
+          if (!dateRegex.test(effectiveDate)) {
             return res.status(400).json({
               error: 'Invalid date format',
-              message: 'planDate must be in YYYY-MM-DD format'
+              message: 'Date must be in YYYY-MM-DD format'
             });
           }
 
+          // Use effective date for processing
+          const effectivePlanDate = effectiveDate;
+
           // Check if plan date is not in the past
-          const planDateObj = new Date(planDate);
+          const planDateObj = new Date(effectivePlanDate);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           
@@ -394,6 +402,57 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         let generatedMealPlan;
         
         if (['preview', 'save'].includes(action)) {
+          // Validate multi-day parameters
+          if (days && (days < 1 || days > 30)) {
+            return res.status(400).json({
+              error: 'Invalid days parameter',
+              message: 'Days must be between 1 and 30'
+            });
+          }
+
+          // Use the effective date (startDate takes precedence over planDate)
+          const effectiveStartDate = startDate || planDate;
+
+          // Check if this is a multi-day meal plan request
+          if (days && days > 1) {
+            console.log(`🎯 API - Generating multi-day meal plan for ${days} days starting ${effectiveStartDate}`);
+            
+            // Generate multi-day meal plan
+            generatedMealPlan = await mealPlanningService.generateMultiDayMealPlan(
+              clientId,
+              effectiveStartDate,
+              days,
+              dietaryRestrictions,
+              cuisinePreferences,
+              user.id,
+              overrideMealProgram,
+              overrideClientGoals
+            );
+            
+            if (!generatedMealPlan.success) {
+              return res.status(400).json({
+                error: 'Multi-day meal plan generation failed',
+                message: generatedMealPlan.error
+              });
+            }
+            
+            // Return multi-day meal plan response
+            if (action === 'preview') {
+              return res.status(200).json({
+                success: true,
+                message: `${days}-day meal plan preview generated successfully`,
+                data: generatedMealPlan.data
+              });
+            } else {
+              return res.status(201).json({
+                success: true,
+                message: `${days}-day meal plan saved successfully`,
+                data: generatedMealPlan.data
+              });
+            }
+          }
+
+          // Single-day meal plan logic (existing)
           // Check if UI provided override meal program, otherwise check if client has a meal program
           const hasOverrideMealProgram = overrideMealProgram && overrideMealProgram.meals && overrideMealProgram.meals.length > 0;
           
@@ -417,7 +476,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             // Generate meal plan based on meal program (with possible overrides)
             generatedMealPlan = await mealPlanningService.generateMealPlanFromProgramWithOverrides(
               clientId,
-              planDate,
+              effectiveStartDate,
               dietaryRestrictions,
               cuisinePreferences,
               user.id,
@@ -755,7 +814,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   // GET - Handle different modes: meal plans or meal programs
   if (req.method === 'GET') {
     try {
-      const { clientId, mode = 'meal-plans' } = req.query;
+      const { 
+        clientId, 
+        mode = 'meal-plans', 
+        mealPlanId, 
+        view = 'consolidated', // 'consolidated', 'day-wise', 'day'
+        day 
+      } = req.query;
 
       if (!clientId || typeof clientId !== 'string') {
         return res.status(400).json({
@@ -811,6 +876,24 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           success: true,
           data: result.data,
           message: 'Client goals fetched successfully'
+        });
+      } else if (mode === 'meal-plan-detail' && mealPlanId) {
+        // Get specific meal plan with different view options
+        const mealPlanIdParam = Array.isArray(mealPlanId) ? mealPlanId[0] : mealPlanId;
+        const dayParam = Array.isArray(day) ? day[0] : day;
+        const result = await mealPlanningService.getMealPlanWithView(mealPlanIdParam, view as string, dayParam ? parseInt(dayParam) : undefined);
+
+        if (!result.success) {
+          return res.status(400).json({
+            error: 'Failed to fetch meal plan',
+            message: result.error
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          data: result.data,
+          message: `Meal plan fetched successfully (${view} view)`
         });
       } else {
         // Default mode: get meal plans for the client
