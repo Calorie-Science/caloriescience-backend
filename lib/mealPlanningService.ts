@@ -3,6 +3,7 @@ import { EdamamService, EdamamRecipe, RecipeSearchParams } from './edamamService
 import { MealProgramMappingService } from './mealProgramMappingService';
 import { ClientGoalsService } from './clientGoalsService';
 import { objectToCamelCase } from './caseTransform';
+import { calculateEER, calculateMacros } from './calculations';
 
 export interface MealPlanGenerationRequest {
   clientId: string;
@@ -154,14 +155,21 @@ export class MealPlanningService {
     console.log('🚀 Meal Planning Service - User ID:', userId);
     
     try {
-      // 1. Get client's nutrition requirements
+      // 1. Get client's nutrition requirements or calculate from guidelines
       console.log('🚀 Meal Planning Service - Getting client nutrition requirements...');
-      const nutritionRequirements = await this.getClientNutritionRequirements(request.clientId);
+      let nutritionRequirements = await this.getClientNutritionRequirements(request.clientId);
       console.log('🚀 Meal Planning Service - Nutrition requirements:', JSON.stringify(nutritionRequirements, null, 2));
       
+      // If no client goals found, calculate from nutritional guidelines
       if (!nutritionRequirements) {
-        console.error('❌ Meal Planning Service - Client nutrition requirements not found');
-        throw new Error('Client nutrition requirements not found');
+        console.log('⚠️ Meal Planning Service - No client nutrition requirements found, calculating from guidelines...');
+        nutritionRequirements = await this.calculateNutritionFromGuidelines(request.clientId);
+        console.log('🔄 Meal Planning Service - Calculated nutrition requirements:', JSON.stringify(nutritionRequirements, null, 2));
+        
+        if (!nutritionRequirements) {
+          console.error('❌ Meal Planning Service - Failed to calculate nutrition requirements from guidelines');
+          throw new Error('Unable to determine nutrition requirements. Please ensure client profile is complete.');
+        }
       }
 
       // 2. Get client's dietary preferences and restrictions
@@ -282,7 +290,6 @@ export class MealPlanningService {
         clients!inner(nutritionist_id)
       `)
       .eq('client_id', clientId)
-      .eq('is_active', true)
       .single();
 
     if (error) {
@@ -1567,6 +1574,333 @@ export class MealPlanningService {
   }
 
   /**
+   * Generate meal plan based on client's meal program and goals with UI overrides
+   */
+  async generateMealPlanFromProgramWithOverrides(
+    clientId: string,
+    planDate: string,
+    dietaryRestrictions: string[],
+    cuisinePreferences: string[],
+    userId: string,
+    overrideMealProgram?: any,
+    overrideClientGoals?: any
+  ): Promise<any> {
+    console.log('🎯 Meal Planning Service - Generating meal plan with overrides for client:', clientId);
+    console.log('🎯 Override Meal Program:', JSON.stringify(overrideMealProgram, null, 2));
+    console.log('🎯 Override Client Goals:', JSON.stringify(overrideClientGoals, null, 2));
+    
+    try {
+      const clientGoalsService = new ClientGoalsService();
+      const mealProgramMappingService = new MealProgramMappingService();
+      
+      // 1. Get client's active goals (or use override)
+      let clientGoal;
+      if (overrideClientGoals) {
+        // Use override client goals from UI
+        clientGoal = overrideClientGoals;
+        console.log('🎯 Meal Planning Service - Using override client goals');
+      } else {
+        // Get from database
+        const goalsResponse = await clientGoalsService.getActiveClientGoal(clientId, userId);
+        if (!goalsResponse.success || !goalsResponse.data) {
+          throw new Error('No active client goals found and no override provided. Please set client goals first.');
+        }
+        clientGoal = goalsResponse.data;
+        console.log('🎯 Meal Planning Service - Using database client goals');
+      }
+      
+      console.log('🎯 Meal Planning Service - Client goals:', JSON.stringify(clientGoal, null, 2));
+      
+      // 2. Get client's active meal program (or use override)
+      let mealProgram;
+      if (overrideMealProgram) {
+        // Use override meal program from UI
+        mealProgram = {
+          id: 'override',
+          client_id: clientId,
+          nutritionist_id: userId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          meals: overrideMealProgram.meals.map((meal: any, index: number) => ({
+            id: `override_${index}`,
+            meal_program_id: 'override',
+            meal_order: meal.mealOrder || index + 1,
+            meal_name: meal.mealName,
+            meal_time: meal.mealTime,
+            target_calories: meal.targetCalories,
+            meal_type: meal.mealType,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }))
+        };
+        console.log('🎯 Meal Planning Service - Using override meal program');
+      } else {
+        // Get from database
+        const { data: dbMealProgram, error: programError } = await supabase
+          .from('meal_programs')
+          .select(`
+            *,
+            meals:meal_program_meals(*)
+          `)
+          .eq('client_id', clientId)
+          .single();
+        
+        if (programError || !dbMealProgram) {
+          throw new Error('No meal program found and no override provided. Please create a meal program first.');
+        }
+        mealProgram = dbMealProgram;
+        console.log('🎯 Meal Planning Service - Using database meal program');
+      }
+      
+      console.log('🎯 Meal Planning Service - Meal program:', JSON.stringify(mealProgram, null, 2));
+      
+      // 3. Calculate meal distribution based on goals and program
+      const mealDistribution = mealProgramMappingService.calculateMealDistribution(
+        clientGoal,
+        {
+          id: mealProgram.id,
+          clientId: mealProgram.client_id,
+          nutritionistId: mealProgram.nutritionist_id,
+          createdAt: mealProgram.created_at,
+          updatedAt: mealProgram.updated_at,
+          meals: mealProgram.meals.map((meal: any) => ({
+            id: meal.id,
+            mealProgramId: meal.meal_program_id,
+            mealOrder: meal.meal_order,
+            mealName: meal.meal_name,
+            mealTime: meal.meal_time,
+            targetCalories: meal.target_calories,
+            mealType: meal.meal_type,
+            createdAt: meal.created_at,
+            updatedAt: meal.updated_at
+          }))
+        }
+      );
+      
+      console.log('🎯 Meal Planning Service - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
+      
+      // 4. Create Edamam meal plan request
+      const edamamRequest = mealProgramMappingService.createEdamamMealPlanRequest(
+        mealDistribution,
+        dietaryRestrictions,
+        cuisinePreferences,
+        clientGoal,
+        undefined // No individual meal overrides since we're using program/goal overrides
+      );
+      
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM REQUEST WITH OVERRIDES 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - EDAMAM REQUEST BODY:', JSON.stringify(edamamRequest, null, 2));
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM REQUEST END 🚨🚨🚨');
+      
+      // 5. Call Edamam API
+      console.log('🚨🚨🚨 MEAL PLANNING - CALLING EDAMAM API 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - About to call Edamam with request above');
+      const edamamResponse = await this.edamamService.generateMealPlanV1(edamamRequest, undefined);
+      console.log('🚨🚨🚨 MEAL PLANNING - EDAMAM API CALL COMPLETED 🚨🚨🚨');
+      console.log('🚨 MEAL PLANNING - EDAMAM RESPONSE RECEIVED:', JSON.stringify(edamamResponse, null, 2));
+      
+      // 6. Map response back to meal program structure
+      console.log('🎯 Meal Planning Service - ===== MAPPING EDAMAM RESPONSE =====');
+      const mappedResponse = mealProgramMappingService.mapEdamamResponseToMealProgram(
+        edamamResponse,
+        mealDistribution
+      );
+      console.log('🎯 Meal Planning Service - Mapped response:', JSON.stringify(mappedResponse, null, 2));
+      console.log('🎯 Meal Planning Service - ===== END MAPPING =====');
+      
+      // 7. Fetch recipe details for each meal that has a recipe URI (in parallel for speed)
+      console.log('🎯 Meal Planning Service - Fetching recipe details for meals in parallel...');
+      const recipeFetchPromises = mappedResponse.meals
+        .filter(meal => meal.recipe?.uri)
+        .map(async (meal) => {
+          try {
+            console.log(`🎯 Meal Planning Service - Fetching details for meal: ${meal.mealName} (Order: ${meal.mealOrder || 'N/A'})`);
+            const recipeDetails = await this.edamamService.getRecipeDetails(meal.recipe.uri, userId);
+            
+            // Flatten the structure: merge recipeDetails.recipe into meal.recipe
+            if (recipeDetails?.recipe) {
+              const recipe = recipeDetails.recipe;
+              const servings = recipe.yield || 1;
+              
+              meal.recipe = {
+                ...(meal.recipe as object),  // Type assertion to allow spread
+                ...(recipe as object),       // Type assertion to allow spread
+                nutritionSummary: {
+                  calories: Math.round((recipe.calories || 0) / servings * 100) / 100,
+                  protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
+                  carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
+                  fat: Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
+                  fiber: Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+                  sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
+                  sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
+                  servings: servings
+                }
+              };
+              // Remove the now redundant 'details' if it was set
+              delete meal.recipe.details;
+            } else {
+              meal.recipe.error = 'Failed to fetch recipe details';
+            }
+            
+            console.log(`✅ Meal Planning Service - Recipe details fetched and flattened for: ${meal.mealName}`);
+          } catch (error) {
+            console.error(`❌ Meal Planning Service - Failed to fetch recipe details for ${meal.mealName}:`, error);
+            meal.recipe.error = 'Failed to fetch recipe details';
+          }
+        });
+      
+      // Wait for all recipe fetches to complete
+      if (recipeFetchPromises.length > 0) {
+        console.log(`🎯 Meal Planning Service - Waiting for ${recipeFetchPromises.length} recipe fetches to complete...`);
+        await Promise.all(recipeFetchPromises);
+        console.log('✅ Meal Planning Service - All recipe fetches completed');
+      } else {
+        console.log('🎯 Meal Planning Service - No recipes to fetch details for');
+      }
+      
+      // Calculate consolidated daily nutrition totals AFTER all recipe details have been fetched
+      console.log('🎯 Meal Planning Service - ===== CALCULATING DAILY NUTRITION =====');
+      const dailyNutrition = {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        totalFiber: 0,
+        totalSodium: 0,
+        totalSugar: 0,
+        totalCholesterol: 0,
+        totalCalcium: 0,
+        totalIron: 0
+      };
+
+      // Calculate totals from actual recipe nutrition (now that details are populated)
+      mappedResponse.meals.forEach(meal => {
+        console.log(`🎯 Meal Planning Service - Processing meal: ${meal.mealName}`);
+        console.log(`🎯 Meal Planning Service - Has recipe: ${!!meal.recipe}`);
+        
+        if (meal.recipe && meal.recipe.totalNutrients) {  // Use flattened structure
+          const recipe = meal.recipe;
+          const servings = recipe.yield || 1;
+          const perServingCalories = (recipe.calories || 0) / servings;
+          const perServingProtein = (recipe.totalNutrients?.PROCNT?.quantity || 0) / servings;
+          const perServingCarbs = (recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings;
+          const perServingFat = (recipe.totalNutrients?.FAT?.quantity || 0) / servings;
+          const perServingFiber = (recipe.totalNutrients?.FIBTG?.quantity || 0) / servings;
+          const perServingSodium = (recipe.totalNutrients?.NA?.quantity || 0) / servings;
+          const perServingSugar = (recipe.totalNutrients?.SUGAR?.quantity || 0) / servings;
+          const perServingCholesterol = (recipe.totalNutrients?.CHOLE?.quantity || 0) / servings;
+          const perServingCalcium = (recipe.totalNutrients?.CA?.quantity || 0) / servings;
+          const perServingIron = (recipe.totalNutrients?.FE?.quantity || 0) / servings;
+
+          console.log(`🎯 Meal Planning Service - Per-serving values for ${meal.mealName}:`);
+          console.log(`  - Calories: ${perServingCalories}`);
+          console.log(`  - Protein: ${perServingProtein}g`);
+          console.log(`  - Carbs: ${perServingCarbs}g`);
+          console.log(`  - Fat: ${perServingFat}g`);
+          console.log(`  - Fiber: ${perServingFiber}g`);
+          
+          dailyNutrition.totalCalories += perServingCalories;
+          dailyNutrition.totalProtein += perServingProtein;
+          dailyNutrition.totalCarbs += perServingCarbs;
+          dailyNutrition.totalFat += perServingFat;
+          dailyNutrition.totalFiber += perServingFiber;
+          dailyNutrition.totalSodium += perServingSodium;
+          dailyNutrition.totalSugar += perServingSugar;
+          dailyNutrition.totalCholesterol += perServingCholesterol;
+          dailyNutrition.totalCalcium += perServingCalcium;
+          dailyNutrition.totalIron += perServingIron;
+          
+          console.log(`🎯 Meal Planning Service - Added nutrition from ${meal.mealName}: Calories=${perServingCalories}, Protein=${perServingProtein}, Carbs=${perServingCarbs}, Fat=${perServingFat}`);
+        } else {
+          // Use meal distribution estimates for meals without recipes
+          dailyNutrition.totalCalories += meal.targetCalories || 0;
+          console.log(`🎯 Meal Planning Service - Added estimated calories from ${meal.mealName}: ${meal.targetCalories || 0}`);
+        }
+      });
+
+      // Add dailyNutrition to the mappedResponse
+      mappedResponse.dailyNutrition = {
+        ...dailyNutrition,
+        totalCalories: Math.round(dailyNutrition.totalCalories * 100) / 100,
+        totalProtein: Math.round(dailyNutrition.totalProtein * 100) / 100,
+        totalCarbs: Math.round(dailyNutrition.totalCarbs * 100) / 100,
+        totalFat: Math.round(dailyNutrition.totalFat * 100) / 100,
+        totalFiber: Math.round(dailyNutrition.totalFiber * 100) / 100,
+        totalSodium: Math.round(dailyNutrition.totalSodium * 100) / 100,
+        totalSugar: Math.round(dailyNutrition.totalSugar * 100) / 100,
+        totalCholesterol: Math.round(dailyNutrition.totalCholesterol * 100) / 100,
+        totalCalcium: Math.round(dailyNutrition.totalCalcium * 100) / 100,
+        totalIron: Math.round(dailyNutrition.totalIron * 100) / 100
+      };
+      
+      console.log('🎯 Meal Planning Service - Final daily nutrition totals:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
+      console.log('🎯 Meal Planning Service - ===== END CALCULATING DAILY NUTRITION =====');
+      
+      // Insert as draft meal plan
+      const { data: draftPlan, error: draftError } = await supabase
+        .from('meal_plans')
+        .insert({
+          client_id: clientId,
+          nutritionist_id: userId,
+          plan_name: 'Preview Meal Plan',
+          plan_date: planDate,
+          plan_type: 'daily',
+          status: 'draft',
+          target_calories: clientGoal.eerGoalCalories,
+          target_protein_grams: (clientGoal.proteinGoalMin + clientGoal.proteinGoalMax) / 2,
+          target_carbs_grams: (clientGoal.carbsGoalMin + clientGoal.carbsGoalMax) / 2,
+          target_fat_grams: (clientGoal.fatGoalMin + clientGoal.fatGoalMax) / 2,
+          target_fiber_grams: 0, // Add if available
+          dietary_restrictions: dietaryRestrictions,
+          cuisine_preferences: cuisinePreferences,
+          generated_meals: mappedResponse.meals, // Store meals array in JSONB
+          nutrition_summary: mappedResponse.dailyNutrition
+        })
+        .select('id')
+        .single();
+
+      if (draftError || !draftPlan) {
+        console.error('❌ Meal Planning Service - Draft creation error:', draftError);
+        throw new Error('Failed to create draft preview');
+      }
+
+      const previewId = draftPlan.id;
+      console.log('🎯 Meal Planning Service - Created draft preview with ID:', previewId);
+
+      // Add previewId to response
+      mappedResponse.previewId = previewId;
+      console.log('🎯 Meal Planning Service - Added previewId to mappedResponse:', mappedResponse.previewId);
+
+      return {
+        success: true,
+        data: {
+          mealPlan: mappedResponse,
+          clientGoals: clientGoal,
+          mealProgram: overrideMealProgram || {
+            id: mealProgram.id,
+            name: mealProgram.name,
+            description: mealProgram.description
+          },
+          planDate,
+          dietaryRestrictions,
+          cuisinePreferences,
+          overrideUsed: {
+            mealProgram: !!overrideMealProgram,
+            clientGoals: !!overrideClientGoals
+          }
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Meal Planning Service - Error generating meal plan with overrides:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to generate meal plan with overrides'
+      };
+    }
+  }
+
+  /**
    * Generate meal plan based on client's meal program and goals
    */
   async generateMealPlanFromProgram(
@@ -1600,11 +1934,10 @@ export class MealPlanningService {
           meals:meal_program_meals(*)
         `)
         .eq('client_id', clientId)
-        .eq('is_active', true)
         .single();
       
       if (programError || !mealProgram) {
-        throw new Error('No active meal program found. Please create a meal program first.');
+        throw new Error('No meal program found. Please create a meal program first.');
       }
       
       console.log('🎯 Meal Planning Service - Meal program:', JSON.stringify(mealProgram, null, 2));
@@ -1616,9 +1949,6 @@ export class MealPlanningService {
           id: mealProgram.id,
           clientId: mealProgram.client_id,
           nutritionistId: mealProgram.nutritionist_id,
-          name: mealProgram.name,
-          description: mealProgram.description,
-          isActive: mealProgram.is_active,
           createdAt: mealProgram.created_at,
           updatedAt: mealProgram.updated_at,
           meals: mealProgram.meals.map((meal: any) => ({
@@ -2806,6 +3136,83 @@ export class MealPlanningService {
       return { success: true, deletedCount: count };
     } catch (error) {
       return { success: false, deletedCount: 0, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Calculate nutrition requirements from nutritional guidelines when client goals are absent
+   */
+  async calculateNutritionFromGuidelines(clientId: string): Promise<any> {
+    try {
+      console.log('🔄 Calculating nutrition from guidelines for client:', clientId);
+
+      // Get client basic information
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .select('age, gender, height_cm, weight_kg, country, activity_level')
+        .eq('id', clientId)
+        .single();
+
+      if (clientError || !client) {
+        console.error('❌ Client not found for guidelines calculation');
+        return null;
+      }
+
+      console.log('📊 Client data for guidelines calculation:', {
+        age: client.age,
+        gender: client.gender,
+        height: client.height_cm,
+        weight: client.weight_kg,
+        country: client.country,
+        activityLevel: client.activity_level
+      });
+
+      // Calculate EER using database formulas
+      const eerResult = await calculateEER({
+        country: client.country || 'usa',
+        age: client.age,
+        gender: client.gender,
+        height_cm: client.height_cm,
+        weight_kg: client.weight_kg,
+        activity_level: client.activity_level || 'moderately_active'
+      });
+
+      console.log('⚡ EER calculation result:', eerResult);
+
+      // Calculate macros using database guidelines
+      const macroResult = await calculateMacros({
+        eer: eerResult.eer,
+        country: client.country || 'usa',
+        age: client.age,
+        gender: client.gender,
+        weight_kg: client.weight_kg
+      });
+
+      console.log('🥗 Macro calculation result:', macroResult);
+
+      // Return in the same format as client nutrition requirements
+      const calculatedRequirements = {
+        client_id: clientId,
+        eer_calories: Math.round(eerResult.eer),
+        protein_grams_min: Math.round(macroResult.Protein.min || 0),
+        protein_grams_max: Math.round(macroResult.Protein.max || 0),
+        carbs_grams_min: Math.round(macroResult.Carbohydrates.min || 0),
+        carbs_grams_max: Math.round(macroResult.Carbohydrates.max || 0),
+        fat_grams_min: Math.round(macroResult['Total Fat'].min || 0),
+        fat_grams_max: Math.round(macroResult['Total Fat'].max || 0),
+        fiber_grams: Math.round(macroResult.Fiber.min || 25),
+        water_liters: Math.round((client.weight_kg * 35) / 1000 * 100) / 100, // 35ml per kg
+        calculated_from_guidelines: true, // Flag to indicate this was calculated
+        guideline_country: macroResult.guideline_country,
+        calculation_date: new Date().toISOString()
+      };
+
+      console.log('✅ Final calculated requirements:', calculatedRequirements);
+      return calculatedRequirements;
+
+    } catch (error) {
+      console.error('❌ Error calculating nutrition from guidelines:', error);
+      return null;
     }
   }
 

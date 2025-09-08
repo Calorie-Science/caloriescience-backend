@@ -23,26 +23,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   // POST - Handle both meal planning and meal program creation
   if (req.method === 'POST') {
     try {
-      const {
-        type = 'meal-plan', // 'meal-plan' or 'meal-program'
-        action = 'save', // 'preview', 'save', 'update', 'activate' (for meal-plan type)
-        clientId,
-        planDate,
-        planType = 'daily',
-        dietaryRestrictions = [],
-        cuisinePreferences = [],
-        mealPreferences = {},
-        targetCalories,
-        macroTargets = null, // New field for macro targets
-        // Meal program fields
-        name,
-        description,
-        meals,
-        // Edit fields
-        mealProgramId, // For editing meal programs
-        mealPlanId, // For editing meal plans
-        isActive // For meal program activation
-      } = req.body;
+        const {
+          type = 'meal-plan', // 'meal-plan' or 'meal-program'
+          action = 'save', // 'preview', 'save', 'update', 'activate' (for meal-plan type)
+          clientId,
+          planDate,
+          planType = 'daily',
+          dietaryRestrictions = [],
+          cuisinePreferences = [],
+          mealPreferences = {},
+          targetCalories,
+          macroTargets = null, // New field for macro targets
+          // Override fields for UI-driven meal plan generation
+          overrideMealProgram = null, // Override meal program data from UI
+          overrideClientGoals = null, // Override client goals data from UI
+          // Meal program fields
+          name,
+          description,
+          meals,
+          // Edit fields
+          mealProgramId, // For editing meal programs
+          mealPlanId, // For editing meal plans
+          isActive // For meal program activation
+        } = req.body;
 
       if (req.body.action === 'cleanup') {
         if (req.body.secret !== process.env.CLEANUP_SECRET) {
@@ -102,10 +105,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Handle edit operations
         if (action === 'update' && mealProgramId) {
           // Update existing meal program
-          if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
+          if (!meals || !Array.isArray(meals) || meals.length === 0) {
             return res.status(400).json({
               error: 'Missing required fields',
-              message: 'name and meals array are required for updating meal programs'
+              message: 'meals array is required for updating meal programs'
             });
           }
 
@@ -126,8 +129,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
 
           const result = await mealProgramService.updateMealProgram(mealProgramId, user.id, {
-            name,
-            description,
             meals
           });
 
@@ -142,22 +143,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             success: true,
             data: result.data,
             message: 'Meal program updated successfully'
-          });
-        } else if (action === 'activate' && mealProgramId) {
-          // Activate meal program
-          const result = await mealProgramService.activateMealProgram(mealProgramId, user.id);
-          
-          if (!result.success) {
-            return res.status(400).json({
-              error: 'Failed to activate meal program',
-              message: result.error
-            });
-          }
-
-          return res.status(200).json({
-            success: true,
-            data: result.data,
-            message: 'Meal program activated successfully'
           });
         } else if (action === 'delete' && mealProgramId) {
           // Delete meal program
@@ -177,10 +162,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } else {
           // Create new meal program (default action)
           // Validate meal program fields
-          if (!name || !meals || !Array.isArray(meals) || meals.length === 0) {
+          if (!meals || !Array.isArray(meals) || meals.length === 0) {
             return res.status(400).json({
               error: 'Missing required fields',
-              message: 'name and meals array are required for meal programs'
+              message: 'meals array is required for meal programs'
             });
           }
 
@@ -202,7 +187,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
                     // Create meal program
           const result = await mealProgramService.createMealProgram(
-            { clientId, name, description, meals },
+            { clientId, meals },
             user.id
           );
 
@@ -409,28 +394,35 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         let generatedMealPlan;
         
         if (['preview', 'save'].includes(action)) {
-          // Check if client has a meal program - if yes, use it for meal planning
-          const { data: activeMealProgram } = await require('../../lib/supabase').supabase
-            .from('meal_programs')
-            .select('id')
-            .eq('client_id', clientId)
-            .eq('is_active', true)
-            .single();
+          // Check if UI provided override meal program, otherwise check if client has a meal program
+          const hasOverrideMealProgram = overrideMealProgram && overrideMealProgram.meals && overrideMealProgram.meals.length > 0;
           
-          if (activeMealProgram) {
-            console.log('🎯 API - Client has active meal program, using program-based meal planning');
+          let clientMealProgram = null;
+          if (!hasOverrideMealProgram) {
+            const { data } = await require('../../lib/supabase').supabase
+              .from('meal_programs')
+              .select('id')
+              .eq('client_id', clientId)
+              .single();
+            clientMealProgram = data;
+          }
+          
+          if (hasOverrideMealProgram || clientMealProgram) {
+            console.log('🎯 API - Using program-based meal planning with overrides:', {
+              hasOverrideMealProgram,
+              hasClientMealProgram: !!clientMealProgram,
+              hasOverrideClientGoals: !!overrideClientGoals
+            });
             
-            // Check if UI is sending meal program overrides
-            const uiOverrideMeals = req.body.uiOverrideMeals || null;
-            
-            // Generate meal plan based on meal program
-            generatedMealPlan = await mealPlanningService.generateMealPlanFromProgram(
+            // Generate meal plan based on meal program (with possible overrides)
+            generatedMealPlan = await mealPlanningService.generateMealPlanFromProgramWithOverrides(
               clientId,
               planDate,
               dietaryRestrictions,
               cuisinePreferences,
-              uiOverrideMeals,
-              user.id
+              user.id,
+              overrideMealProgram,
+              overrideClientGoals
             );
             
             if (!generatedMealPlan.success) {
@@ -472,7 +464,30 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               });
             }
           } else {
-            console.log('🎯 API - No active meal program, using standard meal planning');
+            console.log('🎯 API - No meal program found, using standard meal planning with possible overrides');
+            
+            // Check if UI provided override client goals for standard meal planning
+            let effectiveTargetCalories = targetCalories;
+            let effectiveMacroTargets = macroTargets;
+            
+            if (overrideClientGoals) {
+              console.log('🎯 API - Using override client goals for standard meal planning');
+              effectiveTargetCalories = overrideClientGoals.eerGoalCalories || targetCalories;
+              effectiveMacroTargets = {
+                protein: { 
+                  min: overrideClientGoals.proteinGoalMin || 0, 
+                  max: overrideClientGoals.proteinGoalMax || 0 
+                },
+                fat: { 
+                  min: overrideClientGoals.fatGoalMin || 0, 
+                  max: overrideClientGoals.fatGoalMax || 0 
+                },
+                carbs: { 
+                  min: overrideClientGoals.carbsGoalMin || 0, 
+                  max: overrideClientGoals.carbsGoalMax || 0 
+                }
+              };
+            }
             
             // Generate meal plan using standard method
             const mealPlanRequest: MealPlanGenerationRequest = {
@@ -482,12 +497,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               dietaryRestrictions,
               cuisinePreferences,
               mealPreferences,
-              targetCalories,
-              macroTargets
+              targetCalories: effectiveTargetCalories,
+              macroTargets: effectiveMacroTargets
             };
 
             console.log('🔍 API Debug - User ID from JWT:', user.id);
             console.log('🔍 API Debug - User object:', JSON.stringify(user, null, 2));
+            console.log('🔍 API Debug - Effective meal plan request:', JSON.stringify(mealPlanRequest, null, 2));
             
             // Use a simple user ID for Edamam instead of the UUID
             const edamamUserId = 'nutritionist1';

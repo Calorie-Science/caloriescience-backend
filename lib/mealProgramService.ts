@@ -19,10 +19,10 @@ export class MealProgramService {
       console.log('🍽️ Meal Program Service - Creating meal program:', JSON.stringify(request, null, 2));
       
       // Validate request
-      if (!request.clientId || !request.name || !request.meals || request.meals.length === 0) {
+      if (!request.clientId || !request.meals || request.meals.length === 0) {
         return {
           success: false,
-          error: 'Missing required fields: clientId, name, and meals are required'
+          error: 'Missing required fields: clientId and meals are required'
         };
       }
 
@@ -80,22 +80,18 @@ export class MealProgramService {
         };
       }
 
-      // Deactivate any existing active meal program for this client
+      // Delete any existing meal program for this client (only one allowed)
       await supabase
         .from('meal_programs')
-        .update({ is_active: false })
-        .eq('client_id', request.clientId)
-        .eq('is_active', true);
+        .delete()
+        .eq('client_id', request.clientId);
 
-      // Create new meal program (active by default - latest one becomes active)
+      // Create new meal program (single program per client)
       const { data: mealProgram, error: programError } = await supabase
         .from('meal_programs')
         .insert({
           client_id: request.clientId,
-          nutritionist_id: nutritionistId,
-          name: request.name,
-          description: request.description,
-          is_active: true
+          nutritionist_id: nutritionistId
         })
         .select()
         .single();
@@ -230,9 +226,6 @@ export class MealProgramService {
         id: mealProgram.id,
         clientId: mealProgram.client_id,
         nutritionistId: mealProgram.nutritionist_id,
-        name: mealProgram.name,
-        description: mealProgram.description,
-        isActive: mealProgram.is_active,
         createdAt: mealProgram.created_at,
         updatedAt: mealProgram.updated_at,
         meals: meals.map(meal => ({
@@ -263,9 +256,9 @@ export class MealProgramService {
   }
 
   /**
-   * Get active meal program for a client
+   * Get meal program for a client (single program per client)
    */
-  async getActiveMealProgram(clientId: string, nutritionistId: string): Promise<MealProgramResponse> {
+  async getMealProgramForClient(clientId: string, nutritionistId: string): Promise<MealProgramResponse> {
     try {
       // Validate that the user is actually a nutritionist
       const { data: user, error: userError } = await supabase
@@ -287,20 +280,19 @@ export class MealProgramService {
         .select('*')
         .eq('client_id', clientId)
         .eq('nutritionist_id', nutritionistId)
-        .eq('is_active', true)
         .single();
 
       if (programError || !mealProgram) {
         return {
           success: false,
-          error: 'No active meal program found for this client'
+          error: 'No meal program found for this client'
         };
       }
 
       return this.getMealProgramById(mealProgram.id, nutritionistId);
 
     } catch (error) {
-      console.error('❌ Meal Program Service - Error in getActiveMealProgram:', error);
+      console.error('❌ Meal Program Service - Error in getMealProgramForClient:', error);
       return {
         success: false,
         error: 'Internal server error'
@@ -309,52 +301,32 @@ export class MealProgramService {
   }
 
   /**
-   * Get all meal programs for a client
+   * Get meal program for a client (single program per client)
    */
   async getMealProgramsForClient(clientId: string, nutritionistId: string): Promise<MealProgramsResponse> {
     try {
-      // Validate that the user is actually a nutritionist
-      const { data: user, error: userError } = await supabase
-        .from('users')
-        .select('id, role')
-        .eq('id', nutritionistId)
-        .eq('role', 'nutritionist')
-        .single();
-
-      if (userError || !user) {
-        return {
-          success: false,
-          error: 'Access denied. Only nutritionists can access meal programs.'
-        };
-      }
-
-      const { data: mealPrograms, error: programsError } = await supabase
-        .from('meal_programs')
-        .select('*')
-        .eq('client_id', clientId)
-        .eq('nutritionist_id', nutritionistId)
-        .order('created_at', { ascending: false });
-
-      if (programsError) {
-        console.error('❌ Meal Program Service - Error fetching meal programs:', programsError);
-        return {
-          success: false,
-          error: 'Failed to fetch meal programs'
-        };
-      }
-
-      const completePrograms: MealProgram[] = [];
-
-      for (const program of mealPrograms) {
-        const completeProgram = await this.getMealProgramById(program.id, nutritionistId);
-        if (completeProgram.success && completeProgram.data) {
-          completePrograms.push(completeProgram.data);
+      // Since there's only one program per client, just get that single program
+      const singleProgram = await this.getMealProgramForClient(clientId, nutritionistId);
+      
+      if (!singleProgram.success) {
+        // If no meal program found, return empty array instead of error
+        if (singleProgram.error === 'No meal program found for this client') {
+          return {
+            success: true,
+            data: []
+          };
         }
+        // For other errors (like access denied), still return the error
+        return {
+          success: false,
+          error: singleProgram.error
+        };
       }
 
+      // Return as array for backward compatibility
       return {
         success: true,
-        data: completePrograms
+        data: singleProgram.data ? [singleProgram.data] : []
       };
 
     } catch (error) {
@@ -510,12 +482,10 @@ export class MealProgramService {
         }
       }
 
-      // Start a transaction
+      // Update timestamp only (no name/description fields)
       const { error: updateProgramError } = await supabase
         .from('meal_programs')
         .update({
-          name: updateData.name,
-          description: updateData.description,
           updated_at: new Date().toISOString()
         })
         .eq('id', programId);
@@ -587,86 +557,4 @@ export class MealProgramService {
     }
   }
 
-  /**
-   * Activate a meal program (deactivates others)
-   */
-  async activateMealProgram(programId: string, nutritionistId: string): Promise<MealProgramResponse> {
-    try {
-      // Validate that the user is actually a nutritionist
-      const { data: user, error: userError } = await supabase
-        .from('users')
-        .select('id, role')
-        .eq('id', nutritionistId)
-        .eq('role', 'nutritionist')
-        .single();
-
-      if (userError || !user) {
-        return {
-          success: false,
-          error: 'Access denied. Only nutritionists can access meal programs.'
-        };
-      }
-
-      // Check if program exists and belongs to nutritionist
-      const { data: existingProgram, error: checkError } = await supabase
-        .from('meal_programs')
-        .select('id, client_id')
-        .eq('id', programId)
-        .eq('nutritionist_id', nutritionistId)
-        .single();
-
-      if (checkError || !existingProgram) {
-        return {
-          success: false,
-          error: 'Meal program not found or access denied'
-        };
-      }
-
-      // Deactivate all other programs for this client
-      const { error: deactivateError } = await supabase
-        .from('meal_programs')
-        .update({ is_active: false })
-        .eq('client_id', existingProgram.client_id)
-        .neq('id', programId);
-
-      if (deactivateError) {
-        console.error('❌ Meal Program Service - Error deactivating other programs:', deactivateError);
-        return {
-          success: false,
-          error: 'Failed to activate meal program'
-        };
-      }
-
-      // Activate the selected program
-      const { error: activateError } = await supabase
-        .from('meal_programs')
-        .update({ is_active: true })
-        .eq('id', programId);
-
-      if (activateError) {
-        console.error('❌ Meal Program Service - Error activating program:', activateError);
-        return {
-          success: false,
-          error: 'Failed to activate meal program'
-        };
-      }
-
-      // Fetch updated program
-      const updatedProgram = await this.getMealProgramById(programId, nutritionistId);
-      
-      console.log('✅ Meal Program Service - Meal program activated successfully');
-      return {
-        success: true,
-        data: updatedProgram.data,
-        message: 'Meal program activated successfully'
-      };
-
-    } catch (error) {
-      console.error('❌ Meal Program Service - Error in activateMealProgram:', error);
-      return {
-        success: false,
-        error: 'Internal server error'
-      };
-    }
-  }
 }

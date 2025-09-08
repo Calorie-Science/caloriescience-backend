@@ -2,9 +2,6 @@ export interface MealProgram {
   id: string;
   clientId: string;
   nutritionistId: string;
-  name: string;
-  description?: string;
-  isActive: boolean;
   createdAt: string;
   updatedAt: string;
   meals: MealProgramMeal[];
@@ -24,8 +21,6 @@ export interface MealProgramMeal {
 
 export interface CreateMealProgramRequest {
   clientId: string;
-  name: string;
-  description?: string;
   meals: CreateMealProgramMealRequest[];
 }
 
@@ -38,8 +33,6 @@ export interface CreateMealProgramMealRequest {
 }
 
 export interface UpdateMealProgramRequest {
-  name?: string;
-  description?: string;
   meals?: UpdateMealProgramMealRequest[];
 }
 

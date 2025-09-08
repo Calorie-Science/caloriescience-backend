@@ -171,6 +171,10 @@ export class EdamamService {
   private nutritionApiUrl: string;
   private nutritionAppId: string;
   private nutritionAppKey: string;
+  
+  // Round-robin user management for Meal Planner API only
+  private static mealPlannerUsers = ['test1', 'test2', 'test3', 'test4', 'test5'];
+  private static currentMealPlannerUserIndex = 0;
 
   constructor() {
     this.appId = config.edamam.appId;
@@ -327,7 +331,25 @@ export class EdamamService {
   }
 
   /**
-   * Generate a meal plan using the NEW Meal Planner API v1
+   * Get current meal planner user (round-robin)
+   */
+  private static getCurrentMealPlannerUser(): string {
+    return EdamamService.mealPlannerUsers[EdamamService.currentMealPlannerUserIndex];
+  }
+
+  /**
+   * Move to next meal planner user in round-robin
+   */
+  private static moveToNextMealPlannerUser(): string {
+    EdamamService.currentMealPlannerUserIndex = 
+      (EdamamService.currentMealPlannerUserIndex + 1) % EdamamService.mealPlannerUsers.length;
+    const newUser = EdamamService.getCurrentMealPlannerUser();
+    console.log(`🔄 Switching to next Edamam meal planner user: ${newUser}`);
+    return newUser;
+  }
+
+  /**
+   * Generate a meal plan using the NEW Meal Planner API v1 with round-robin fallback
    */
   async generateMealPlanV1(request: MealPlannerRequest, userId?: string): Promise<MealPlannerResponse> {
     console.log('🚨🚨🚨 EDAMAM SERVICE START 🚨🚨🚨');
@@ -359,11 +381,15 @@ export class EdamamService {
         'Authorization': `Basic ${base64Credentials}`
       };
       
-      // Add user ID header if provided (required for Active User Tracking)
-      // Always use 'test5' for Edamam API calls to avoid rate limiting
-      const accountUser = "test5"
-      headers['Edamam-Account-User'] = accountUser;
-      console.log('🍽️ Edamam Service - Using Edamam-Account-User:', accountUser);
+      // Use round-robin user system for meal planner API to handle rate limits
+      let currentUser = EdamamService.getCurrentMealPlannerUser();
+      let attemptCount = 0;
+      const maxAttempts = 2;
+      
+      while (attemptCount < maxAttempts) {
+        attemptCount++;
+        headers['Edamam-Account-User'] = currentUser;
+        console.log(`🔄 ATTEMPT ${attemptCount}: Using Edamam-Account-User: ${currentUser}`);
 
       // Use the correct Edamam Meal Planner API endpoint with hardcoded appId and type=public
       const url = `${this.mealPlannerApiUrl}/${mealPlannerAppId}/select?type=public`;
@@ -378,7 +404,7 @@ export class EdamamService {
       // Generate the cURL command equivalent
       const requestBodyString = JSON.stringify(request);
       const authHeader = `Authorization: Basic ${base64Credentials}`;
-      const accountUserHeader = `Edamam-Account-User: ${accountUser}`;
+      const accountUserHeader = `Edamam-Account-User: ${currentUser}`;
       
       // Log the complete cURL command as a single line to avoid truncation
       const completeCurl = `curl -X POST '${url}' -H 'accept: application/json' -H 'Content-Type: application/json' -H '${authHeader}' -H '${accountUserHeader}' -d '${requestBodyString}'`;
@@ -400,49 +426,70 @@ export class EdamamService {
       console.log('🍽️ Edamam Service - Request body:', JSON.stringify(request, null, 2));
       console.log('🚨 EDAMAM - ABOUT TO MAKE FETCH CALL 🚨');
 
-      // Add timeout to prevent hanging requests
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      console.log('🚨 EDAMAM - FETCH CALL STARTING 🚨');
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(request),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      console.log('🚨 EDAMAM - FETCH CALL COMPLETED 🚨');
-      console.log('🚨 EDAMAM - RESPONSE STATUS:', response.status);
-      console.log('🚨🚨🚨 EDAMAM RESPONSE START 🚨🚨🚨');
-      console.log('🚨 EDAMAM RESPONSE STATUS:', response.status);
-      console.log('🚨 EDAMAM RESPONSE STATUS TEXT:', response.statusText);
-      console.log('🚨 EDAMAM RESPONSE HEADERS:', JSON.stringify(Object.fromEntries(response.headers as any), null, 2));
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Edamam Service - Meal Planner API error response:');
-        console.error('  - Status:', response.status);
-        console.error('  - Status Text:', response.statusText);
-        console.error('  - Error Body:', errorText);
-        throw new Error(`Edamam Meal Planner API error: ${response.status} ${response.statusText}`);
+        try {
+          // Add timeout to prevent hanging requests
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+          
+          console.log(`🚨 EDAMAM - FETCH CALL STARTING (Attempt ${attemptCount}) 🚨`);
+          const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(request),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          console.log(`🚨 EDAMAM - RESPONSE STATUS (Attempt ${attemptCount}):`, response.status);
+          console.log(`🚨 EDAMAM - RESPONSE STATUS TEXT (Attempt ${attemptCount}):`, response.statusText);
+          
+          if (response.ok) {
+            // Success! Parse and return data
+            const data = await response.json();
+            console.log(`✅ SUCCESS with user ${currentUser} on attempt ${attemptCount}`);
+            console.log('✅ Edamam Service - Response summary:');
+            console.log('  - Response type:', typeof data);
+            console.log('  - Has selection:', !!data.selection);
+            console.log('  - Selection count:', data.selection ? data.selection.length : 0);
+            console.log('  - Status:', data.status);
+            
+            return data;
+          }
+          
+          // API call failed - check if it's a rate limit or other error
+          const errorText = await response.text();
+          console.error(`❌ Attempt ${attemptCount} failed with user ${currentUser}:`);
+          console.error('  - Status:', response.status);
+          console.error('  - Status Text:', response.statusText);
+          console.error('  - Error Body:', errorText);
+          
+          // If this is not the last attempt, try next user
+          if (attemptCount < maxAttempts) {
+            currentUser = EdamamService.moveToNextMealPlannerUser();
+            console.log(`🔄 Moving to next user for attempt ${attemptCount + 1}: ${currentUser}`);
+            continue;
+          }
+          
+          // Last attempt failed, throw error
+          throw new Error(`Edamam Meal Planner API error after ${maxAttempts} attempts: ${response.status} ${response.statusText}`);
+          
+        } catch (error) {
+          console.error(`❌ Attempt ${attemptCount} with user ${currentUser} failed:`, error);
+          
+          // If this is not the last attempt and it's not a timeout error, try next user
+          if (attemptCount < maxAttempts && error instanceof Error && !error.message.includes('aborted')) {
+            currentUser = EdamamService.moveToNextMealPlannerUser();
+            console.log(`🔄 Error occurred, trying next user for attempt ${attemptCount + 1}: ${currentUser}`);
+            continue;
+          }
+          
+          // Last attempt or timeout error, throw
+          throw error;
+        }
       }
-
-      const data = await response.json();
-      console.log('🚨🚨🚨 EDAMAM RESPONSE BODY START 🚨🚨🚨');
-      console.log('🚨 EDAMAM FULL RESPONSE DATA:', JSON.stringify(data, null, 2));
-      console.log('🚨🚨🚨 EDAMAM RESPONSE BODY END 🚨🚨🚨');
-      console.log('✅ Edamam Service - Meal plan generated successfully');
-      console.log('✅ Edamam Service - Response summary:');
-      console.log('  - Response type:', typeof data);
-      console.log('  - Has selection:', !!data.selection);
-      console.log('  - Selection count:', data.selection ? data.selection.length : 0);
-      console.log('  - Status:', data.status);
-      console.log('🍽️ Edamam Service - ===== generateMealPlanV1 END =====');
       
-      return data;
+      throw new Error('All meal planner user attempts exhausted');
     } catch (error) {
       console.error('❌ Edamam Service - Error generating meal plan:', error);
       console.error('❌ Edamam Service - Error stack:', error instanceof Error ? error.stack : 'No stack trace');
