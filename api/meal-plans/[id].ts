@@ -20,20 +20,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     });
   }
 
-  // GET - Get specific meal plan
+  // GET - Get specific meal plan with view support
   if (req.method === 'GET') {
     try {
-      const mealPlan = await mealPlanningService.getMealPlan(id);
+      const { view, day } = req.query;
+      const viewParam = Array.isArray(view) ? view[0] : view;
+      const dayParam = Array.isArray(day) ? day[0] : day;
+      
+      // Use getMealPlanWithView for multi-day support
+      const result = await mealPlanningService.getMealPlanWithView(
+        id, 
+        viewParam || 'consolidated', 
+        dayParam ? parseInt(dayParam) : undefined
+      );
 
-      if (!mealPlan) {
+      if (!result.success) {
         return res.status(404).json({
           error: 'Meal plan not found',
-          message: 'The specified meal plan does not exist'
+          message: result.error || 'The specified meal plan does not exist'
         });
       }
 
       // Check if the meal plan belongs to a client of the authenticated nutritionist
-      if (mealPlan.nutritionistId !== user.id) {
+      if (result.data.mealPlan.nutritionistId !== user.id) {
         return res.status(403).json({
           error: 'Access denied',
           message: 'You do not have access to this meal plan'
@@ -41,8 +50,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       return res.status(200).json({
-        message: 'Meal plan retrieved successfully',
-        mealPlan
+        message: `Meal plan retrieved successfully (${viewParam || 'consolidated'} view)`,
+        mealPlan: result.data.mealPlan,
+        days: result.data.days || null,
+        overallStats: result.data.overallStats || null,
+        clientGoals: result.data.clientGoals || null
       });
 
     } catch (error) {

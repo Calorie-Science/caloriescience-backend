@@ -1241,9 +1241,14 @@ export class MealPlanningService {
       // Insert individual meals - only those with valid recipes
       const mealInserts = mealPlan.meals
         .filter(meal => {
-          // Only include meals with valid recipe data
-          if (!meal.edamamRecipeId || meal.caloriesPerServing === 0) {
-            console.log(`⚠️ Skipping meal without valid recipe: ${meal.recipeName || meal.mealType}`);
+          // Enhanced validation: Only include meals with valid recipe data and meaningful nutrition
+          const hasValidData = meal.edamamRecipeId && 
+                              meal.caloriesPerServing > 0 && 
+                              meal.recipeName && 
+                              meal.recipeName.trim() !== '';
+          
+          if (!hasValidData) {
+            console.log(`⚠️ Skipping meal without valid recipe: ${meal.recipeName || meal.mealType} - Recipe ID: ${meal.edamamRecipeId || 'N/A'}, Calories: ${meal.caloriesPerServing || 'N/A'}`);
             return false;
           }
           return true;
@@ -1835,6 +1840,7 @@ export class MealPlanningService {
       const mealPlanData = {
         client_id: clientId,
         nutritionist_id: userId,
+        meal_program_id: mealProgram.id !== 'override' ? mealProgram.id : null, // Add meal program ID
         plan_name: `${days}-Day Meal Plan`,
         plan_date: startDate,
         end_date: endDate.toISOString().split('T')[0],
@@ -1878,8 +1884,20 @@ export class MealPlanningService {
       
       processedDays.forEach((day) => {
         day.meals.forEach((meal: any, mealIndex: number) => {
-          // Only insert meals that have valid recipes
-          if (meal.recipe && meal.recipe.id && meal.recipe.nutritionSummary) {
+          // Enhanced validation: Only insert meals that have valid recipes with meaningful nutrition data
+          const hasValidRecipe = meal.recipe && 
+                                meal.recipe.id && 
+                                meal.recipe.nutritionSummary &&
+                                meal.recipe.label &&
+                                meal.recipe.nutritionSummary.calories > 0;
+          
+          if (hasValidRecipe) {
+            const calories = Math.round(meal.recipe.nutritionSummary.calories || 0);
+            const protein = Math.round(meal.recipe.nutritionSummary.protein || 0);
+            const carbs = Math.round(meal.recipe.nutritionSummary.carbs || 0);
+            const fat = Math.round(meal.recipe.nutritionSummary.fat || 0);
+            const fiber = Math.round(meal.recipe.nutritionSummary.fiber || 0);
+            
             mealInserts.push({
               meal_plan_id: mealPlanId,
               day_number: day.dayNumber,
@@ -1887,24 +1905,24 @@ export class MealPlanningService {
               meal_type: meal.edamamMealType || 'snack',
               meal_order: mealIndex + 1,
               edamam_recipe_id: meal.recipe.id,
-              recipe_name: meal.recipe.label || meal.mealName,
+              recipe_name: meal.recipe.label,
               recipe_url: meal.recipe.url || null,
               recipe_image_url: meal.recipe.image || null,
-              calories_per_serving: Math.round(meal.recipe.nutritionSummary.calories || 0),
-              protein_grams: Math.round(meal.recipe.nutritionSummary.protein || 0),
-              carbs_grams: Math.round(meal.recipe.nutritionSummary.carbs || 0),
-              fat_grams: Math.round(meal.recipe.nutritionSummary.fat || 0),
-              fiber_grams: Math.round(meal.recipe.nutritionSummary.fiber || 0),
+              calories_per_serving: calories,
+              protein_grams: protein,
+              carbs_grams: carbs,
+              fat_grams: fat,
+              fiber_grams: fiber,
               servings_per_meal: 1.0,
-              total_calories: Math.round(meal.recipe.nutritionSummary.calories || 0),
-              total_protein_grams: Math.round(meal.recipe.nutritionSummary.protein || 0),
-              total_carbs_grams: Math.round(meal.recipe.nutritionSummary.carbs || 0),
-              total_fat_grams: Math.round(meal.recipe.nutritionSummary.fat || 0),
-              total_fiber_grams: Math.round(meal.recipe.nutritionSummary.fiber || 0),
-              ingredients: meal.recipe.ingredientLines || []
+              total_calories: calories,
+              total_protein_grams: protein,
+              total_carbs_grams: carbs,
+              total_fat_grams: fat,
+              total_fiber_grams: fiber,
+              ingredients: meal.recipe.ingredients || []
             });
           } else {
-            console.log(`⚠️ Skipping meal without valid recipe: Day ${day.dayNumber}, ${meal.mealName}`);
+            console.log(`⚠️ Skipping meal without valid recipe: Day ${day.dayNumber}, ${meal.mealName} - Recipe: ${meal.recipe ? 'exists' : 'null'}, Calories: ${meal.recipe?.nutritionSummary?.calories || 'N/A'}`);
           }
         });
       });
@@ -1989,11 +2007,14 @@ export class MealPlanningService {
         .single();
 
       if (planError || !mealPlan) {
+        console.log(`❌ MEAL PLAN NOT FOUND: ${mealPlanId}, Error:`, planError);
         return {
           success: false,
           error: 'Meal plan not found'
         };
       }
+
+      console.log(`✅ MEAL PLAN FOUND: ${mealPlan.plan_name}, Duration: ${mealPlan.plan_duration_days} days, Type: ${mealPlan.plan_type}`);
 
       // Get meals based on view type
       let mealsQuery = supabase
@@ -2010,6 +2031,8 @@ export class MealPlanningService {
         .order('day_number')
         .order('meal_order');
 
+      console.log(`🔍 MEALS QUERY: Found ${meals?.length || 0} meals, Error:`, mealsError);
+
       if (mealsError) {
         return {
           success: false,
@@ -2017,10 +2040,75 @@ export class MealPlanningService {
         };
       }
 
+      // Get meal program data for the client to get meal names
+      let mealProgramMeals: any[] = [];
+      console.log(`🔍 FETCHING MEAL PROGRAM FOR CLIENT: ${mealPlan.client_id}`);
+      
+      // First get the meal program for this client
+      const { data: mealProgram, error: programError } = await supabase
+        .from('meal_programs')
+        .select('id')
+        .eq('client_id', mealPlan.client_id)
+        .single();
+
+      if (!programError && mealProgram) {
+        // Then get the meal program meals
+        const { data: mealProgramData, error: mealsError } = await supabase
+          .from('meal_program_meals')
+          .select('*')
+          .eq('meal_program_id', mealProgram.id)
+          .order('meal_order');
+
+        if (!mealsError && mealProgramData) {
+          mealProgramMeals = mealProgramData;
+          console.log(`✅ MEAL PROGRAM MEALS FOUND: ${mealProgramMeals.length} meals`);
+        } else {
+          console.log(`⚠️ MEAL PROGRAM MEALS NOT FOUND:`, mealsError);
+        }
+      } else {
+        console.log(`⚠️ MEAL PROGRAM NOT FOUND:`, programError);
+      }
+
+      // Get client goals data
+      let clientGoals: any = null;
+      console.log(`🔍 FETCHING CLIENT GOALS FOR CLIENT: ${mealPlan.client_id}`);
+      
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('client_goals')
+        .select('*')
+        .eq('client_id', mealPlan.client_id)
+        .eq('is_active', true)
+        .single();
+
+      if (!goalsError && goalsData) {
+        // Convert snake_case to camelCase
+        clientGoals = {
+          id: goalsData.id,
+          clientId: goalsData.client_id,
+          isActive: goalsData.is_active,
+          eerGoalCalories: goalsData.eer_goal_calories,
+          proteinGoalMin: goalsData.protein_goal_min,
+          proteinGoalMax: goalsData.protein_goal_max,
+          carbsGoalMin: goalsData.carbs_goal_min,
+          carbsGoalMax: goalsData.carbs_goal_max,
+          fatGoalMin: goalsData.fat_goal_min,
+          fatGoalMax: goalsData.fat_goal_max,
+          fiberGoalMin: goalsData.fiber_goal_min,
+          fiberGoalMax: goalsData.fiber_goal_max,
+          createdAt: goalsData.created_at,
+          updatedAt: goalsData.updated_at
+        };
+        console.log(`✅ CLIENT GOALS FOUND:`, clientGoals);
+      } else {
+        console.log(`⚠️ CLIENT GOALS NOT FOUND:`, goalsError);
+      }
+
       // Format response based on view type
       let responseData: any = {
         mealPlan: {
           id: mealPlan.id,
+          clientId: mealPlan.client_id,
+          nutritionistId: mealPlan.nutritionist_id,
           planName: mealPlan.plan_name,
           startDate: mealPlan.plan_date,
           endDate: mealPlan.end_date,
@@ -2037,13 +2125,73 @@ export class MealPlanningService {
       };
 
       if (view === 'consolidated') {
-        // Return all meals organized by day
-        const mealsByDay = meals.reduce((acc: any, meal: any) => {
-          const dayKey = `day_${meal.day_number}`;
-          if (!acc[dayKey]) {
-            acc[dayKey] = {
-              dayNumber: meal.day_number,
-              date: meal.meal_date,
+        console.log(`🔍 CONSOLIDATED VIEW: Found ${meals.length} meals for meal plan ${mealPlan.id}`);
+        
+        // For both single-day and multi-day plans, always return days array structure
+        const daysArray: any[] = [];
+        
+        if (meals.length > 0) {
+          // Group meals by day number
+          const mealsByDay = meals.reduce((acc: any, meal: any) => {
+            const dayKey = `day_${meal.day_number}`;
+            if (!acc[dayKey]) {
+              acc[dayKey] = {
+                dayNumber: meal.day_number,
+                date: meal.meal_date,
+                meals: [],
+                dailyNutrition: {
+                  totalCalories: 0,
+                  totalProtein: 0,
+                  totalCarbs: 0,
+                  totalFat: 0,
+                  totalFiber: 0
+                }
+              };
+            }
+            
+            // Find corresponding meal program meal name
+            const mealProgramMeal = mealProgramMeals.find(mp => mp.meal_order === meal.meal_order);
+            const mealName = mealProgramMeal ? mealProgramMeal.meal_name : null;
+
+            const mealData = {
+              id: meal.id,
+              mealType: meal.meal_type,
+              mealOrder: meal.meal_order,
+              mealName: mealName, // Add meal program meal name
+              recipeName: meal.recipe_name,
+              recipeUrl: meal.recipe_url,
+              recipeImage: meal.recipe_image_url,
+              caloriesPerServing: meal.calories_per_serving,
+              totalCalories: meal.total_calories,
+              protein: meal.protein_grams,
+              carbs: meal.carbs_grams,
+              fat: meal.fat_grams,
+              fiber: meal.fiber_grams,
+              ingredients: meal.ingredients
+            };
+
+            acc[dayKey].meals.push(mealData);
+            
+            // Add to daily nutrition
+            acc[dayKey].dailyNutrition.totalCalories += meal.total_calories || 0;
+            acc[dayKey].dailyNutrition.totalProtein += meal.total_protein_grams || 0;
+            acc[dayKey].dailyNutrition.totalCarbs += meal.total_carbs_grams || 0;
+            acc[dayKey].dailyNutrition.totalFat += meal.total_fat_grams || 0;
+            acc[dayKey].dailyNutrition.totalFiber += meal.total_fiber_grams || 0;
+            
+            return acc;
+          }, {});
+
+          daysArray.push(...Object.values(mealsByDay));
+        } else {
+          // If no meals found, create empty days based on plan duration
+          for (let dayNum = 1; dayNum <= mealPlan.plan_duration_days; dayNum++) {
+            const dayDate = new Date(mealPlan.plan_date);
+            dayDate.setDate(dayDate.getDate() + (dayNum - 1));
+            
+            daysArray.push({
+              dayNumber: dayNum,
+              date: dayDate.toISOString().split('T')[0],
               meals: [],
               dailyNutrition: {
                 totalCalories: 0,
@@ -2051,40 +2199,29 @@ export class MealPlanningService {
                 totalCarbs: 0,
                 totalFat: 0,
                 totalFiber: 0
-              }
-            };
+              },
+              mealCount: 0
+            });
           }
-          
-          const mealData = {
-            id: meal.id,
-            mealType: meal.meal_type,
-            mealOrder: meal.meal_order,
-            recipeName: meal.recipe_name,
-            recipeUrl: meal.recipe_url,
-            recipeImage: meal.recipe_image_url,
-            caloriesPerServing: meal.calories_per_serving,
-            totalCalories: meal.total_calories,
-            protein: meal.protein_grams,
-            carbs: meal.carbs_grams,
-            fat: meal.fat_grams,
-            fiber: meal.fiber_grams,
-            ingredients: meal.ingredients
-          };
+        }
+        
+        // Calculate overall statistics
+        const overallStats = {
+          totalDays: mealPlan.plan_duration_days,
+          totalMeals: meals.length,
+          averageMealsPerDay: mealPlan.plan_duration_days > 0 ? meals.length / mealPlan.plan_duration_days : 0,
+          totalCalories: daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalCalories, 0),
+          totalProtein: daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalProtein, 0),
+          totalCarbs: daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalCarbs, 0),
+          totalFat: daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalFat, 0),
+          totalFiber: daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalFiber, 0),
+          averageCaloriesPerDay: daysArray.length > 0 ? daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalCalories, 0) / daysArray.length : 0
+        };
 
-          acc[dayKey].meals.push(mealData);
-          
-          // Add to daily nutrition
-          acc[dayKey].dailyNutrition.totalCalories += meal.total_calories || 0;
-          acc[dayKey].dailyNutrition.totalProtein += meal.total_protein_grams || 0;
-          acc[dayKey].dailyNutrition.totalCarbs += meal.total_carbs_grams || 0;
-          acc[dayKey].dailyNutrition.totalFat += meal.total_fat_grams || 0;
-          acc[dayKey].dailyNutrition.totalFiber += meal.total_fiber_grams || 0;
-          
-          return acc;
-        }, {});
-
-        responseData.days = Object.values(mealsByDay);
+        responseData.days = daysArray;
+        responseData.overallStats = overallStats;
         responseData.totalDays = mealPlan.plan_duration_days;
+        responseData.clientGoals = clientGoals;
 
       } else if (view === 'day-wise') {
         // Return summary of each day without full meal details
@@ -2145,13 +2282,13 @@ export class MealPlanningService {
           totalFiber: meals.reduce((sum, meal) => sum + (meal.total_fiber_grams || 0), 0)
         };
 
-        responseData.day = {
+        responseData.days = [{
           dayNumber,
           date: meals[0]?.meal_date,
           meals: dayMeals,
           dailyNutrition,
           mealCount: dayMeals.length
-        };
+        }];
       }
 
       return {
@@ -2483,6 +2620,7 @@ export class MealPlanningService {
         .insert({
           client_id: clientId,
           nutritionist_id: userId,
+          meal_program_id: mealProgram.id !== 'override' ? mealProgram.id : null, // Add meal program ID
           plan_name: 'Preview Meal Plan',
           plan_date: planDate,
           plan_type: 'daily',
@@ -4215,6 +4353,355 @@ export class MealPlanningService {
       return { success: true, data: updatedMealPlan };
     } catch (error) {
       console.error('Error deleting manual meal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Edit an ingredient in a multi-day meal plan
+   */
+  async editSavedMealIngredientMultiDay(
+    mealPlanId: string,
+    dayNumber: number,
+    mealOrder: number,
+    ingredientIndex: number,
+    newIngredientText: string
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🔧 EDIT MULTI-DAY MEAL INGREDIENT - START');
+      console.log('mealPlanId:', mealPlanId);
+      console.log('dayNumber:', dayNumber);
+      console.log('mealOrder:', mealOrder);
+      console.log('ingredientIndex:', ingredientIndex);
+      console.log('newIngredientText:', newIngredientText);
+
+      // Fetch the specific meal from meal_plan_meals table
+      const { data: meal, error: mealError } = await supabase
+        .from('meal_plan_meals')
+        .select('*')
+        .eq('meal_plan_id', mealPlanId)
+        .eq('day_number', dayNumber)
+        .eq('meal_order', mealOrder)
+        .single();
+
+      if (mealError || !meal) {
+        console.log('❌ ERROR: Meal not found');
+        return { success: false, error: 'Meal not found' };
+      }
+
+      // Check if ingredients are stored as strings (old format) or objects (new format)
+      let ingredients: any[] = [];
+      if (Array.isArray(meal.ingredients)) {
+        if (meal.ingredients.length > 0 && typeof meal.ingredients[0] === 'string') {
+          // Old format: array of strings, need to convert to objects
+          console.log('🔄 Converting old string format to structured format');
+          ingredients = meal.ingredients.map((text: string, index: number) => ({
+            text: text,
+            food: text.split(' ').slice(1).join(' '), // Remove first word (quantity)
+            quantity: 1,
+            measure: 'unit',
+            weight: 100,
+            foodCategory: 'unknown',
+            foodId: `temp_${index}`,
+            image: ''
+          }));
+        } else {
+          // New format: array of objects
+          ingredients = meal.ingredients;
+        }
+      }
+
+      if (ingredientIndex >= ingredients.length) {
+        console.log('❌ ERROR: Invalid ingredient index');
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const oldIngredient = ingredients[ingredientIndex];
+      console.log('🔄 OLD INGREDIENT:', oldIngredient);
+
+      // Parse the new ingredient text to extract quantity, measure, and food
+      const parsedIngredient = await this.edamamService.parseIngredientText(newIngredientText);
+      if (!parsedIngredient) {
+        return {
+          success: false,
+          error: 'Failed to parse ingredient text'
+        };
+      }
+      
+      // Update ingredient fields
+      ingredients[ingredientIndex] = parsedIngredient;
+      
+      console.log('🔄 UPDATED INGREDIENT:', {
+        text: newIngredientText,
+        quantity: parsedIngredient.quantity,
+        measure: parsedIngredient.measure,
+        food: parsedIngredient.food
+      });
+
+      // Recalculate nutrition from all ingredients
+      let totalCalories: number = 0;
+      let totalWeight: number = 0;
+      const totalNutrients: { [key: string]: { label?: string; quantity: number; unit: string } } = {};
+
+      for (const ing of ingredients) {
+        // Ensure we have the text property (handle both string and object formats)
+        const ingredientText = typeof ing === 'string' ? ing : ing.text;
+        console.log('🔍 Processing ingredient:', ingredientText);
+        
+        // Get nutrition data for this ingredient
+        const nutritionData = await this.edamamService.getIngredientNutrition(ingredientText);
+        if (nutritionData) {
+          totalCalories += nutritionData.calories || 0;
+          totalWeight += nutritionData.weight || 0;
+          
+          // Add to total nutrients
+          Object.entries(nutritionData.totalNutrients || {}).forEach(([key, value]: [string, any]) => {
+            if (totalNutrients[key]) {
+              totalNutrients[key].quantity += value.quantity || 0;
+            } else {
+              totalNutrients[key] = {
+                label: value.label,
+                quantity: value.quantity || 0,
+                unit: value.unit
+              };
+            }
+          });
+        }
+      }
+
+      // Calculate per-serving values (assuming 1 serving per meal)
+      const servings = 1;
+      const caloriesPerServing = Math.round(totalCalories / servings);
+      const proteinPerServing = Math.round((totalNutrients.PROCNT?.quantity || 0) / servings);
+      const carbsPerServing = Math.round((totalNutrients.CHOCDF?.quantity || 0) / servings);
+      const fatPerServing = Math.round((totalNutrients.FAT?.quantity || 0) / servings);
+      const fiberPerServing = Math.round((totalNutrients.FIBTG?.quantity || 0) / servings);
+
+      console.log('📊 RECALCULATED NUTRITION:', {
+        totalCalories,
+        caloriesPerServing,
+        proteinPerServing,
+        carbsPerServing,
+        fatPerServing,
+        fiberPerServing
+      });
+
+      // Update the meal in database
+      const { error: updateError } = await supabase
+        .from('meal_plan_meals')
+        .update({
+          ingredients: ingredients,
+          calories_per_serving: caloriesPerServing,
+          protein_grams: proteinPerServing,
+          carbs_grams: carbsPerServing,
+          fat_grams: fatPerServing,
+          fiber_grams: fiberPerServing,
+          total_calories: caloriesPerServing,
+          total_protein_grams: proteinPerServing,
+          total_carbs_grams: carbsPerServing,
+          total_fat_grams: fatPerServing,
+          total_fiber_grams: fiberPerServing
+        })
+        .eq('id', meal.id);
+
+      if (updateError) {
+        console.log('❌ ERROR updating meal:', updateError);
+        return { success: false, error: 'Failed to update meal' };
+      }
+
+      // Get updated meal plan data for response
+      const updatedMealPlan = await this.getMealPlanWithView(mealPlanId, 'consolidated');
+
+      console.log('✅ EDIT MULTI-DAY MEAL INGREDIENT - SUCCESS');
+      return { 
+        success: true, 
+        data: {
+          mealPlan: updatedMealPlan.data?.mealPlan,
+          days: updatedMealPlan.data?.days,
+          overallStats: updatedMealPlan.data?.overallStats,
+          updatedMeal: {
+            dayNumber,
+            mealOrder,
+            ingredientIndex,
+            newIngredient: ingredients[ingredientIndex],
+            updatedNutrition: {
+              caloriesPerServing,
+              proteinPerServing,
+              carbsPerServing,
+              fatPerServing,
+              fiberPerServing
+            }
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ ERROR in editSavedMealIngredientMultiDay:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Delete an ingredient from a multi-day meal plan
+   */
+  async deleteSavedMealIngredientMultiDay(
+    mealPlanId: string,
+    dayNumber: number,
+    mealOrder: number,
+    ingredientIndex: number
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🗑️ DELETE MULTI-DAY MEAL INGREDIENT - START');
+      console.log('mealPlanId:', mealPlanId);
+      console.log('dayNumber:', dayNumber);
+      console.log('mealOrder:', mealOrder);
+      console.log('ingredientIndex:', ingredientIndex);
+
+      // Fetch the specific meal from meal_plan_meals table
+      const { data: meal, error: mealError } = await supabase
+        .from('meal_plan_meals')
+        .select('*')
+        .eq('meal_plan_id', mealPlanId)
+        .eq('day_number', dayNumber)
+        .eq('meal_order', mealOrder)
+        .single();
+
+      if (mealError || !meal) {
+        console.log('❌ ERROR: Meal not found');
+        return { success: false, error: 'Meal not found' };
+      }
+
+      // Check if ingredients are stored as strings (old format) or objects (new format)
+      let ingredients: any[] = [];
+      if (Array.isArray(meal.ingredients)) {
+        if (meal.ingredients.length > 0 && typeof meal.ingredients[0] === 'string') {
+          // Old format: array of strings, need to convert to objects
+          console.log('🔄 Converting old string format to structured format');
+          ingredients = meal.ingredients.map((text: string, index: number) => ({
+            text: text,
+            food: text.split(' ').slice(1).join(' '), // Remove first word (quantity)
+            quantity: 1,
+            measure: 'unit',
+            weight: 100,
+            foodCategory: 'unknown',
+            foodId: `temp_${index}`,
+            image: ''
+          }));
+        } else {
+          // New format: array of objects
+          ingredients = meal.ingredients;
+        }
+      }
+
+      if (ingredientIndex >= ingredients.length) {
+        console.log('❌ ERROR: Invalid ingredient index');
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const deletedIngredient = ingredients[ingredientIndex];
+      console.log('🗑️ DELETING INGREDIENT:', deletedIngredient);
+
+      // Remove the ingredient
+      ingredients.splice(ingredientIndex, 1);
+
+      // Recalculate nutrition from remaining ingredients
+      let totalCalories: number = 0;
+      let totalWeight: number = 0;
+      const totalNutrients: { [key: string]: { label?: string; quantity: number; unit: string } } = {};
+
+      for (const ing of ingredients) {
+        // Ensure we have the text property (handle both string and object formats)
+        const ingredientText = typeof ing === 'string' ? ing : ing.text;
+        console.log('🔍 Processing ingredient:', ingredientText);
+        
+        // Get nutrition data for this ingredient
+        const nutritionData = await this.edamamService.getIngredientNutrition(ingredientText);
+        if (nutritionData) {
+          totalCalories += nutritionData.calories || 0;
+          totalWeight += nutritionData.weight || 0;
+          
+          // Add to total nutrients
+          Object.entries(nutritionData.totalNutrients || {}).forEach(([key, value]: [string, any]) => {
+            if (totalNutrients[key]) {
+              totalNutrients[key].quantity += value.quantity || 0;
+            } else {
+              totalNutrients[key] = {
+                label: value.label,
+                quantity: value.quantity || 0,
+                unit: value.unit
+              };
+            }
+          });
+        }
+      }
+
+      // Calculate per-serving values (assuming 1 serving per meal)
+      const servings = 1;
+      const caloriesPerServing = Math.round(totalCalories / servings);
+      const proteinPerServing = Math.round((totalNutrients.PROCNT?.quantity || 0) / servings);
+      const carbsPerServing = Math.round((totalNutrients.CHOCDF?.quantity || 0) / servings);
+      const fatPerServing = Math.round((totalNutrients.FAT?.quantity || 0) / servings);
+      const fiberPerServing = Math.round((totalNutrients.FIBTG?.quantity || 0) / servings);
+
+      console.log('📊 RECALCULATED NUTRITION:', {
+        totalCalories,
+        caloriesPerServing,
+        proteinPerServing,
+        carbsPerServing,
+        fatPerServing,
+        fiberPerServing
+      });
+
+      // Update the meal in database
+      const { error: updateError } = await supabase
+        .from('meal_plan_meals')
+        .update({
+          ingredients: ingredients,
+          calories_per_serving: caloriesPerServing,
+          protein_grams: proteinPerServing,
+          carbs_grams: carbsPerServing,
+          fat_grams: fatPerServing,
+          fiber_grams: fiberPerServing,
+          total_calories: caloriesPerServing,
+          total_protein_grams: proteinPerServing,
+          total_carbs_grams: carbsPerServing,
+          total_fat_grams: fatPerServing,
+          total_fiber_grams: fiberPerServing
+        })
+        .eq('id', meal.id);
+
+      if (updateError) {
+        console.log('❌ ERROR updating meal:', updateError);
+        return { success: false, error: 'Failed to update meal' };
+      }
+
+      // Get updated meal plan data for response
+      const updatedMealPlan = await this.getMealPlanWithView(mealPlanId, 'consolidated');
+
+      console.log('✅ DELETE MULTI-DAY MEAL INGREDIENT - SUCCESS');
+      return { 
+        success: true, 
+        data: {
+          mealPlan: updatedMealPlan.data?.mealPlan,
+          days: updatedMealPlan.data?.days,
+          overallStats: updatedMealPlan.data?.overallStats,
+          updatedMeal: {
+            dayNumber,
+            mealOrder,
+            deletedIngredient,
+            updatedNutrition: {
+              caloriesPerServing,
+              proteinPerServing,
+              carbsPerServing,
+              fatPerServing,
+              fiberPerServing
+            }
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ ERROR in deleteSavedMealIngredientMultiDay:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }

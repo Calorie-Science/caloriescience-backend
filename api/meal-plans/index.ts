@@ -317,10 +317,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       } else {
         // Meal plan type - validate action
-        if (!['preview', 'save', 'preview-edit-ingredient', 'preview-delete-ingredient', 'save-from-preview', 'saved-edit-ingredient', 'saved-delete-ingredient', 'create-manual', 'add-manual-meal', 'add-manual-ingredient', 'remove-manual-ingredient', 'delete-manual-meal'].includes(action)) {
+        if (!['preview', 'save', 'preview-edit-ingredient', 'preview-delete-ingredient', 'save-from-preview', 'saved-edit-ingredient', 'saved-delete-ingredient', 'multi-day-edit-ingredient', 'multi-day-delete-ingredient', 'create-manual', 'add-manual-meal', 'add-manual-ingredient', 'remove-manual-ingredient', 'delete-manual-meal'].includes(action)) {
           return res.status(400).json({
             error: 'Invalid action',
-            message: 'action must be one of: "preview", "save", "preview-edit-ingredient", "preview-delete-ingredient", "save-from-preview", "saved-edit-ingredient", "saved-delete-ingredient", "create-manual", "add-manual-meal", "add-manual-ingredient", "remove-manual-ingredient", "delete-manual-meal"'
+            message: 'action must be one of: "preview", "save", "preview-edit-ingredient", "preview-delete-ingredient", "save-from-preview", "saved-edit-ingredient", "saved-delete-ingredient", "multi-day-edit-ingredient", "multi-day-delete-ingredient", "create-manual", "add-manual-meal", "add-manual-ingredient", "remove-manual-ingredient", "delete-manual-meal"'
           });
         }
 
@@ -700,6 +700,40 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
           return res.status(200).json({
             message: 'Ingredient deleted successfully from saved meal',
+            data: result.data
+          });
+        } else if (action === 'multi-day-edit-ingredient') {
+          const { mealPlanId, dayNumber, mealOrder, ingredientIndex, newIngredientText } = req.body;
+
+          if (!mealPlanId || dayNumber === undefined || mealOrder === undefined || ingredientIndex === undefined || !newIngredientText) {
+            return res.status(400).json({ error: 'Missing required fields for multi-day ingredient edit' });
+          }
+
+          const result = await mealPlanningService.editSavedMealIngredientMultiDay(mealPlanId, dayNumber, mealOrder, ingredientIndex, newIngredientText);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Multi-day meal ingredient edited successfully',
+            data: result.data
+          });
+        } else if (action === 'multi-day-delete-ingredient') {
+          const { mealPlanId, dayNumber, mealOrder, ingredientIndex } = req.body;
+
+          if (!mealPlanId || dayNumber === undefined || mealOrder === undefined || ingredientIndex === undefined) {
+            return res.status(400).json({ error: 'Missing required fields for multi-day ingredient delete' });
+          }
+
+          const result = await mealPlanningService.deleteSavedMealIngredientMultiDay(mealPlanId, dayNumber, mealOrder, ingredientIndex);
+
+          if (!result.success) {
+            return res.status(400).json({ error: result.error });
+          }
+
+          return res.status(200).json({
+            message: 'Multi-day meal ingredient deleted successfully',
             data: result.data
           });
         } else if (action === 'create-manual') {
