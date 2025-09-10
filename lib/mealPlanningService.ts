@@ -384,12 +384,12 @@ export class MealPlanningService {
       // If request has dietary restrictions, use those; otherwise use client preferences
       dietaryRestrictions: request.dietaryRestrictions !== undefined 
         ? request.dietaryRestrictions 
-        : clientPreferences.dietaryRestrictions,
+        : (clientPreferences.dietaryRestrictions || []),
       
       // If request has cuisine preferences, use those; otherwise use client preferences  
       cuisinePreferences: request.cuisinePreferences !== undefined 
         ? request.cuisinePreferences 
-        : clientPreferences.cuisinePreferences,
+        : (clientPreferences.cuisinePreferences || []),
       
       mealPreferences: {
         ...clientPreferences.mealPreferences,
@@ -994,11 +994,11 @@ export class MealPlanningService {
     }
 
     // Add health labels based on dietary restrictions
-    if (preferences.dietaryRestrictions.includes('gluten-free')) {
+    if (preferences.dietaryRestrictions && preferences.dietaryRestrictions.includes('gluten-free')) {
       searchParams.health = ['gluten-free'];
       console.log(`🔍 Meal Planning Debug - Added gluten-free health label`);
     }
-    if (preferences.dietaryRestrictions.includes('dairy-free')) {
+    if (preferences.dietaryRestrictions && preferences.dietaryRestrictions.includes('dairy-free')) {
       searchParams.health = ['dairy-free'];
       console.log(`🔍 Meal Planning Debug - Added dairy-free health label`);
     }
@@ -1333,27 +1333,48 @@ export class MealPlanningService {
         } 
         // Handle preview meal plans (generated from Edamam)
         else if (Array.isArray(generatedMealsData)) {
-          generatedMeals = generatedMealsData.map((meal: any) => ({
-            id: meal.id || `meal-${meal.mealOrder || 0}`,
-            mealType: meal.mealType,
-            mealOrder: meal.mealOrder,
-            recipeName: meal.recipeName || meal.recipe?.label,
-            recipeUrl: meal.recipe?.url || '',
-            recipeImageUrl: meal.recipe?.image || '',
-            caloriesPerServing: meal.recipe?.nutritionSummary?.calories || 0,
-            proteinGrams: meal.recipe?.nutritionSummary?.protein || 0,
-            carbsGrams: meal.recipe?.nutritionSummary?.carbs || 0,
-            fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
-            fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
-            servingsPerMeal: meal.recipe?.yield || 1,
-            totalCalories: meal.targetCalories || 0,
-            totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
-            totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
-            totalFat: meal.recipe?.nutritionSummary?.fat || 0,
-            totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
-            ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
-            edamamRecipeId: meal.recipe?.uri || ''
-          }));
+          console.log('🔍 getMealPlan - Processing preview meals, count:', generatedMealsData.length);
+          
+          // Check if data is already in GeneratedMeal format
+          if (generatedMealsData.length > 0 && generatedMealsData[0].id && generatedMealsData[0].mealOrder) {
+            console.log('🔍 getMealPlan - Data is in GeneratedMeal format, using as-is');
+            // Data is already in GeneratedMeal format, use as-is
+            generatedMeals = generatedMealsData.map((meal: any) => ({
+              ...meal,
+              servingsPerMeal: meal.servingsPerMeal || 1 // Ensure servingsPerMeal is preserved
+            }));
+          } else {
+            console.log('🔍 getMealPlan - Data is in old format, mapping...');
+            // Data is in old format, map it
+            generatedMeals = generatedMealsData.map((meal: any) => ({
+              id: meal.id || `meal-${meal.mealOrder || 0}`,
+              mealType: meal.mealType,
+              mealOrder: meal.mealOrder,
+              recipeName: meal.recipeName || meal.recipe?.label,
+              recipeUrl: meal.recipe?.url || '',
+              recipeImageUrl: meal.recipe?.image || '',
+              caloriesPerServing: meal.recipe?.nutritionSummary?.calories || 0,
+              proteinGrams: meal.recipe?.nutritionSummary?.protein || 0,
+              carbsGrams: meal.recipe?.nutritionSummary?.carbs || 0,
+              fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
+              fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
+              servingsPerMeal: meal.recipe?.yield || 1,
+              totalCalories: meal.recipe?.nutritionSummary?.calories || 0,
+              totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
+              totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
+              totalFat: meal.recipe?.nutritionSummary?.fat || 0,
+              totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
+              ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
+              edamamRecipeId: meal.recipe?.uri || ''
+            }));
+          }
+          
+          console.log('🔍 getMealPlan - Final meals:', generatedMeals.map(m => ({ 
+            id: m.id, 
+            mealOrder: m.mealOrder, 
+            totalCalories: m.totalCalories,
+            ingredientsCount: m.ingredients?.length 
+          })));
         }
       } 
       // Fallback: Check meal_plan_meals table for saved meal plans
@@ -1479,7 +1500,7 @@ export class MealPlanningService {
               fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
               fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
               servingsPerMeal: meal.recipe?.yield || 1,
-              totalCalories: meal.targetCalories || 0,
+              totalCalories: meal.recipe?.nutritionSummary?.calories || 0,
               totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
               totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
               totalFat: meal.recipe?.nutritionSummary?.fat || 0,
@@ -1840,7 +1861,6 @@ export class MealPlanningService {
       const mealPlanData = {
         client_id: clientId,
         nutritionist_id: userId,
-        meal_program_id: mealProgram.id !== 'override' ? mealProgram.id : null, // Add meal program ID
         plan_name: `${days}-Day Meal Plan`,
         plan_date: startDate,
         end_date: endDate.toISOString().split('T')[0],
@@ -1872,8 +1892,14 @@ export class MealPlanningService {
         .single();
       
       if (planError || !mealPlan) {
-        console.error('❌ DB INSERT: Failed to create meal plan:', planError?.message);
-        throw new Error('Failed to create multi-day meal plan');
+        console.error('❌ DB INSERT: Failed to create meal plan:', {
+          error_code: planError?.code,
+          error_message: planError?.message,
+          error_details: planError?.details,
+          error_hint: planError?.hint,
+          meal_plan_data: mealPlanData
+        });
+        throw new Error(`Failed to create multi-day meal plan: ${planError?.message} (${planError?.code})`);
       }
       
       const mealPlanId = mealPlan.id;
@@ -1985,6 +2011,12 @@ export class MealPlanningService {
       
     } catch (error) {
       console.error('❌ Multi-Day Meal Planning Service - Error:', error);
+      console.error('❌ Multi-Day Meal Planning Service - Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('❌ Multi-Day Meal Planning Service - Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        cause: error instanceof Error ? error.cause : undefined
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to generate multi-day meal plan'
@@ -2014,30 +2046,77 @@ export class MealPlanningService {
         };
       }
 
-      console.log(`✅ MEAL PLAN FOUND: ${mealPlan.plan_name}, Duration: ${mealPlan.plan_duration_days} days, Type: ${mealPlan.plan_type}`);
+      console.log(`✅ MEAL PLAN FOUND: ${mealPlan.plan_name}, Duration: ${mealPlan.plan_duration_days} days, Type: ${mealPlan.plan_type}, Status: ${mealPlan.status}`);
 
-      // Get meals based on view type
-      let mealsQuery = supabase
-        .from('meal_plan_meals')
-        .select('*')
-        .eq('meal_plan_id', mealPlanId);
+      let meals: any[] = [];
+      
+      // For preview/draft meal plans, get meals from generated_meals JSONB
+      if (mealPlan.status === 'draft' && mealPlan.generated_meals) {
+        console.log(`🔍 PREVIEW MEAL PLAN: Getting meals from generated_meals field`);
+        
+        // Parse generated_meals if it's a string
+        const generatedMeals = typeof mealPlan.generated_meals === 'string' 
+          ? JSON.parse(mealPlan.generated_meals) 
+          : mealPlan.generated_meals;
+        
+        // Convert GeneratedMeal format to meal_plan_meals format for consistency
+        if (Array.isArray(generatedMeals)) {
+          meals = generatedMeals.map((meal: any, index: number) => ({
+            id: meal.id || `preview-meal-${index}`,
+            meal_plan_id: mealPlanId,
+            day_number: 1, // Preview plans are single-day by default
+            meal_order: meal.mealOrder || index,
+            meal_type: meal.mealType,
+            recipe_name: meal.recipeName,
+            recipe_url: meal.recipeUrl,
+            recipe_image_url: meal.recipeImageUrl,
+            target_calories: meal.targetCalories || meal.totalCalories,
+            actual_calories: meal.totalCalories,
+            servingsPerMeal: meal.servingsPerMeal || 1,
+            protein_grams: meal.totalProtein,
+            carbs_grams: meal.totalCarbs,
+            fat_grams: meal.totalFat,
+            fiber_grams: meal.totalFiber,
+            servings: meal.servingsPerMeal || 1,
+            ingredients: meal.ingredients,
+            nutrition: {
+              calories: meal.totalCalories,
+              protein: meal.totalProtein,
+              carbs: meal.totalCarbs,
+              fat: meal.totalFat,
+              fiber: meal.totalFiber
+            }
+          }));
+          console.log(`✅ PREVIEW MEALS FOUND: ${meals.length} meals`);
+        }
+      } else {
+        // For saved meal plans, get from meal_plan_meals table
+        console.log(`🔍 SAVED MEAL PLAN: Getting meals from meal_plan_meals table`);
+        
+        let mealsQuery = supabase
+          .from('meal_plan_meals')
+          .select('*')
+          .eq('meal_plan_id', mealPlanId);
 
-      // Add day filter if specific day requested
-      if (view === 'day' && dayNumber) {
-        mealsQuery = mealsQuery.eq('day_number', dayNumber);
-      }
+        // Add day filter if specific day requested
+        if (view === 'day' && dayNumber) {
+          mealsQuery = mealsQuery.eq('day_number', dayNumber);
+        }
 
-      const { data: meals, error: mealsError } = await mealsQuery
-        .order('day_number')
-        .order('meal_order');
+        const { data: mealsData, error: mealsError } = await mealsQuery
+          .order('day_number')
+          .order('meal_order');
 
-      console.log(`🔍 MEALS QUERY: Found ${meals?.length || 0} meals, Error:`, mealsError);
+        console.log(`🔍 MEALS QUERY: Found ${mealsData?.length || 0} meals, Error:`, mealsError);
 
-      if (mealsError) {
-        return {
-          success: false,
-          error: 'Failed to fetch meal plan meals'
-        };
+        if (mealsError) {
+          return {
+            success: false,
+            error: 'Failed to fetch meal plan meals'
+          };
+        }
+        
+        meals = mealsData || [];
       }
 
       // Get meal program data for the client to get meal names
@@ -2161,23 +2240,23 @@ export class MealPlanningService {
               recipeName: meal.recipe_name,
               recipeUrl: meal.recipe_url,
               recipeImage: meal.recipe_image_url,
-              caloriesPerServing: meal.calories_per_serving,
-              totalCalories: meal.total_calories,
-              protein: meal.protein_grams,
-              carbs: meal.carbs_grams,
-              fat: meal.fat_grams,
-              fiber: meal.fiber_grams,
+              caloriesPerServing: meal.calories_per_serving || (meal.actual_calories / (meal.servings || 1)),
+              totalCalories: meal.actual_calories || meal.total_calories || 0,
+              protein: meal.protein_grams || 0,
+              carbs: meal.carbs_grams || 0,
+              fat: meal.fat_grams || 0,
+              fiber: meal.fiber_grams || 0,
               ingredients: meal.ingredients
             };
 
             acc[dayKey].meals.push(mealData);
             
             // Add to daily nutrition
-            acc[dayKey].dailyNutrition.totalCalories += meal.total_calories || 0;
-            acc[dayKey].dailyNutrition.totalProtein += meal.total_protein_grams || 0;
-            acc[dayKey].dailyNutrition.totalCarbs += meal.total_carbs_grams || 0;
-            acc[dayKey].dailyNutrition.totalFat += meal.total_fat_grams || 0;
-            acc[dayKey].dailyNutrition.totalFiber += meal.total_fiber_grams || 0;
+            acc[dayKey].dailyNutrition.totalCalories += meal.actual_calories || meal.total_calories || 0;
+            acc[dayKey].dailyNutrition.totalProtein += meal.protein_grams || 0;
+            acc[dayKey].dailyNutrition.totalCarbs += meal.carbs_grams || 0;
+            acc[dayKey].dailyNutrition.totalFat += meal.fat_grams || 0;
+            acc[dayKey].dailyNutrition.totalFiber += meal.fiber_grams || 0;
             
             return acc;
           }, {});
@@ -2218,6 +2297,10 @@ export class MealPlanningService {
           averageCaloriesPerDay: daysArray.length > 0 ? daysArray.reduce((sum: number, day: any) => sum + day.dailyNutrition.totalCalories, 0) / daysArray.length : 0
         };
 
+        // Also add a flat meals array for backward compatibility
+        const allMeals = daysArray.flatMap((day: any) => day.meals);
+        responseData.mealPlan.meals = allMeals;
+        
         responseData.days = daysArray;
         responseData.overallStats = overallStats;
         responseData.totalDays = mealPlan.plan_duration_days;
@@ -2269,6 +2352,7 @@ export class MealPlanningService {
           totalCalories: meal.total_calories,
           protein: meal.protein_grams,
           carbs: meal.carbs_grams,
+          servingsPerMeal: meal.servingsPerMeal || 1,
           fat: meal.fat_grams,
           fiber: meal.fiber_grams,
           ingredients: meal.ingredients
@@ -2614,33 +2698,76 @@ export class MealPlanningService {
       console.log('🎯 Meal Planning Service - Final daily nutrition totals:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
       console.log('🎯 Meal Planning Service - ===== END CALCULATING DAILY NUTRITION =====');
       
+      // Convert meals to GeneratedMeal format for consistency with saved meal plans
+      console.log('🎯 Meal Planning Service - Converting to GeneratedMeal format...');
+      const generatedMeals = mappedResponse.meals.map((meal: any) => {
+        const recipe = meal.recipe;
+        const servings = recipe?.yield || 1;
+        const mealOrder = parseInt(meal.mealKey?.split('_')[1]) || 1;
+        
+        return {
+          id: `meal-${meal.mealKey || mealOrder}`,
+          mealType: meal.edamamMealType || meal.mealName,
+          mealOrder: mealOrder,
+          recipeName: recipe?.label || meal.mealName,
+          recipeUrl: recipe?.url || '',
+          recipeImageUrl: recipe?.image || '',
+          caloriesPerServing: Math.round((recipe?.calories || 0) / servings * 100) / 100,
+          proteinGrams: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
+          carbsGrams: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
+          fatGrams: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
+          fiberGrams: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+          servingsPerMeal: servings,
+          totalCalories: Math.round((recipe?.calories || 0) / servings * 100) / 100, // Per-serving calories
+          totalProtein: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
+          totalCarbs: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
+          totalFat: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
+          totalFiber: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+          ingredients: recipe?.ingredients?.map((ing: any) => ing.text) || recipe?.ingredientLines || [],
+          edamamRecipeId: recipe?.uri || ''
+        };
+      });
+      
+      console.log('🎯 Meal Planning Service - Generated meals format:', JSON.stringify(generatedMeals, null, 2));
+      
       // Insert as draft meal plan
+      const insertData = {
+        client_id: clientId,
+        nutritionist_id: userId,
+        // meal_program_id: mealProgram.id !== 'override' ? mealProgram.id : null, // Remove this column as it doesn't exist
+        plan_name: 'Preview Meal Plan',
+        plan_date: planDate,
+        plan_type: 'daily',
+        status: 'draft',
+        target_calories: clientGoal.eerGoalCalories,
+        target_protein_grams: (clientGoal.proteinGoalMin + clientGoal.proteinGoalMax) / 2,
+        target_carbs_grams: (clientGoal.carbsGoalMin + clientGoal.carbsGoalMax) / 2,
+        target_fat_grams: (clientGoal.fatGoalMin + clientGoal.fatGoalMax) / 2,
+        target_fiber_grams: 0, // Add if available
+        dietary_restrictions: dietaryRestrictions,
+        cuisine_preferences: cuisinePreferences,
+        generated_meals: generatedMeals, // Store meals in GeneratedMeal format
+        nutrition_summary: mappedResponse.dailyNutrition
+      };
+
+      console.log('🚨🚨🚨 ATTEMPTING SUPABASE INSERT 🚨🚨🚨');
+      console.log('🚨 Insert data keys:', Object.keys(insertData));
+      console.log('🚨 Generated meals count:', mappedResponse.meals?.length || 0);
+      console.log('🚨 Generated meals size (approx):', JSON.stringify(mappedResponse.meals).length, 'characters');
+      console.log('🚨 Nutrition summary:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
+      console.log('🚨 Full insert data size (approx):', JSON.stringify(insertData).length, 'characters');
+      console.log('🚨🚨🚨 END DEBUGGING SUPABASE INSERT 🚨🚨🚨');
+
       const { data: draftPlan, error: draftError } = await supabase
         .from('meal_plans')
-        .insert({
-          client_id: clientId,
-          nutritionist_id: userId,
-          meal_program_id: mealProgram.id !== 'override' ? mealProgram.id : null, // Add meal program ID
-          plan_name: 'Preview Meal Plan',
-          plan_date: planDate,
-          plan_type: 'daily',
-          status: 'draft',
-          target_calories: clientGoal.eerGoalCalories,
-          target_protein_grams: (clientGoal.proteinGoalMin + clientGoal.proteinGoalMax) / 2,
-          target_carbs_grams: (clientGoal.carbsGoalMin + clientGoal.carbsGoalMax) / 2,
-          target_fat_grams: (clientGoal.fatGoalMin + clientGoal.fatGoalMax) / 2,
-          target_fiber_grams: 0, // Add if available
-          dietary_restrictions: dietaryRestrictions,
-          cuisine_preferences: cuisinePreferences,
-          generated_meals: mappedResponse.meals, // Store meals array in JSONB
-          nutrition_summary: mappedResponse.dailyNutrition
-        })
+        .insert(insertData)
         .select('id')
         .single();
 
       if (draftError || !draftPlan) {
-        console.error('❌ Meal Planning Service - Draft creation error:', draftError);
-        throw new Error('Failed to create draft preview');
+        console.error('❌ Meal Planning Service - Draft creation error:', JSON.stringify(draftError, null, 2));
+        console.error('❌ Meal Planning Service - Error details:', draftError);
+        throw new Error(`Failed to create draft preview: ${JSON.stringify(draftError)}`);
       }
 
       const previewId = draftPlan.id;
@@ -2653,7 +2780,10 @@ export class MealPlanningService {
       return {
         success: true,
         data: {
-          mealPlan: mappedResponse,
+          mealPlan: {
+            ...mappedResponse,
+            meals: generatedMeals
+          },
           clientGoals: clientGoal,
           mealProgram: overrideMealProgram || {
             id: mealProgram.id,
@@ -2672,6 +2802,11 @@ export class MealPlanningService {
       
     } catch (error) {
       console.error('❌ Meal Planning Service - Error generating meal plan with overrides:', error);
+      console.error('❌ Meal Planning Service - Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      console.error('❌ Meal Planning Service - Error details:', JSON.stringify(error, null, 2));
+      console.error('❌ Meal Planning Service - Client ID:', clientId);
+      console.error('❌ Meal Planning Service - Plan Date:', planDate);
+      console.error('❌ Meal Planning Service - User ID:', userId);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to generate meal plan with overrides'
@@ -2903,6 +3038,29 @@ export class MealPlanningService {
       console.log('🎯 Meal Planning Service - Final daily nutrition totals:', JSON.stringify(mappedResponse.dailyNutrition, null, 2));
       console.log('🎯 Meal Planning Service - ===== END CALCULATING DAILY NUTRITION =====');
       
+      // Convert meals to GeneratedMeal format before storing
+      const generatedMeals: GeneratedMeal[] = mappedResponse.meals.map((meal: any) => ({
+        id: meal.id || `meal-${meal.mealOrder || 0}`,
+        mealType: meal.mealType,
+        mealOrder: meal.mealOrder,
+        recipeName: meal.recipeName || meal.recipe?.label,
+        recipeUrl: meal.recipe?.url || '',
+        recipeImageUrl: meal.recipe?.image || '',
+        caloriesPerServing: meal.recipe?.nutritionSummary?.calories || 0,
+        proteinGrams: meal.recipe?.nutritionSummary?.protein || 0,
+        carbsGrams: meal.recipe?.nutritionSummary?.carbs || 0,
+        fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
+        fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
+        servingsPerMeal: meal.recipe?.yield || meal.recipe?.nutritionSummary?.servings || 1,
+        totalCalories: meal.recipe?.nutritionSummary?.calories || 0,
+        totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
+        totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
+        totalFat: meal.recipe?.nutritionSummary?.fat || 0,
+        totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
+        ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
+        edamamRecipeId: meal.recipe?.uri || ''
+      }));
+
       // Insert as draft meal plan
       const { data: draftPlan, error: draftError } = await supabase
         .from('meal_plans')
@@ -2920,15 +3078,16 @@ export class MealPlanningService {
           target_fiber_grams: 0, // Add if available
           dietary_restrictions: dietaryRestrictions,
           cuisine_preferences: cuisinePreferences,
-          generated_meals: mappedResponse.meals, // Store meals array in JSONB
+          generated_meals: generatedMeals, // Store GeneratedMeal format in JSONB
           nutrition_summary: mappedResponse.dailyNutrition
         })
         .select('id')
         .single();
 
       if (draftError || !draftPlan) {
-        console.error('❌ Meal Planning Service - Draft creation error:', draftError);
-        throw new Error('Failed to create draft preview');
+        console.error('❌ Meal Planning Service - Draft creation error:', JSON.stringify(draftError, null, 2));
+        console.error('❌ Meal Planning Service - Error details:', draftError);
+        throw new Error(`Failed to create draft preview: ${JSON.stringify(draftError)}`);
       }
 
       const previewId = draftPlan.id;
@@ -4523,7 +4682,13 @@ export class MealPlanningService {
             dayNumber,
             mealOrder,
             ingredientIndex,
-            newIngredient: ingredients[ingredientIndex],
+            newIngredient: {
+              ...ingredients[ingredientIndex],
+              text: newIngredientText,
+              quantity: parsedIngredient.quantity,
+              measure: parsedIngredient.measure,
+              food: parsedIngredient.food
+            },
             updatedNutrition: {
               caloriesPerServing,
               proteinPerServing,
@@ -4537,6 +4702,390 @@ export class MealPlanningService {
 
     } catch (error) {
       console.error('❌ ERROR in editSavedMealIngredientMultiDay:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Edit an ingredient in a preview meal plan
+   */
+  async editPreviewMealIngredientMultiDay(
+    previewId: string,
+    dayNumber: number,
+    mealOrder: number,
+    ingredientIndex: number,
+    newIngredientText: string
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🔧 EDIT PREVIEW MEAL INGREDIENT - START');
+      console.log('previewId:', previewId);
+      console.log('dayNumber:', dayNumber);
+      console.log('mealOrder:', mealOrder);
+      console.log('ingredientIndex:', ingredientIndex);
+      console.log('newIngredientText:', newIngredientText);
+
+      // Get the meal plan data using the getMealPlan function
+      const mealPlan = await this.getMealPlan(previewId);
+      if (!mealPlan) {
+        return { success: false, error: 'Preview not found' };
+      }
+
+      // Get the meals data
+      const rawMeals = mealPlan.meals;
+      if (!Array.isArray(rawMeals)) {
+        return { success: false, error: 'Invalid meal data structure' };
+      }
+
+      // Find the specific meal in the data
+      const mealIndex = rawMeals.findIndex(
+        (m: any) => m.mealOrder === mealOrder
+      );
+
+      if (mealIndex === -1) {
+        console.log('Available meals:', rawMeals.map(m => ({ mealOrder: m.mealOrder, mealType: m.mealType })));
+        return { success: false, error: 'Meal not found in preview' };
+      }
+
+      const meal = rawMeals[mealIndex];
+
+      // Check if ingredients exist
+      // The GeneratedMeal format has ingredients as an array of strings
+      if (!meal.ingredients || ingredientIndex >= meal.ingredients.length) {
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const oldIngredient = meal.ingredients[ingredientIndex];
+      console.log('🔄 OLD INGREDIENT:', oldIngredient);
+
+      // Get nutrition data for the old ingredient to subtract
+      const oldIngredientText = oldIngredient; // ingredients are stored as strings in GeneratedMeal
+      const oldNutritionData = await this.edamamService.getIngredientNutrition(oldIngredientText);
+      console.log('🔄 OLD INGREDIENT NUTRITION:', oldNutritionData);
+
+      // Parse the new ingredient text
+      const parsedIngredient = await this.edamamService.parseIngredientText(newIngredientText);
+      if (!parsedIngredient) {
+        return {
+          success: false,
+          error: 'Failed to parse ingredient text'
+        };
+      }
+
+      // Get nutrition data for the new ingredient to add
+      const newNutritionData = await this.edamamService.getIngredientNutrition(newIngredientText);
+      if (!newNutritionData) {
+        return {
+          success: false,
+          error: 'Failed to get nutrition data for new ingredient'
+        };
+      }
+      console.log('🔄 NEW INGREDIENT NUTRITION:', newNutritionData);
+
+      // Update the ingredient
+      meal.ingredients[ingredientIndex] = newIngredientText;
+      
+      console.log('🔄 UPDATED INGREDIENT:', newIngredientText);
+
+      // Get current total nutrition from the meal (these are per-serving values)
+      let totalCalories = meal.totalCalories || 0;
+      let totalProtein = meal.totalProtein || 0;
+      let totalCarbs = meal.totalCarbs || 0;
+      let totalFat = meal.totalFat || 0;
+      let totalFiber = meal.totalFiber || 0;
+
+      // Get the meal's serving size to properly calculate per-serving nutrition
+      const mealServings = meal.servingsPerMeal || 1;
+      console.log('🍽️ MEAL SERVINGS:', mealServings);
+
+      // Subtract old ingredient nutrition (per-serving)
+      if (oldNutritionData) {
+        const oldCaloriesPerServing = (oldNutritionData.calories || 0) / mealServings;
+        const oldProteinPerServing = (oldNutritionData.totalNutrients?.PROCNT?.quantity || 0) / mealServings;
+        const oldCarbsPerServing = (oldNutritionData.totalNutrients?.CHOCDF?.quantity || 0) / mealServings;
+        const oldFatPerServing = (oldNutritionData.totalNutrients?.FAT?.quantity || 0) / mealServings;
+        const oldFiberPerServing = (oldNutritionData.totalNutrients?.FIBTG?.quantity || 0) / mealServings;
+        
+        totalCalories -= oldCaloriesPerServing;
+        totalProtein -= oldProteinPerServing;
+        totalCarbs -= oldCarbsPerServing;
+        totalFat -= oldFatPerServing;
+        totalFiber -= oldFiberPerServing;
+      }
+
+      // Add new ingredient nutrition (per-serving)
+      const newCaloriesPerServing = (newNutritionData.calories || 0) / mealServings;
+      const newProteinPerServing = (newNutritionData.totalNutrients?.PROCNT?.quantity || 0) / mealServings;
+      const newCarbsPerServing = (newNutritionData.totalNutrients?.CHOCDF?.quantity || 0) / mealServings;
+      const newFatPerServing = (newNutritionData.totalNutrients?.FAT?.quantity || 0) / mealServings;
+      const newFiberPerServing = (newNutritionData.totalNutrients?.FIBTG?.quantity || 0) / mealServings;
+      
+      totalCalories += newCaloriesPerServing;
+      totalProtein += newProteinPerServing;
+      totalCarbs += newCarbsPerServing;
+      totalFat += newFatPerServing;
+      totalFiber += newFiberPerServing;
+
+      console.log('📊 NUTRITION UPDATE:', {
+        oldCalories: oldNutritionData?.calories || 0,
+        newCalories: newNutritionData.calories || 0,
+        totalCaloriesBefore: (meal.totalCalories || 0),
+        totalCaloriesAfter: totalCalories,
+        netChange: (newNutritionData.calories || 0) - (oldNutritionData?.calories || 0)
+      });
+
+      // Update meal nutrition data
+      const servings = meal.servingsPerMeal || 1;
+      meal.totalCalories = totalCalories;
+      meal.totalProtein = totalProtein;
+      meal.totalCarbs = totalCarbs;
+      meal.totalFat = totalFat;
+      meal.totalFiber = totalFiber;
+      
+      // Preserve the servingsPerMeal field
+      meal.servingsPerMeal = servings;
+      
+      // Update per-serving values
+      meal.caloriesPerServing = Math.round(totalCalories / servings * 100) / 100;
+      meal.proteinGrams = Math.round(totalProtein / servings * 100) / 100;
+      meal.carbsGrams = Math.round(totalCarbs / servings * 100) / 100;
+      meal.fatGrams = Math.round(totalFat / servings * 100) / 100;
+      meal.fiberGrams = Math.round(totalFiber / servings * 100) / 100;
+
+      console.log('📊 RECALCULATED NUTRITION:', {
+        totalCalories,
+        totalProtein,
+        totalCarbs,
+        totalFat,
+        totalFiber,
+        caloriesPerServing: meal.caloriesPerServing,
+        proteinPerServing: meal.proteinGrams,
+        carbsPerServing: meal.carbsGrams,
+        fatPerServing: meal.fatGrams,
+        fiberPerServing: meal.fiberGrams
+      });
+
+      // Update the rawMeals array with the modified meal
+      rawMeals[mealIndex] = meal;
+
+      // Recalculate daily nutrition
+      const dailyNutrition = this.calculateDailyNutrition(rawMeals);
+
+      // Update the meal plan in database
+      const { error: updateError } = await supabase
+        .from('meal_plans')
+        .update({
+          generated_meals: rawMeals,
+          nutrition_summary: dailyNutrition
+        })
+        .eq('id', previewId);
+
+      if (updateError) {
+        console.log('❌ ERROR updating preview meal plan:', updateError);
+        return { success: false, error: 'Failed to update preview meal plan' };
+      }
+
+      console.log('✅ EDIT PREVIEW MEAL INGREDIENT - SUCCESS');
+      return { 
+        success: true, 
+        data: {
+          dailyNutrition: dailyNutrition,
+          updatedMeal: {
+            dayNumber,
+            mealOrder,
+            ingredientIndex,
+            newIngredient: newIngredientText,
+            updatedNutrition: {
+              caloriesPerServing: meal.caloriesPerServing,
+              proteinPerServing: meal.proteinGrams,
+              carbsPerServing: meal.carbsGrams,
+              fatPerServing: meal.fatGrams,
+              fiberPerServing: meal.fiberGrams,
+              totalCalories: meal.totalCalories,
+              totalProtein: meal.totalProtein,
+              totalCarbs: meal.totalCarbs,
+              totalFat: meal.totalFat,
+              totalFiber: meal.totalFiber
+            }
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ ERROR in editPreviewMealIngredientMultiDay:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Delete an ingredient from a preview meal plan
+   */
+  async deletePreviewMealIngredientMultiDay(
+    previewId: string,
+    dayNumber: number,
+    mealOrder: number,
+    ingredientIndex: number
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🗑️ DELETE PREVIEW MEAL INGREDIENT - START');
+      console.log('previewId:', previewId);
+      console.log('dayNumber:', dayNumber);
+      console.log('mealOrder:', mealOrder);
+      console.log('ingredientIndex:', ingredientIndex);
+
+      // Get the raw preview data from database
+      const { data: previewPlan, error: planError } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('id', previewId)
+        .single();
+
+      if (planError || !previewPlan) {
+        return { success: false, error: 'Preview not found' };
+      }
+
+      // Get the raw meals data
+      const rawMeals = previewPlan.generated_meals as any[];
+      if (!Array.isArray(rawMeals)) {
+        return { success: false, error: 'Invalid meal data structure' };
+      }
+
+      // Find the specific meal in the raw data
+      // For preview meals, we need to look at the meal structure differently
+      console.log('🔍 Looking for meal with mealOrder:', mealOrder);
+      console.log('🔍 Available meals:', rawMeals.map(m => ({ 
+        mealOrder: m.mealOrder, 
+        mealType: m.mealType,
+        mealKey: m.mealKey,
+        keys: Object.keys(m)
+      })));
+      
+      // The preview data structure uses mealKey instead of mealOrder
+      const meal = rawMeals.find(
+        (m: any) => m.mealKey === `meal_${mealOrder}` || m.mealOrder === mealOrder
+      );
+
+      if (!meal) {
+        return { success: false, error: 'Meal not found in preview' };
+      }
+
+      // Check if ingredients exist
+      if (!meal.ingredients || ingredientIndex >= meal.ingredients.length) {
+        return { success: false, error: 'Invalid ingredient index' };
+      }
+
+      const deletedIngredient = meal.ingredients[ingredientIndex];
+      console.log('🗑️ DELETING INGREDIENT:', deletedIngredient);
+
+      // Get nutrition data for the ingredient to be deleted
+      const deletedIngredientText = typeof deletedIngredient === 'string' ? deletedIngredient : deletedIngredient.text;
+      const deletedNutritionData = await this.edamamService.getIngredientNutrition(deletedIngredientText);
+      console.log('🗑️ DELETED INGREDIENT NUTRITION:', deletedNutritionData);
+
+      // Remove the ingredient
+      meal.ingredients.splice(ingredientIndex, 1);
+
+      // Get current total nutrition from the meal
+      let totalCalories = meal.totalCalories || 0;
+      let totalWeight = meal.recipe?.totalWeight || 0;
+      const totalNutrients = { ...(meal.recipe?.totalNutrients || {}) };
+
+      // Subtract deleted ingredient nutrition
+      if (deletedNutritionData) {
+        totalCalories -= deletedNutritionData.calories || 0;
+        totalWeight -= deletedNutritionData.weight || 0;
+        
+        Object.entries(deletedNutritionData.totalNutrients || {}).forEach(([key, value]: [string, any]) => {
+          if (totalNutrients[key]) {
+            totalNutrients[key].quantity -= value.quantity || 0;
+          }
+        });
+      }
+
+      console.log('📊 NUTRITION UPDATE:', {
+        deletedCalories: deletedNutritionData?.calories || 0,
+        totalCaloriesBefore: (meal.recipe.calories || 0),
+        totalCaloriesAfter: totalCalories,
+        netChange: -(deletedNutritionData?.calories || 0)
+      });
+
+      // Update meal nutrition data
+      const servings = meal.recipe?.yield || 1;
+      meal.totalCalories = totalCalories;
+      meal.totalProtein = totalNutrients.PROCNT?.quantity || 0;
+      meal.totalCarbs = totalNutrients.CHOCDF?.quantity || 0;
+      meal.totalFat = totalNutrients.FAT?.quantity || 0;
+      meal.totalFiber = totalNutrients.FIBTG?.quantity || 0;
+      
+      // Update recipe nutrition data if it exists
+      if (meal.recipe) {
+        meal.recipe.calories = totalCalories;
+        meal.recipe.totalWeight = totalWeight;
+        meal.recipe.totalNutrients = totalNutrients;
+        
+        // Update nutrition summary
+        meal.recipe.nutritionSummary = {
+          calories: Math.round(totalCalories / servings),
+          protein: Math.round((totalNutrients.PROCNT?.quantity || 0) / servings),
+          carbs: Math.round((totalNutrients.CHOCDF?.quantity || 0) / servings),
+          fat: Math.round((totalNutrients.FAT?.quantity || 0) / servings),
+          fiber: Math.round((totalNutrients.FIBTG?.quantity || 0) / servings),
+          sodium: Math.round((totalNutrients.NA?.quantity || 0) / servings),
+          sugar: Math.round((totalNutrients.SUGAR?.quantity || 0) / servings),
+          servings: servings
+        };
+      }
+
+      console.log('📊 RECALCULATED NUTRITION:', {
+        totalCalories,
+        caloriesPerServing: meal.recipe?.nutritionSummary?.calories || 0,
+        proteinPerServing: meal.recipe?.nutritionSummary?.protein || 0,
+        carbsPerServing: meal.recipe?.nutritionSummary?.carbs || 0,
+        fatPerServing: meal.recipe?.nutritionSummary?.fat || 0,
+        fiberPerServing: meal.recipe?.nutritionSummary?.fiber || 0
+      });
+
+      // Recalculate daily nutrition
+      const dailyNutrition = this.calculateDailyNutrition(rawMeals);
+      previewPlan.nutrition_summary = dailyNutrition;
+
+      // Update the meal plan in database
+      const { error: updateError } = await supabase
+        .from('meal_plans')
+        .update({
+          generated_meals: rawMeals,
+          nutrition_summary: dailyNutrition
+        })
+        .eq('id', previewId);
+
+      if (updateError) {
+        console.log('❌ ERROR updating preview meal plan:', updateError);
+        return { success: false, error: 'Failed to update preview meal plan' };
+      }
+
+      console.log('✅ DELETE PREVIEW MEAL INGREDIENT - SUCCESS');
+      return { 
+        success: true, 
+        data: {
+          mealPlan: previewPlan,
+          dailyNutrition: dailyNutrition,
+          deletedMeal: {
+            dayNumber,
+            mealOrder,
+            ingredientIndex,
+            deletedIngredient: deletedIngredient,
+            updatedNutrition: {
+              caloriesPerServing: meal.recipe.nutritionSummary.calories,
+              proteinPerServing: meal.recipe.nutritionSummary.protein,
+              carbsPerServing: meal.recipe.nutritionSummary.carbs,
+              fatPerServing: meal.recipe.nutritionSummary.fat,
+              fiberPerServing: meal.recipe.nutritionSummary.fiber
+            }
+          }
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ ERROR in deletePreviewMealIngredientMultiDay:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }

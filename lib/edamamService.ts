@@ -210,8 +210,8 @@ export class EdamamService {
     const searchParams = new URLSearchParams();
     
     // Add authentication using working credentials
-    const workingAppId = 'd58a8212';
-    const workingAppKey = 'acb8a2aefec9a5cafc2ccb65d7ccf401';
+    const workingAppId = '48653092';
+    const workingAppKey = '31cfd195356381d874f504e5f3f868c9';
     searchParams.append('app_id', workingAppId);
     searchParams.append('app_key', workingAppKey);
     searchParams.append('type', 'public');
@@ -401,6 +401,32 @@ export class EdamamService {
         
       } catch (error) {
         console.error(`❌ EDAMAM SERVICE - Error generating day ${day}:`, error);
+        
+        // If it's a rate limiting error (429), wait longer and retry
+        if (error instanceof Error && error.message.includes('429')) {
+          console.log(`🔄 EDAMAM SERVICE - Rate limit hit for day ${day}, waiting 5 seconds before retry...`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+          
+          try {
+            console.log(`🔄 EDAMAM SERVICE - Retrying day ${day} after rate limit...`);
+            const retryDayPlan = await this.generateMealPlanV1(dayRequest, userId);
+            dayPlans.push(retryDayPlan);
+            
+            // Extract recipe URIs from this day's plan to exclude them from subsequent days
+            const dayRecipeUris = this.extractRecipeUrisFromResponse(retryDayPlan);
+            console.log(`🍽️ EDAMAM SERVICE - Day ${day} retry generated ${dayRecipeUris.length} recipes:`, dayRecipeUris);
+            
+            // Add these recipes to the exclusion list for next day
+            allExcludedRecipes.push(...dayRecipeUris);
+            
+            console.log(`✅ EDAMAM SERVICE - Day ${day} retry completed. Total excluded recipes: ${allExcludedRecipes.length}`);
+            continue; // Skip to next day
+          } catch (retryError) {
+            console.error(`❌ EDAMAM SERVICE - Retry failed for day ${day}:`, retryError);
+            throw new Error(`Failed to generate meal plan for day ${day} even after retry: ${retryError instanceof Error ? retryError.message : 'Unknown error'}`);
+          }
+        }
+        
         throw new Error(`Failed to generate meal plan for day ${day}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
@@ -452,8 +478,8 @@ export class EdamamService {
     
     try {
       // Use correct hardcoded Meal Planner credentials
-      const mealPlannerAppId = 'd58a8212';
-      const mealPlannerAppKey = 'acb8a2aefec9a5cafc2ccb65d7ccf401';
+      const mealPlannerAppId = 'd6c2e8a0';
+      const mealPlannerAppKey = 'df2c1d3db4c11fc5bd5a01a94257c2e4';
       const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
@@ -924,6 +950,10 @@ export class EdamamService {
       /^(\d+(?:\.\d+)?)\s*(oz|ounce|ounces)\s+(.+)$/i,
       // "1 lb beef" -> quantity: 1, measure: "lb", food: "beef"
       /^(\d+(?:\.\d+)?)\s*(lb|pound|pounds)\s+(.+)$/i,
+      // "6 fillet Salmon" -> quantity: 6, measure: "fillet", food: "Salmon"
+      /^(\d+(?:\.\d+)?)\s+(fillet|fillets)\s+(.+)$/i,
+      // "4 slice bacon" -> quantity: 4, measure: "slice", food: "bacon"
+      /^(\d+(?:\.\d+)?)\s+(slice|slices)\s+(.+)$/i,
       // "1/2 cup milk" -> quantity: 0.5, measure: "cup", food: "milk"
       /^(\d+\/\d+)\s+(cup|cups)\s+(.+)$/i,
       // "1/4 tsp vanilla" -> quantity: 0.25, measure: "tsp", food: "vanilla"
@@ -933,7 +963,9 @@ export class EdamamService {
       // "3 tbsp olive oil" -> quantity: 3, measure: "tbsp", food: "olive oil"
       /^(\d+)\s+(tbsp|tablespoon|tablespoons)\s+(.+)$/i,
       // "2 tsp salt" -> quantity: 2, measure: "tsp", food: "salt"
-      /^(\d+)\s+(tsp|teaspoon|teaspoons)\s+(.+)$/i
+      /^(\d+)\s+(tsp|teaspoon|teaspoons)\s+(.+)$/i,
+      // "6 fillet Salmon" -> quantity: 6, measure: "fillet", food: "Salmon" (fallback)
+      /^(\d+)\s+(fillet|fillets)\s+(.+)$/i
     ];
     
     for (let i = 0; i < patterns.length; i++) {
@@ -1021,13 +1053,17 @@ export class EdamamService {
       });
 
       const fullUrl = `${url}?${params.toString()}`;
+      const credentials = `${params.get('app_id')}:${params.get('app_key')}`;
+      const base64Credentials = Buffer.from(credentials).toString('base64');
+      
       console.log('🚨🚨🚨 HARDCODED CURL COMMAND 🚨🚨🚨');
-      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
+      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json' -H 'Authorization: Basic ${base64Credentials}'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers: {
-          'accept': 'application/json'
+          'accept': 'application/json',
+          'Authorization': `Basic ${base64Credentials}`
         }
       });
 
