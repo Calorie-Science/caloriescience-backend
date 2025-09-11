@@ -436,20 +436,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               });
             }
             
-            // Return multi-day meal plan response
-            if (action === 'preview') {
-              return res.status(200).json({
-                success: true,
-                message: `${days}-day meal plan preview generated successfully`,
-                data: generatedMealPlan.data
-              });
-            } else {
-              return res.status(201).json({
-                success: true,
-                message: `${days}-day meal plan saved successfully`,
-                data: generatedMealPlan.data
-              });
-            }
+            // Always save multi-day meal plans as drafts
+            return res.status(200).json({
+              success: true,
+              message: `${days}-day meal plan generated successfully`,
+              data: generatedMealPlan.data
+            });
           }
 
           // Single-day meal plan logic (existing)
@@ -491,37 +483,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               });
             }
             
-            // Return the program-based meal plan
-            if (action === 'preview') {
-              console.log('🎯 API - Returning preview response with data:', JSON.stringify(generatedMealPlan.data, null, 2));
-              console.log('🎯 API - PreviewId in mealPlan:', generatedMealPlan.data?.mealPlan?.previewId);
-              return res.status(200).json({
-                success: true,
-                message: 'Meal plan preview generated successfully',
-                data: {
-                  mealPlan: generatedMealPlan.data.mealPlan,
-                  clientGoals: generatedMealPlan.data.clientGoals,
-                  mealProgram: generatedMealPlan.data.mealProgram,
-                  planDate: generatedMealPlan.data.planDate,
-                  dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
-                  cuisinePreferences: generatedMealPlan.data.cuisinePreferences
-                }
-              });
-            } else {
-              // For save action, you might want to store this differently
-              return res.status(200).json({
-                success: true,
-                message: 'Meal plan saved successfully',
-                data: {
-                  mealPlan: generatedMealPlan.data.mealPlan,
-                  clientGoals: generatedMealPlan.data.clientGoals,
-                  mealProgram: generatedMealPlan.data.mealProgram,
-                  planDate: generatedMealPlan.data.planDate,
-                  dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
-                  cuisinePreferences: generatedMealPlan.data.cuisinePreferences
-                }
-              });
-            }
+            // Always save program-based meal plans as drafts
+            console.log('🎯 API - Returning program-based meal plan response with data:', JSON.stringify(generatedMealPlan.data, null, 2));
+            console.log('🎯 API - PreviewId in mealPlan:', generatedMealPlan.data?.mealPlan?.previewId);
+            return res.status(200).json({
+              success: true,
+              message: 'Meal plan generated successfully',
+              data: {
+                mealPlan: generatedMealPlan.data.mealPlan,
+                clientGoals: generatedMealPlan.data.clientGoals,
+                mealProgram: generatedMealPlan.data.mealProgram,
+                planDate: generatedMealPlan.data.planDate,
+                dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
+                cuisinePreferences: generatedMealPlan.data.cuisinePreferences
+              }
+            });
           } else {
             console.log('🎯 API - No meal program found, using standard meal planning with possible overrides');
             
@@ -551,7 +527,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             // Generate meal plan using standard method
             const mealPlanRequest: MealPlanGenerationRequest = {
               clientId,
-              planDate,
+              planDate: effectiveStartDate,
               planType,
               dietaryRestrictions,
               cuisinePreferences,
@@ -569,35 +545,40 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             console.log('🔍 API Debug - Using Edamam User ID:', edamamUserId);
             console.log('🚨 TEST DEBUG - This should appear in logs!');
             
-            generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, edamamUserId);
+            generatedMealPlan = await mealPlanningService.generateMealPlan(mealPlanRequest, user.id);
           }
 
-          // Handle based on action
-          if (action === 'preview') {
-            // Return preview without saving
-            return res.status(200).json({
-              success: true,
-              message: 'Meal plan preview generated successfully',
-              data: {
-                mealPlan: {
-                  ...generatedMealPlan,
-                  id: 'preview-' + Date.now(), // Temporary ID for preview
-                  status: 'preview'
-                }
-              }
-            });
-          } else {
-            // Save to database
+          // Always save meal plans as drafts (remove temporary preview functionality)
+          try {
             const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
 
             // Return the generated meal plan with the new ID
             const savedMealPlan = await mealPlanningService.getMealPlan(planId);
 
-            return res.status(201).json({
+            return res.status(200).json({
               success: true,
-              message: 'Meal plan generated and saved successfully',
+              message: 'Meal plan generated successfully',
               data: {
                 mealPlan: savedMealPlan
+              }
+            });
+          } catch (saveError) {
+            console.error('❌ Error saving meal plan:', saveError);
+            const errorLine = saveError instanceof Error ? saveError.stack?.split('\n')[1] : 'Unknown line';
+            return res.status(400).json({
+              success: false,
+              error: 'Failed to save meal plan',
+              message: saveError instanceof Error ? saveError.message : 'Unknown error occurred while saving meal plan',
+              details: {
+                error: saveError,
+                stack: saveError instanceof Error ? saveError.stack : undefined,
+                errorLine: errorLine,
+                generatedMealPlan: {
+                  clientId: generatedMealPlan?.clientId,
+                  nutritionistId: generatedMealPlan?.nutritionistId,
+                  planName: generatedMealPlan?.planName,
+                  mealsCount: generatedMealPlan?.meals?.length || 0
+                }
               }
             });
           }
@@ -770,25 +751,56 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             data: result.data
           });
         } else {
-          // Save to database
-          const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
+          // Always save meal plans as drafts (remove temporary preview functionality)
+          try {
+            const planId = await mealPlanningService.saveMealPlan(generatedMealPlan);
 
-          // Return the generated meal plan with the new ID
-          const savedMealPlan = await mealPlanningService.getMealPlan(planId);
+            // Return the generated meal plan with the new ID
+            const savedMealPlan = await mealPlanningService.getMealPlan(planId);
 
-          return res.status(201).json({
-            message: 'Meal plan generated and saved successfully',
-            action: 'save',
-            mealPlan: savedMealPlan
-          });
+            return res.status(200).json({
+              success: true,
+              message: 'Meal plan generated successfully',
+              data: {
+                mealPlan: savedMealPlan
+              }
+            });
+          } catch (saveError) {
+            console.error('❌ Error saving meal plan:', saveError);
+            const errorLine = saveError instanceof Error ? saveError.stack?.split('\n')[1] : 'Unknown line';
+            return res.status(400).json({
+              success: false,
+              error: 'Failed to save meal plan',
+              message: saveError instanceof Error ? saveError.message : 'Unknown error occurred while saving meal plan',
+              details: {
+                error: saveError,
+                stack: saveError instanceof Error ? saveError.stack : undefined,
+                errorLine: errorLine,
+                generatedMealPlan: {
+                  clientId: generatedMealPlan?.clientId,
+                  nutritionistId: generatedMealPlan?.nutritionistId,
+                  planName: generatedMealPlan?.planName,
+                  mealsCount: generatedMealPlan?.meals?.length || 0
+                }
+              }
+            });
+          }
         }
       }
 
     } catch (error) {
-      console.error('Error in POST request:', error);
+      console.error('❌ Error in POST request:', error);
+      const errorDetails = {
+        message: error instanceof Error ? error.message : 'Failed to process request',
+        stack: error instanceof Error ? error.stack : undefined,
+        line: error instanceof Error ? error.stack?.split('\n')[1] : undefined,
+        fullError: error
+      };
       return res.status(500).json({
+        success: false,
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Failed to process request'
+        message: errorDetails.message,
+        details: errorDetails
       });
     }
   }
@@ -863,6 +875,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Get specific meal plan with different view options
         const mealPlanIdParam = Array.isArray(mealPlanId) ? mealPlanId[0] : mealPlanId;
         const dayParam = Array.isArray(day) ? day[0] : day;
+        
+        // Check if this is a preview meal plan (starts with "preview-")
+        if (mealPlanIdParam.startsWith('preview-')) {
+          console.log(`🔍 PREVIEW MEAL PLAN REQUEST: ${mealPlanIdParam}`);
+          
+          // For preview meal plans, we need to regenerate them since they're not stored in DB
+          // This is a limitation - preview meal plans are not persisted
+          return res.status(400).json({
+            error: 'Preview meal plans not supported for consolidated view',
+            message: 'Preview meal plans are temporary and not stored in the database. Please save the meal plan first to retrieve consolidated view, or regenerate the preview with the same parameters.'
+          });
+        }
+        
         const result = await mealPlanningService.getMealPlanWithView(mealPlanIdParam, view as string, dayParam ? parseInt(dayParam) : undefined);
 
         if (!result.success) {

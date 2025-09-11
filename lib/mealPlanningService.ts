@@ -72,7 +72,7 @@ export interface GeneratedMeal {
   totalCarbs: number;
   totalFat: number;
   totalFiber: number;
-  ingredients: string[];
+  ingredients: any[]; // Can be string[] or detailed ingredient objects
   edamamRecipeId: string;
 }
 
@@ -243,16 +243,16 @@ export class MealPlanningService {
       const mealPlan: GeneratedMealPlan = {
         id: '', // Will be set when saved to database
         clientId: request.clientId,
-        nutritionistId: nutritionRequirements.nutritionist_id || '',
+        nutritionistId: userId || nutritionRequirements.nutritionist_id || '',
         planName: `${request.planType || 'Daily'} Meal Plan`,
         planDate: request.planDate,
         planType: request.planType || 'daily',
         status: 'draft',
         targetCalories: request.targetCalories || nutritionRequirements.eer_calories,
-        targetProtein: nutritionRequirements.protein_grams,
-        targetCarbs: nutritionRequirements.carbs_grams,
-        targetFat: nutritionRequirements.fat_grams,
-        targetFiber: nutritionRequirements.fiber_grams || 0,
+        targetProtein: nutritionRequirements.protein_grams || nutritionRequirements.protein_min_grams || 0,
+        targetCarbs: nutritionRequirements.carbs_grams || nutritionRequirements.carbs_min_grams || 0,
+        targetFat: nutritionRequirements.fat_grams || nutritionRequirements.fat_min_grams || 0,
+        targetFiber: nutritionRequirements.fiber_grams || nutritionRequirements.fiber_min_grams || 0,
         dietaryRestrictions: finalPreferences.dietaryRestrictions,
         cuisinePreferences: finalPreferences.cuisinePreferences,
         meals: generatedMeals,
@@ -290,6 +290,7 @@ export class MealPlanningService {
         clients!inner(nutritionist_id)
       `)
       .eq('client_id', clientId)
+      .eq('is_active', true)
       .single();
 
     if (error) {
@@ -890,11 +891,24 @@ export class MealPlanningService {
         if (meal.edamamRecipeId) {
           console.log(`🍽️ Meal Planning Debug - Fetching details for ${meal.mealType} meal:`, meal.edamamRecipeId);
           
-          const recipeDetails = await this.edamamService.getRecipeDetails(meal.edamamRecipeId, 'nutritionist1');
-          console.log(`🍽️ Meal Planning Debug - Raw recipe details for ${meal.mealType}:`, JSON.stringify(recipeDetails, null, 2));
+          // Extract recipe ID from URI
+          const recipeId = meal.edamamRecipeId.split('#recipe_')[1];
+          if (!recipeId) {
+            console.log(`⚠️ Meal Planning Debug - Invalid recipe URI format: ${meal.edamamRecipeId}`);
+            enrichedMeals.push(meal);
+            continue;
+          }
           
-          if (recipeDetails && recipeDetails.recipe) {
-            const recipe = recipeDetails.recipe;
+          // Use the working searchRecipes approach instead of getRecipeDetails
+          const searchParams = {
+            query: recipeId // Search by recipe ID
+          };
+          
+          console.log(`🍽️ Meal Planning Debug - Searching for recipe with ID: ${recipeId}`);
+          const response = await this.edamamService.searchRecipes(searchParams, 'nutritionist1');
+          
+          if (response && response.hits && response.hits.length > 0) {
+            const recipe = response.hits[0].recipe;
             console.log(`🍽️ Meal Planning Debug - Recipe object for ${meal.mealType}:`, JSON.stringify(recipe, null, 2));
             
             // Update meal with actual recipe details
@@ -909,7 +923,19 @@ export class MealPlanningService {
             meal.carbsGrams = Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / recipeYield * 100) / 100;
             meal.fatGrams = Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / recipeYield * 100) / 100;
             meal.fiberGrams = Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / recipeYield * 100) / 100;
-            meal.ingredients = recipe.ingredientLines || [];
+            // Use detailed ingredients with quantity, measure, etc.
+            meal.ingredients = recipe.ingredients?.map((ing: any) => ({
+              text: ing.text,
+              quantity: ing.quantity,
+              measure: ing.measure,
+              food: ing.food,
+              weight: ing.weight,
+              calories: ing.nutrients?.ENERC_KCAL?.quantity,
+              protein: ing.nutrients?.PROCNT?.quantity,
+              carbs: ing.nutrients?.CHOCDF?.quantity,
+              fat: ing.nutrients?.FAT?.quantity,
+              fiber: ing.nutrients?.FIBTG?.quantity
+            })) || recipe.ingredientLines || [];
             
             // Update totals to match per-serving values
             meal.totalCalories = meal.caloriesPerServing;
@@ -920,7 +946,7 @@ export class MealPlanningService {
             
             console.log(`✅ Meal Planning Debug - ${meal.mealType} meal enriched:`, JSON.stringify(meal, null, 2));
           } else {
-            console.log(`⚠️ Meal Planning Debug - No recipe data found for ${meal.mealType} meal. Recipe details:`, recipeDetails);
+            console.log(`⚠️ Meal Planning Debug - No recipe found for ${meal.mealType} meal with ID: ${recipeId}`);
           }
         } else {
           console.log(`⚠️ Meal Planning Debug - No edamamRecipeId for ${meal.mealType} meal`);
@@ -1284,7 +1310,8 @@ export class MealPlanningService {
       return planId;
     } catch (error) {
       console.error('Error saving meal plan:', error);
-      throw new Error(`Failed to save meal plan: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error details:', JSON.stringify(error, null, 2));
+      throw new Error(`Failed to save meal plan: ${error instanceof Error ? error.message : 'Unknown error'} - Original error: ${JSON.stringify(error)}`);
     }
   }
 
@@ -1327,7 +1354,18 @@ export class MealPlanningService {
             totalCarbs: (meal.nutrition?.carbs || 0) * (meal.servings || 1),
             totalFat: (meal.nutrition?.fat || 0) * (meal.servings || 1),
             totalFiber: (meal.nutrition?.fiber || 0) * (meal.servings || 1),
-            ingredients: meal.ingredients?.map((ing: any) => ing.text) || [],
+            ingredients: meal.ingredients?.map((ing: any) => ({
+              text: ing.text,
+              quantity: ing.quantity,
+              measure: ing.measure,
+              food: ing.food,
+              weight: ing.weight,
+              calories: ing.nutrients?.ENERC_KCAL?.quantity,
+              protein: ing.nutrients?.PROCNT?.quantity,
+              carbs: ing.nutrients?.CHOCDF?.quantity,
+              fat: ing.nutrients?.FAT?.quantity,
+              fiber: ing.nutrients?.FIBTG?.quantity
+            })) || [],
             edamamRecipeId: ''
           }));
         } 
@@ -1364,7 +1402,18 @@ export class MealPlanningService {
               totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
               totalFat: meal.recipe?.nutritionSummary?.fat || 0,
               totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
-              ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
+              ingredients: meal.recipe?.ingredients?.map((ing: any) => ({
+                text: ing.text,
+                quantity: ing.quantity,
+                measure: ing.measure,
+                food: ing.food,
+                weight: ing.weight,
+                calories: ing.nutrients?.ENERC_KCAL?.quantity,
+                protein: ing.nutrients?.PROCNT?.quantity,
+                carbs: ing.nutrients?.CHOCDF?.quantity,
+                fat: ing.nutrients?.FAT?.quantity,
+                fiber: ing.nutrients?.FIBTG?.quantity
+              })) || meal.recipe?.ingredientLines || [],
               edamamRecipeId: meal.recipe?.uri || ''
             }));
           }
@@ -1481,7 +1530,18 @@ export class MealPlanningService {
               totalCarbs: (meal.nutrition?.carbs || 0) * (meal.servings || 1),
               totalFat: (meal.nutrition?.fat || 0) * (meal.servings || 1),
               totalFiber: (meal.nutrition?.fiber || 0) * (meal.servings || 1),
-              ingredients: meal.ingredients?.map((ing: any) => ing.text) || [],
+              ingredients: meal.ingredients?.map((ing: any) => ({
+              text: ing.text,
+              quantity: ing.quantity,
+              measure: ing.measure,
+              food: ing.food,
+              weight: ing.weight,
+              calories: ing.nutrients?.ENERC_KCAL?.quantity,
+              protein: ing.nutrients?.PROCNT?.quantity,
+              carbs: ing.nutrients?.CHOCDF?.quantity,
+              fat: ing.nutrients?.FAT?.quantity,
+              fiber: ing.nutrients?.FIBTG?.quantity
+            })) || [],
               edamamRecipeId: ''
             }));
           } 
@@ -1505,7 +1565,18 @@ export class MealPlanningService {
               totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
               totalFat: meal.recipe?.nutritionSummary?.fat || 0,
               totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
-              ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
+              ingredients: meal.recipe?.ingredients?.map((ing: any) => ({
+                text: ing.text,
+                quantity: ing.quantity,
+                measure: ing.measure,
+                food: ing.food,
+                weight: ing.weight,
+                calories: ing.nutrients?.ENERC_KCAL?.quantity,
+                protein: ing.nutrients?.PROCNT?.quantity,
+                carbs: ing.nutrients?.CHOCDF?.quantity,
+                fat: ing.nutrients?.FAT?.quantity,
+                fiber: ing.nutrients?.FIBTG?.quantity
+              })) || meal.recipe?.ingredientLines || [],
               edamamRecipeId: meal.recipe?.uri || ''
             }));
           }
@@ -2723,7 +2794,18 @@ export class MealPlanningService {
           totalCarbs: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
           totalFat: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
           totalFiber: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
-          ingredients: recipe?.ingredients?.map((ing: any) => ing.text) || recipe?.ingredientLines || [],
+          ingredients: recipe?.ingredients?.map((ing: any) => ({
+            text: ing.text,
+            quantity: ing.quantity,
+            measure: ing.measure,
+            food: ing.food,
+            weight: ing.weight,
+            calories: ing.nutrients?.ENERC_KCAL?.quantity,
+            protein: ing.nutrients?.PROCNT?.quantity,
+            carbs: ing.nutrients?.CHOCDF?.quantity,
+            fat: ing.nutrients?.FAT?.quantity,
+            fiber: ing.nutrients?.FIBTG?.quantity
+          })) || recipe?.ingredientLines || [],
           edamamRecipeId: recipe?.uri || ''
         };
       });
@@ -3057,7 +3139,18 @@ export class MealPlanningService {
         totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
         totalFat: meal.recipe?.nutritionSummary?.fat || 0,
         totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
-        ingredients: meal.recipe?.ingredients?.map((ing: any) => ing.text) || meal.recipe?.ingredientLines || [],
+        ingredients: meal.recipe?.ingredients?.map((ing: any) => ({
+          text: ing.text,
+          quantity: ing.quantity,
+          measure: ing.measure,
+          food: ing.food,
+          weight: ing.weight,
+          calories: ing.nutrients?.ENERC_KCAL?.quantity,
+          protein: ing.nutrients?.PROCNT?.quantity,
+          carbs: ing.nutrients?.CHOCDF?.quantity,
+          fat: ing.nutrients?.FAT?.quantity,
+          fiber: ing.nutrients?.FIBTG?.quantity
+        })) || meal.recipe?.ingredientLines || [],
         edamamRecipeId: meal.recipe?.uri || ''
       }));
 
@@ -5254,4 +5347,5 @@ export class MealPlanningService {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
+
 }
