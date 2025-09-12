@@ -72,6 +72,11 @@ export interface GeneratedMeal {
   totalCarbs: number;
   totalFat: number;
   totalFiber: number;
+  // Database fields (without "total" prefix) - optional since they might not always be present
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
   ingredients: any[]; // Can be string[] or detailed ingredient objects
   edamamRecipeId: string;
 }
@@ -2478,18 +2483,17 @@ export class MealPlanningService {
     };
 
     meals.forEach(meal => {
-      if (meal.recipe && meal.recipe.nutritionSummary) {
-        const nutrition = meal.recipe.nutritionSummary;
-        dailyNutrition.totalCalories += nutrition.calories || 0;
-        dailyNutrition.totalProtein += nutrition.protein || 0;
-        dailyNutrition.totalCarbs += nutrition.carbs || 0;
-        dailyNutrition.totalFat += nutrition.fat || 0;
-        dailyNutrition.totalFiber += nutrition.fiber || 0;
-        dailyNutrition.totalSodium += nutrition.sodium || 0;
-        dailyNutrition.totalSugar += nutrition.sugar || 0;
-      } else {
-        dailyNutrition.totalCalories += meal.targetCalories || 0;
-      }
+      // Use direct meal nutrition fields
+      dailyNutrition.totalCalories += meal.totalCalories || 0;
+      dailyNutrition.totalProtein += meal.protein || 0;
+      dailyNutrition.totalCarbs += meal.carbs || 0;
+      dailyNutrition.totalFat += meal.fat || 0;
+      dailyNutrition.totalFiber += meal.fiber || 0;
+      dailyNutrition.totalSodium += meal.sodium || 0;
+      dailyNutrition.totalSugar += meal.sugar || 0;
+      dailyNutrition.totalCholesterol += meal.cholesterol || 0;
+      dailyNutrition.totalCalcium += meal.calcium || 0;
+      dailyNutrition.totalIron += meal.iron || 0;
     });
 
     return {
@@ -4851,17 +4855,17 @@ export class MealPlanningService {
       console.log('🔄 OLD INGREDIENT:', oldIngredient);
 
       // Get nutrition data for the old ingredient to subtract
-      const oldIngredientText = oldIngredient; // ingredients are stored as strings in GeneratedMeal
-      const oldNutritionData = await this.edamamService.getIngredientNutrition(oldIngredientText);
-      console.log('🔄 OLD INGREDIENT NUTRITION:', oldNutritionData);
-
-      // Parse the new ingredient text
-      const parsedIngredient = await this.edamamService.parseIngredientText(newIngredientText);
-      if (!parsedIngredient) {
-        return {
-          success: false,
-          error: 'Failed to parse ingredient text'
-        };
+      // Handle both string and object formats for ingredients
+      const oldIngredientText = typeof oldIngredient === 'string' ? oldIngredient : oldIngredient.text;
+      console.log('🔄 OLD INGREDIENT TEXT:', oldIngredientText);
+      
+      let oldNutritionData: any = null;
+      if (oldIngredientText) {
+        console.log('🔍 CALLING EDAMAM FOR OLD INGREDIENT:', oldIngredientText);
+        oldNutritionData = await this.edamamService.getIngredientNutrition(oldIngredientText);
+        console.log('🔄 OLD INGREDIENT NUTRITION:', oldNutritionData);
+      } else {
+        console.log('⚠️ OLD INGREDIENT TEXT IS EMPTY - SKIPPING SUBTRACTION');
       }
 
       // Get nutrition data for the new ingredient to add
@@ -4874,70 +4878,149 @@ export class MealPlanningService {
       }
       console.log('🔄 NEW INGREDIENT NUTRITION:', newNutritionData);
 
-      // Update the ingredient
-      meal.ingredients[ingredientIndex] = newIngredientText;
+      // Update the ingredient object (structure without nutrition macros)
+      const newIngredientObject = {
+        text: newIngredientText,
+        quantity: newNutritionData.ingredients?.[0]?.parsed?.[0]?.quantity || 1,
+        measure: newNutritionData.ingredients?.[0]?.parsed?.[0]?.measure || 'serving',
+        food: newNutritionData.ingredients?.[0]?.parsed?.[0]?.food || newIngredientText,
+        weight: newNutritionData.ingredients?.[0]?.parsed?.[0]?.weight || 0
+        // No calories, protein, carbs, fat, fiber - these are calculated at meal level
+      };
       
-      console.log('🔄 UPDATED INGREDIENT:', newIngredientText);
+      meal.ingredients[ingredientIndex] = newIngredientObject;
+      
+      console.log('🔄 UPDATED INGREDIENT OBJECT:', newIngredientObject);
 
-      // Get current total nutrition from the meal (these are per-serving values)
+      // Get current total nutrition from the meal (these are total values, not per-serving)
       let totalCalories = meal.totalCalories || 0;
-      let totalProtein = meal.totalProtein || 0;
-      let totalCarbs = meal.totalCarbs || 0;
-      let totalFat = meal.totalFat || 0;
-      let totalFiber = meal.totalFiber || 0;
+      let totalProtein = meal.protein || 0;
+      let totalCarbs = meal.carbs || 0;
+      let totalFat = meal.fat || 0;
+      let totalFiber = meal.fiber || 0;
 
-      // Get the meal's serving size to properly calculate per-serving nutrition
-      const mealServings = meal.servingsPerMeal || 1;
-      console.log('🍽️ MEAL SERVINGS:', mealServings);
+      console.log('📊 CURRENT MEAL TOTALS:', {
+        totalCalories,
+        totalProtein,
+        totalCarbs,
+        totalFat,
+        totalFiber
+      });
 
-      // Subtract old ingredient nutrition (per-serving)
+      // Subtract old ingredient nutrition (total values from Edamam)
       if (oldNutritionData) {
-        const oldCaloriesPerServing = (oldNutritionData.calories || 0) / mealServings;
-        const oldProteinPerServing = (oldNutritionData.totalNutrients?.PROCNT?.quantity || 0) / mealServings;
-        const oldCarbsPerServing = (oldNutritionData.totalNutrients?.CHOCDF?.quantity || 0) / mealServings;
-        const oldFatPerServing = (oldNutritionData.totalNutrients?.FAT?.quantity || 0) / mealServings;
-        const oldFiberPerServing = (oldNutritionData.totalNutrients?.FIBTG?.quantity || 0) / mealServings;
+        const oldCalories = oldNutritionData.calories || oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0;
+        const oldProtein = oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0;
+        const oldCarbs = oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0;
+        const oldFat = oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0;
+        const oldFiber = oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0;
         
-        totalCalories -= oldCaloriesPerServing;
-        totalProtein -= oldProteinPerServing;
-        totalCarbs -= oldCarbsPerServing;
-        totalFat -= oldFatPerServing;
-        totalFiber -= oldFiberPerServing;
+        console.log('🔍 OLD INGREDIENT PARSED VALUES:', {
+          calories: oldCalories,
+          protein: oldProtein,
+          carbs: oldCarbs,
+          fat: oldFat,
+          fiber: oldFiber
+        });
+        
+        totalCalories -= oldCalories;
+        totalProtein -= oldProtein;
+        totalCarbs -= oldCarbs;
+        totalFat -= oldFat;
+        totalFiber -= oldFiber;
+
+        console.log('➖ SUBTRACTED OLD INGREDIENT:', {
+          calories: oldCalories,
+          protein: oldProtein,
+          carbs: oldCarbs,
+          fat: oldFat,
+          fiber: oldFiber
+        });
       }
 
-      // Add new ingredient nutrition (per-serving)
-      const newCaloriesPerServing = (newNutritionData.calories || 0) / mealServings;
-      const newProteinPerServing = (newNutritionData.totalNutrients?.PROCNT?.quantity || 0) / mealServings;
-      const newCarbsPerServing = (newNutritionData.totalNutrients?.CHOCDF?.quantity || 0) / mealServings;
-      const newFatPerServing = (newNutritionData.totalNutrients?.FAT?.quantity || 0) / mealServings;
-      const newFiberPerServing = (newNutritionData.totalNutrients?.FIBTG?.quantity || 0) / mealServings;
+      // Add new ingredient nutrition (total values from Edamam)
+      const newCalories = newNutritionData.calories || newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0;
+      const newProtein = newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0;
+      const newCarbs = newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0;
+      const newFat = newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0;
+      const newFiber = newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0;
       
-      totalCalories += newCaloriesPerServing;
-      totalProtein += newProteinPerServing;
-      totalCarbs += newCarbsPerServing;
-      totalFat += newFatPerServing;
-      totalFiber += newFiberPerServing;
+      console.log('🔍 NEW INGREDIENT PARSED VALUES:', {
+        calories: newCalories,
+        protein: newProtein,
+        carbs: newCarbs,
+        fat: newFat,
+        fiber: newFiber
+      });
+      
+      totalCalories += newCalories;
+      totalProtein += newProtein;
+      totalCarbs += newCarbs;
+      totalFat += newFat;
+      totalFiber += newFiber;
+
+      console.log('➕ ADDED NEW INGREDIENT:', {
+        calories: newCalories,
+        protein: newProtein,
+        carbs: newCarbs,
+        fat: newFat,
+        fiber: newFiber
+      });
 
       console.log('📊 NUTRITION UPDATE:', {
-        oldCalories: oldNutritionData?.calories || 0,
-        newCalories: newNutritionData.calories || 0,
+        oldCalories: oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+        newCalories: newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
         totalCaloriesBefore: (meal.totalCalories || 0),
         totalCaloriesAfter: totalCalories,
-        netChange: (newNutritionData.calories || 0) - (oldNutritionData?.calories || 0)
+        netChange: (newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0) - (oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0)
       });
 
       // Update meal nutrition data
       const servings = meal.servingsPerMeal || 1;
+      console.log('🔍 SERVINGS VALUE:', servings);
+      console.log('🔍 CALCULATED TOTALS:', {
+        totalCalories,
+        totalProtein,
+        totalCarbs,
+        totalFat,
+        totalFiber
+      });
+      
+      console.log('🔍 FINAL PROTEIN CALCULATION:', {
+        initialProtein: meal.protein || 0,
+        oldProteinSubtracted: oldNutritionData ? (oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0) : 0,
+        newProteinAdded: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+        finalProtein: totalProtein
+      });
+      
+      console.log('🔍 BEFORE UPDATING MEAL OBJECT:', {
+        'meal.protein': meal.protein,
+        'calculated totalProtein': totalProtein
+      });
+      
       meal.totalCalories = totalCalories;
+      meal.protein = totalProtein;
+      meal.carbs = totalCarbs;
+      meal.fat = totalFat;
+      meal.fiber = totalFiber;
+      
+      // Also update the total* fields for consistency
       meal.totalProtein = totalProtein;
       meal.totalCarbs = totalCarbs;
       meal.totalFat = totalFat;
       meal.totalFiber = totalFiber;
       
+      console.log('🔍 AFTER UPDATING MEAL OBJECT:', {
+        'meal.protein': meal.protein,
+        'meal.carbs': meal.carbs,
+        'meal.fat': meal.fat,
+        'meal.fiber': meal.fiber
+      });
+      
       // Preserve the servingsPerMeal field
       meal.servingsPerMeal = servings;
       
-      // Update per-serving values
+      // Update per-serving values (divide total by servings)
       meal.caloriesPerServing = Math.round(totalCalories / servings * 100) / 100;
       meal.proteinGrams = Math.round(totalProtein / servings * 100) / 100;
       meal.carbsGrams = Math.round(totalCarbs / servings * 100) / 100;
@@ -4959,6 +5042,8 @@ export class MealPlanningService {
 
       // Update the rawMeals array with the modified meal
       rawMeals[mealIndex] = meal;
+      
+      console.log('🔍 UPDATED MEAL OBJECT BEFORE SAVE:', JSON.stringify(meal, null, 2));
 
       // Recalculate daily nutrition
       const dailyNutrition = this.calculateDailyNutrition(rawMeals);

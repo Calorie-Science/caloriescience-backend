@@ -478,8 +478,8 @@ export class EdamamService {
     
     try {
       // Use correct hardcoded Meal Planner credentials
-      const mealPlannerAppId = 'd6c2e8a0';
-      const mealPlannerAppKey = 'df2c1d3db4c11fc5bd5a01a94257c2e4';
+      const mealPlannerAppId = 'c9a4d7f3';
+      const mealPlannerAppKey = 'ce278bfbacf459d128b523bb7cba18c8';
       const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
@@ -1037,7 +1037,7 @@ export class EdamamService {
   /**
    * Get detailed nutrition for an ingredient using Nutrition Data API
    */
-  async getIngredientNutrition(ingredientText: string, nutritionType: 'cooking' | 'logging' = 'cooking'): Promise<any> {
+  async getIngredientNutrition(ingredientText: string, nutritionType: 'cooking' | 'logging' = 'logging'): Promise<any> {
     try {
       console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - START 🚨🚨🚨');
       console.log('ingredientText:', ingredientText);
@@ -1046,8 +1046,8 @@ export class EdamamService {
       // Use hardcoded working credentials
       const url = `https://api.edamam.com/api/nutrition-data`;
       const params = new URLSearchParams({
-        app_id: '2b13b53d',
-        app_key: 'b18ab44bef20a89b52b568d6f09d618b',
+        app_id: '1fad7eb3',
+        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
         'nutrition-type': nutritionType,
         ingr: ingredientText
       });
@@ -1106,8 +1106,8 @@ export class EdamamService {
       // Use hardcoded working credentials for autocomplete
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
-        app_id: '0a4da290',
-        app_key: '1312f27625c249fca57f5bdc433c94a0',
+        app_id: '1fad7eb3',
+        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
         q: query.trim()
       });
 
@@ -1158,8 +1158,8 @@ export class EdamamService {
       // Use hardcoded working credentials for food database parser
       const url = 'https://api.edamam.com/api/food-database/v2/parser';
       const params = new URLSearchParams({
-        app_id: '0a4da290',
-        app_key: '1312f27625c249fca57f5bdc433c94a0',
+        app_id: '1fad7eb3',
+        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
         ingr: ingredient.trim(),
         'nutrition-type': nutritionType
       });
