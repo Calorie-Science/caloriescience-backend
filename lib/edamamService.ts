@@ -1046,8 +1046,8 @@ export class EdamamService {
       // Use hardcoded working credentials
       const url = `https://api.edamam.com/api/nutrition-data`;
       const params = new URLSearchParams({
-        app_id: 'c6c6712b',
-        app_key: '507eb6b619f8a3bd578503ade962561b',
+        app_id: '8ca90ac6',
+        app_key: '3ac3ac20e0911202d7ecbb1879b57318',
         'nutrition-type': nutritionType,
         ingr: ingredientText
       });
@@ -1106,8 +1106,8 @@ export class EdamamService {
       // Use hardcoded working credentials for autocomplete
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
-        app_id: 'c6c6712b',
-        app_key: '507eb6b619f8a3bd578503ade962561b',
+        app_id: '8ca90ac6',
+        app_key: '3ac3ac20e0911202d7ecbb1879b57318',
         q: query.trim()
       });
 
@@ -1158,8 +1158,8 @@ export class EdamamService {
       // Use hardcoded working credentials for food database parser
       const url = 'https://api.edamam.com/api/food-database/v2/parser';
       const params = new URLSearchParams({
-        app_id: 'c6c6712b',
-        app_key: '507eb6b619f8a3bd578503ade962561b',
+        app_id: '8ca90ac6',
+        app_key: '3ac3ac20e0911202d7ecbb1879b57318',
         ingr: ingredient.trim(),
         'nutrition-type': nutritionType
       });
