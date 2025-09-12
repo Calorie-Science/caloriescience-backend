@@ -478,8 +478,8 @@ export class EdamamService {
     
     try {
       // Use correct hardcoded Meal Planner credentials
-      const mealPlannerAppId = 'c9a4d7f3';
-      const mealPlannerAppKey = 'ce278bfbacf459d128b523bb7cba18c8';
+      const mealPlannerAppId = '69179ec3';
+      const mealPlannerAppKey = '6435ff4627ec4ebbf1e8aa5c0173f367';
       const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
@@ -1046,8 +1046,8 @@ export class EdamamService {
       // Use hardcoded working credentials
       const url = `https://api.edamam.com/api/nutrition-data`;
       const params = new URLSearchParams({
-        app_id: '1fad7eb3',
-        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
+        app_id: 'c6c6712b',
+        app_key: '507eb6b619f8a3bd578503ade962561b',
         'nutrition-type': nutritionType,
         ingr: ingredientText
       });
@@ -1106,8 +1106,8 @@ export class EdamamService {
       // Use hardcoded working credentials for autocomplete
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
-        app_id: '1fad7eb3',
-        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
+        app_id: 'c6c6712b',
+        app_key: '507eb6b619f8a3bd578503ade962561b',
         q: query.trim()
       });
 
@@ -1158,8 +1158,8 @@ export class EdamamService {
       // Use hardcoded working credentials for food database parser
       const url = 'https://api.edamam.com/api/food-database/v2/parser';
       const params = new URLSearchParams({
-        app_id: '1fad7eb3',
-        app_key: 'd5b37b58af6dd8c9f1c72e2652e310bb',
+        app_id: 'c6c6712b',
+        app_key: '507eb6b619f8a3bd578503ade962561b',
         ingr: ingredient.trim(),
         'nutrition-type': nutritionType
       });

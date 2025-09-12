@@ -4864,6 +4864,14 @@ export class MealPlanningService {
         console.log('🔍 CALLING EDAMAM FOR OLD INGREDIENT:', oldIngredientText);
         oldNutritionData = await this.edamamService.getIngredientNutrition(oldIngredientText);
         console.log('🔄 OLD INGREDIENT NUTRITION:', oldNutritionData);
+        console.log('🔍 OLD INGREDIENT HAS INGREDIENTS?:', !!oldNutritionData?.ingredients);
+        console.log('🔍 OLD INGREDIENT HAS PARSED?:', !!oldNutritionData?.ingredients?.[0]?.parsed);
+        console.log('🔍 OLD INGREDIENT PARSED LENGTH:', oldNutritionData?.ingredients?.[0]?.parsed?.length);
+        console.log('🔍 OLD INGREDIENT HAS NUTRIENTS?:', !!oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients);
+        if (oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients) {
+          console.log('🔍 OLD INGREDIENT PROTEIN VALUE:', oldNutritionData.ingredients[0].parsed[0].nutrients.PROCNT?.quantity);
+          console.log('🔍 OLD INGREDIENT FAT VALUE:', oldNutritionData.ingredients[0].parsed[0].nutrients.FAT?.quantity);
+        }
       } else {
         console.log('⚠️ OLD INGREDIENT TEXT IS EMPTY - SKIPPING SUBTRACTION');
       }
@@ -4894,10 +4902,10 @@ export class MealPlanningService {
 
       // Get current total nutrition from the meal (these are total values, not per-serving)
       let totalCalories = meal.totalCalories || 0;
-      let totalProtein = meal.protein || 0;
-      let totalCarbs = meal.carbs || 0;
-      let totalFat = meal.fat || 0;
-      let totalFiber = meal.fiber || 0;
+      let totalProtein = meal.protein || meal.totalProtein || 0;
+      let totalCarbs = meal.carbs || meal.totalCarbs || 0;
+      let totalFat = meal.fat || meal.totalFat || 0;
+      let totalFiber = meal.fiber || meal.totalFiber || 0;
 
       console.log('📊 CURRENT MEAL TOTALS:', {
         totalCalories,
@@ -4922,6 +4930,8 @@ export class MealPlanningService {
           fat: oldFat,
           fiber: oldFiber
         });
+        
+        console.log('🔍 OLD INGREDIENT RAW NUTRIENTS:', oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients);
         
         totalCalories -= oldCalories;
         totalProtein -= oldProtein;
@@ -4986,11 +4996,35 @@ export class MealPlanningService {
         totalFiber
       });
       
-      console.log('🔍 FINAL PROTEIN CALCULATION:', {
-        initialProtein: meal.protein || 0,
-        oldProteinSubtracted: oldNutritionData ? (oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0) : 0,
-        newProteinAdded: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
-        finalProtein: totalProtein
+      console.log('🔍 DETAILED CALCULATION BREAKDOWN:', {
+        step1_initial: {
+          calories: meal.totalCalories || 0,
+          protein: meal.protein || 0,
+          carbs: meal.carbs || 0,
+          fat: meal.fat || 0,
+          fiber: meal.fiber || 0
+        },
+        step2_oldSubtracted: oldNutritionData ? {
+          calories: oldNutritionData.calories || oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        } : 'NO_OLD_DATA',
+        step3_newAdded: {
+          calories: newNutritionData.calories || newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        },
+        step4_final: {
+          calories: totalCalories,
+          protein: totalProtein,
+          carbs: totalCarbs,
+          fat: totalFat,
+          fiber: totalFiber
+        }
       });
       
       console.log('🔍 BEFORE UPDATING MEAL OBJECT:', {
