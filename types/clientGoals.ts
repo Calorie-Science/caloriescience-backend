@@ -1,3 +1,75 @@
+// Valid allergies (safety-critical restrictions that must be avoided)
+export const VALID_ALLERGIES = [
+  'celery-free',
+  'crustacean-free',
+  'dairy-free',
+  'egg-free',
+  'fish-free',
+  'fodmap-free',
+  'gluten-free',
+  'lupine-free',
+  'mollusk-free',
+  'mustard-free',
+  'peanut-free',
+  'pork-free',
+  'sesame-free',
+  'shellfish-free',
+  'soy-free',
+  'sulfite-free',
+  'tree-nut-free',
+  'wheat-free'
+] as const;
+
+// Valid dietary preferences (lifestyle choices)
+export const VALID_PREFERENCES = [
+  'alcohol-cocktail',
+  'alcohol-free',
+  'DASH',
+  'immuno-supportive',
+  'keto-friendly',
+  'kidney-friendly',
+  'kosher',
+  'low-potassium',
+  'low-sugar',
+  'Mediterranean',
+  'No-oil-added',
+  'paleo',
+  'pecatarian',
+  'red-meat-free',
+  'sugar-conscious',
+  'vegan',
+  'vegetarian'
+] as const;
+
+// Valid cuisine types for meal planning
+export const VALID_CUISINE_TYPES = [
+  'american',
+  'asian',
+  'british',
+  'caribbean',
+  'central europe',
+  'chinese',
+  'eastern europe',
+  'french',
+  'greek',
+  'indian',
+  'italian',
+  'japanese',
+  'korean',
+  'kosher',
+  'mediterranean',
+  'mexican',
+  'middle eastern',
+  'nordic',
+  'south american',
+  'south east asian',
+  'world'
+] as const;
+
+export type Allergy = typeof VALID_ALLERGIES[number];
+export type Preference = typeof VALID_PREFERENCES[number];
+export type CuisineType = typeof VALID_CUISINE_TYPES[number];
+
 export interface ClientGoal {
   id: string;
   clientId: string;
@@ -17,6 +89,11 @@ export interface ClientGoal {
   // Additional Goals
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
+  
+  // Dietary Restrictions & Preferences (optional)
+  allergies?: Allergy[];
+  preferences?: Preference[];
+  cuisineTypes?: CuisineType[];
   
   // Goal Status
   isActive: boolean;
@@ -40,6 +117,9 @@ export interface CreateClientGoalRequest {
   fatGoalMax: number;
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
+  allergies?: Allergy[];
+  preferences?: Preference[];
+  cuisineTypes?: CuisineType[];
   goalStartDate?: string;
   goalEndDate?: string;
   notes?: string;
@@ -55,6 +135,9 @@ export interface UpdateClientGoalRequest {
   fatGoalMax?: number;
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
+  allergies?: Allergy[];
+  preferences?: Preference[];
+  cuisineTypes?: CuisineType[];
   goalStartDate?: string;
   goalEndDate?: string;
   notes?: string;
@@ -121,4 +204,20 @@ export const calculateMacroGramsFromCalories = (
     carbs: Math.round(carbsCalories / 4),     // 4 cal per gram
     fat: Math.round(fatCalories / 9)          // 9 cal per gram
   };
+};
+
+// Validation helpers for allergies, preferences, and cuisine types
+export const validateAllergies = (allergies: string[]): boolean => {
+  if (!Array.isArray(allergies)) return false;
+  return allergies.every(allergy => VALID_ALLERGIES.includes(allergy as Allergy));
+};
+
+export const validatePreferences = (preferences: string[]): boolean => {
+  if (!Array.isArray(preferences)) return false;
+  return preferences.every(preference => VALID_PREFERENCES.includes(preference as Preference));
+};
+
+export const validateCuisineTypes = (cuisineTypes: string[]): boolean => {
+  if (!Array.isArray(cuisineTypes)) return false;
+  return cuisineTypes.every(cuisine => VALID_CUISINE_TYPES.includes(cuisine as CuisineType));
 };

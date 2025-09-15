@@ -125,6 +125,51 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['clients']['Insert']>;
       };
+      client_goals: {
+        Row: {
+          id: string;
+          client_id: string;
+          nutritionist_id: string;
+          eer_goal_calories: number;
+          protein_goal_min: number;
+          protein_goal_max: number;
+          carbs_goal_min: number;
+          carbs_goal_max: number;
+          fat_goal_min: number;
+          fat_goal_max: number;
+          fiber_goal_grams?: number;
+          water_goal_liters?: number;
+          allergies?: string[];
+          preferences?: string[];
+          cuisine_types?: string[];
+          is_active: boolean;
+          goal_start_date: string;
+          goal_end_date?: string;
+          notes?: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          client_id: string;
+          nutritionist_id: string;
+          eer_goal_calories: number;
+          protein_goal_min: number;
+          protein_goal_max: number;
+          carbs_goal_min: number;
+          carbs_goal_max: number;
+          fat_goal_min: number;
+          fat_goal_max: number;
+          fiber_goal_grams?: number;
+          water_goal_liters?: number;
+          allergies?: string[];
+          preferences?: string[];
+          cuisine_types?: string[];
+          goal_start_date?: string;
+          goal_end_date?: string;
+          notes?: string;
+        };
+        Update: Partial<Database['public']['Tables']['client_goals']['Insert']>;
+      };
     };
   };
 } 

@@ -4,6 +4,7 @@ import { MealProgramMappingService } from './mealProgramMappingService';
 import { ClientGoalsService } from './clientGoalsService';
 import { objectToCamelCase } from './caseTransform';
 import { calculateEER, calculateMacros } from './calculations';
+import { mapCuisineTypesForEdamam, mergeAllergiesAndPreferencesForEdamam } from './clientGoalsMealPlanningIntegration';
 
 export interface MealPlanGenerationRequest {
   clientId: string;
@@ -146,9 +147,11 @@ export interface MealPlanPreferences {
 
 export class MealPlanningService {
   private edamamService: EdamamService;
+  private clientGoalsService: ClientGoalsService;
 
   constructor() {
     this.edamamService = new EdamamService();
+    this.clientGoalsService = new ClientGoalsService();
   }
 
   /**
@@ -182,10 +185,16 @@ export class MealPlanningService {
       const clientPreferences = await this.getClientPreferences(request.clientId);
       console.log('🚀 Meal Planning Service - Client preferences:', JSON.stringify(clientPreferences, null, 2));
       
-      // 3. Merge with request preferences
+      // 2.5. Get client goals for cuisine types, allergies, and preferences
+      console.log('🚀 Meal Planning Service - Getting client goals...');
+      const clientGoalsResult = await this.clientGoalsService.getActiveClientGoal(request.clientId, userId || '');
+      const clientGoals = clientGoalsResult.success ? clientGoalsResult.data : null;
+      console.log('🚀 Meal Planning Service - Client goals:', JSON.stringify(clientGoals, null, 2));
+      
+      // 3. Merge with request preferences and client goals
       console.log('🚀 Meal Planning Service - Merging preferences...');
       console.log('🚀 Meal Planning Service - Request dietary restrictions:', JSON.stringify(request.dietaryRestrictions, null, 2));
-      const finalPreferences = this.mergePreferences(clientPreferences, request);
+      const finalPreferences = this.mergePreferencesWithClientGoals(clientPreferences, request, clientGoals);
       console.log('🚀 Meal Planning Service - Final merged preferences:', JSON.stringify(finalPreferences, null, 2));
 
       // 4. Calculate meal distribution - focus only on calories
@@ -405,6 +414,50 @@ export class MealPlanningService {
       preferredCookingTime: clientPreferences.preferredCookingTime,
       imageSize: clientPreferences.imageSize
     };
+  }
+
+  /**
+   * Merge client preferences with request preferences and client goals
+   * Client goals take precedence for cuisine types, allergies, and preferences
+   */
+  private mergePreferencesWithClientGoals(
+    clientPreferences: MealPlanPreferences,
+    request: MealPlanGenerationRequest,
+    clientGoals: any
+  ): MealPlanPreferences {
+    // Start with base preferences
+    const basePreferences = this.mergePreferences(clientPreferences, request);
+    
+    // Override with client goals data if available
+    if (clientGoals) {
+      // Get cuisine types from client goals
+      const clientGoalsCuisineTypes = mapCuisineTypesForEdamam(clientGoals.cuisineTypes);
+      
+      // Get health labels (allergies + preferences) from client goals
+      const clientGoalsHealthLabels = mergeAllergiesAndPreferencesForEdamam(
+        clientGoals.allergies,
+        clientGoals.preferences
+      );
+      
+      console.log('🚀 Meal Planning Service - Client goals cuisine types:', clientGoalsCuisineTypes);
+      console.log('🚀 Meal Planning Service - Client goals health labels:', clientGoalsHealthLabels);
+      
+      return {
+        ...basePreferences,
+        // Use client goals cuisine types if available, otherwise use request/client preferences
+        cuisinePreferences: clientGoalsCuisineTypes.length > 0 
+          ? clientGoalsCuisineTypes 
+          : basePreferences.cuisinePreferences,
+        
+        // Merge dietary restrictions with client goals health labels
+        dietaryRestrictions: [
+          ...basePreferences.dietaryRestrictions,
+          ...clientGoalsHealthLabels
+        ].filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates
+      };
+    }
+    
+    return basePreferences;
   }
 
   /**
@@ -3018,6 +3071,27 @@ export class MealPlanningService {
       const clientGoal = goalsResponse.data;
       console.log('🎯 Meal Planning Service - Client goals:', JSON.stringify(clientGoal, null, 2));
       
+      // 1.5. Get cuisine types from client goals and merge with request preferences
+      const clientGoalsCuisineTypes = mapCuisineTypesForEdamam(clientGoal.cuisineTypes);
+      const clientGoalsHealthLabels = mergeAllergiesAndPreferencesForEdamam(
+        clientGoal.allergies,
+        clientGoal.preferences
+      );
+      
+      // Merge cuisine preferences: client goals take precedence
+      const finalCuisinePreferences = clientGoalsCuisineTypes.length > 0 
+        ? clientGoalsCuisineTypes 
+        : cuisinePreferences;
+      
+      // Merge dietary restrictions: combine request + client goals
+      const finalDietaryRestrictions = [
+        ...dietaryRestrictions,
+        ...clientGoalsHealthLabels
+      ].filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
+      
+      console.log('🎯 Meal Planning Service - Final cuisine preferences:', finalCuisinePreferences);
+      console.log('🎯 Meal Planning Service - Final dietary restrictions:', finalDietaryRestrictions);
+      
       // 2. Get client's active meal program
       const { data: mealProgram, error: programError } = await supabase
         .from('meal_programs')
@@ -3062,8 +3136,8 @@ export class MealPlanningService {
       // 4. Create Edamam meal plan request
       const edamamRequest = mealProgramMappingService.createEdamamMealPlanRequest(
         mealDistribution,
-        dietaryRestrictions,
-        cuisinePreferences,
+        finalDietaryRestrictions,
+        finalCuisinePreferences,
         clientGoal,
         uiOverrideMeals
       );

@@ -5,7 +5,10 @@ import {
   UpdateClientGoalRequest,
   ClientGoalResponse,
   ClientGoalsResponse,
-  validateMacroRanges
+  validateMacroRanges,
+  validateAllergies,
+  validatePreferences,
+  validateCuisineTypes
 } from '../types/clientGoals';
 
 export class ClientGoalsService {
@@ -34,6 +37,30 @@ export class ClientGoalsService {
         return {
           success: false,
           error: 'Invalid macro ranges: min values must be less than max values and all values must be positive'
+        };
+      }
+
+      // Validate allergies if provided
+      if (request.allergies && !validateAllergies(request.allergies)) {
+        return {
+          success: false,
+          error: 'Invalid allergies: one or more allergy values are not valid'
+        };
+      }
+
+      // Validate preferences if provided
+      if (request.preferences && !validatePreferences(request.preferences)) {
+        return {
+          success: false,
+          error: 'Invalid preferences: one or more preference values are not valid'
+        };
+      }
+
+      // Validate cuisine types if provided
+      if (request.cuisineTypes && !validateCuisineTypes(request.cuisineTypes)) {
+        return {
+          success: false,
+          error: 'Invalid cuisine types: one or more cuisine types are not valid'
         };
       }
 
@@ -97,6 +124,9 @@ export class ClientGoalsService {
               fat_goal_max: request.fatGoalMax,
               fiber_goal_grams: request.fiberGoalGrams,
               water_goal_liters: request.waterGoalLiters,
+              allergies: request.allergies,
+              preferences: request.preferences,
+              cuisine_types: request.cuisineTypes,
               goal_start_date: request.goalStartDate || new Date().toISOString().split('T')[0],
               goal_end_date: request.goalEndDate,
               notes: request.notes
@@ -143,6 +173,9 @@ export class ClientGoalsService {
         fatGoalMax: clientGoal?.fat_goal_max || 0,
         fiberGoalGrams: clientGoal?.fiber_goal_grams,
         waterGoalLiters: clientGoal?.water_goal_liters,
+        allergies: clientGoal?.allergies,
+        preferences: clientGoal?.preferences,
+        cuisineTypes: clientGoal?.cuisine_types,
         isActive: clientGoal?.is_active || false,
         goalStartDate: clientGoal?.goal_start_date || '',
         goalEndDate: clientGoal?.goal_end_date,
@@ -215,6 +248,9 @@ export class ClientGoalsService {
         fatGoalMax: clientGoal?.fat_goal_max || 0,
         fiberGoalGrams: clientGoal?.fiber_goal_grams,
         waterGoalLiters: clientGoal?.water_goal_liters,
+        allergies: clientGoal?.allergies,
+        preferences: clientGoal?.preferences,
+        cuisineTypes: clientGoal?.cuisine_types,
         isActive: clientGoal?.is_active || false,
         goalStartDate: clientGoal?.goal_start_date || '',
         goalEndDate: clientGoal?.goal_end_date,
@@ -285,6 +321,9 @@ export class ClientGoalsService {
         fatGoalMax: clientGoal?.fat_goal_max || 0,
         fiberGoalGrams: clientGoal?.fiber_goal_grams,
         waterGoalLiters: clientGoal?.water_goal_liters,
+        allergies: clientGoal?.allergies,
+        preferences: clientGoal?.preferences,
+        cuisineTypes: clientGoal?.cuisine_types,
         isActive: clientGoal?.is_active || false,
         goalStartDate: clientGoal?.goal_start_date || '',
         goalEndDate: clientGoal?.goal_end_date,
@@ -361,6 +400,30 @@ export class ClientGoalsService {
         }
       }
 
+      // Validate allergies if provided
+      if (request.allergies && !validateAllergies(request.allergies)) {
+        return {
+          success: false,
+          error: 'Invalid allergies: one or more allergy values are not valid'
+        };
+      }
+
+      // Validate preferences if provided
+      if (request.preferences && !validatePreferences(request.preferences)) {
+        return {
+          success: false,
+          error: 'Invalid preferences: one or more preference values are not valid'
+        };
+      }
+
+      // Validate cuisine types if provided
+      if (request.cuisineTypes && !validateCuisineTypes(request.cuisineTypes)) {
+        return {
+          success: false,
+          error: 'Invalid cuisine types: one or more cuisine types are not valid'
+        };
+      }
+
       // Update client goal
       const updateData: any = {};
       
@@ -373,6 +436,9 @@ export class ClientGoalsService {
       if (request.fatGoalMax !== undefined) updateData.fat_goal_max = request.fatGoalMax;
       if (request.fiberGoalGrams !== undefined) updateData.fiber_goal_grams = request.fiberGoalGrams;
       if (request.waterGoalLiters !== undefined) updateData.water_goal_liters = request.waterGoalLiters;
+      if (request.allergies !== undefined) updateData.allergies = request.allergies;
+      if (request.preferences !== undefined) updateData.preferences = request.preferences;
+      if (request.cuisineTypes !== undefined) updateData.cuisine_types = request.cuisineTypes;
       if (request.goalStartDate !== undefined) updateData.goal_start_date = request.goalStartDate;
       if (request.goalEndDate !== undefined) updateData.goal_end_date = request.goalEndDate;
       if (request.notes !== undefined) updateData.notes = request.notes;
@@ -407,6 +473,9 @@ export class ClientGoalsService {
         fatGoalMax: updatedGoal?.fat_goal_max || 0,
         fiberGoalGrams: updatedGoal?.fiber_goal_grams,
         waterGoalLiters: updatedGoal?.water_goal_liters,
+        allergies: updatedGoal?.allergies,
+        preferences: updatedGoal?.preferences,
+        cuisineTypes: updatedGoal?.cuisine_types,
         isActive: updatedGoal?.is_active || false,
         goalStartDate: updatedGoal?.goal_start_date || '',
         goalEndDate: updatedGoal?.goal_end_date,

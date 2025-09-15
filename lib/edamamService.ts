@@ -1,4 +1,6 @@
 import { config } from './config';
+import { EdamamApiKeyService } from './edamamApiKeyService';
+import { EdamamKeyRotationService } from './edamamKeyRotationService';
 
 export interface EdamamRecipe {
   uri: string;
@@ -173,6 +175,10 @@ export class EdamamService {
   private nutritionAppId: string;
   private nutritionAppKey: string;
   
+  // New API key management services
+  private apiKeyService: EdamamApiKeyService;
+  private keyRotationService: EdamamKeyRotationService;
+  
   // Round-robin user management for Meal Planner API only
   private static mealPlannerUsers = ['test1', 'test2', 'test3', 'test4', 'test5'];
   private static currentMealPlannerUserIndex = 0;
@@ -185,6 +191,10 @@ export class EdamamService {
     this.nutritionApiUrl = config.edamam.nutritionApiUrl;
     this.nutritionAppId = process.env.EDAMAM_NUTRITION_APP_ID || '';
     this.nutritionAppKey = process.env.EDAMAM_NUTRITION_APP_KEY || '';
+    
+    // Initialize API key management services
+    this.apiKeyService = new EdamamApiKeyService();
+    this.keyRotationService = new EdamamKeyRotationService();
     
     // Log constructor values for debugging
     console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR 🚨🚨🚨');
@@ -200,8 +210,69 @@ export class EdamamService {
     console.log('  - EDAMAM_APP_KEY exists:', !!process.env.EDAMAM_APP_KEY);
     console.log('  - EDAMAM_APP_KEY value:', process.env.EDAMAM_APP_KEY);
     console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_ID);
+    console.log('  - EDAMAM_NUTRITION_APP_ID value:', process.env.EDAMAM_NUTRITION_APP_ID);
     console.log('  - EDAMAM_NUTRITION_APP_KEY exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
+    console.log('  - EDAMAM_NUTRITION_APP_KEY value:', process.env.EDAMAM_NUTRITION_APP_KEY);
+    console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR END 🚨🚨🚨');
   }
+
+  /**
+   * Get API key with automatic rotation if needed
+   */
+  private async getApiKeyWithRotation(apiType: 'meal_planner' | 'nutrition' | 'recipe' | 'autocomplete'): Promise<{ appId: string; appKey: string }> {
+    try {
+      console.log(`🔑 Edamam Service - Getting ${apiType} API key with rotation check`);
+      
+      // Get active API key
+      const keyResult = await this.apiKeyService.getActiveApiKey(apiType);
+      
+      if (!keyResult.success || !keyResult.appId || !keyResult.appKey) {
+        throw new Error(`Failed to get ${apiType} API key: ${keyResult.error}`);
+      }
+
+      // Check if rotation is needed (usage >= 90%)
+      if (keyResult.needsRotation) {
+        console.log(`🔄 Edamam Service - Key rotation needed for ${apiType} key: ${keyResult.appId}`);
+        
+        const rotationResult = await this.keyRotationService.checkAndRotateIfNeeded(apiType, keyResult.appId);
+        
+        if (rotationResult.needsRotation && rotationResult.rotationResult?.success) {
+          console.log(`✅ Edamam Service - Key rotated successfully for ${apiType}`);
+          return {
+            appId: rotationResult.rotationResult.newAppId!,
+            appKey: rotationResult.rotationResult.newAppKey!
+          };
+        } else {
+          console.warn(`⚠️ Edamam Service - Key rotation failed for ${apiType}, using current key`);
+        }
+      }
+
+      // Increment usage count
+      await this.apiKeyService.incrementUsage(keyResult.appId, apiType);
+
+      return {
+        appId: keyResult.appId,
+        appKey: keyResult.appKey
+      };
+
+    } catch (error) {
+      console.error(`❌ Edamam Service - Error getting ${apiType} API key:`, error);
+      
+      // Fallback to hardcoded keys if database fails
+      console.log(`🔄 Edamam Service - Falling back to hardcoded keys for ${apiType}`);
+      
+      switch (apiType) {
+        case 'meal_planner':
+          return { appId: '858bc297', appKey: '7b2f0ca26ac245692d8d180302246bd2' };
+        case 'nutrition':
+        case 'autocomplete':
+          return { appId: '86a78566', appKey: '0938eb1f14ffeb73a5ba2414fd4198d5' };
+        case 'recipe':
+          return { appId: '5bce8081', appKey: 'c80ecbf8968d48dfe51d395f6f19279a' };
+        default:
+          throw new Error(`Unknown API type: ${apiType}`);
+      }
+    }
 
   /**
    * Search for recipes using the Recipe Search API
@@ -209,11 +280,10 @@ export class EdamamService {
   async searchRecipes(params: RecipeSearchParams, userId?: string): Promise<MealPlanResponse> {
     const searchParams = new URLSearchParams();
     
-    // Add authentication using working credentials
-    const workingAppId = '48653092';
-    const workingAppKey = '31cfd195356381d874f504e5f3f868c9';
-    searchParams.append('app_id', workingAppId);
-    searchParams.append('app_key', workingAppKey);
+    // Get Recipe API credentials with automatic rotation
+    const recipeKeys = await this.getApiKeyWithRotation('recipe');
+    searchParams.append('app_id', recipeKeys.appId);
+    searchParams.append('app_key', recipeKeys.appKey);
     searchParams.append('type', 'public');
     
     // Add search parameters
@@ -271,10 +341,9 @@ export class EdamamService {
    */
   async getRecipe(uri: string, userId?: string): Promise<EdamamRecipe> {
     const searchParams = new URLSearchParams();
-    const workingAppId = '5bce8081';
-    const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
-    searchParams.append('app_id', workingAppId);
-    searchParams.append('app_key', workingAppKey);
+    const recipeKeys = await this.getApiKeyWithRotation('recipe');
+    searchParams.append('app_id', recipeKeys.appId);
+    searchParams.append('app_key', recipeKeys.appKey);
     searchParams.append('uri', uri);
 
     try {
@@ -477,15 +546,14 @@ export class EdamamService {
     }
     
     try {
-      // Use correct hardcoded Meal Planner credentials
-      const mealPlannerAppId = '858bc297';
-      const mealPlannerAppKey = '7b2f0ca26ac245692d8d180302246bd2';
-      const credentials = `${mealPlannerAppId}:${mealPlannerAppKey}`;
+      // Get Meal Planner API credentials with automatic rotation
+      const mealPlannerKeys = await this.getApiKeyWithRotation('meal_planner');
+      const credentials = `${mealPlannerKeys.appId}:${mealPlannerKeys.appKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
-      console.log('🔧🔧🔧 USING HARDCODED MEAL PLANNER CREDENTIALS 🔧🔧🔧');
-      console.log('Meal Planner appId:', mealPlannerAppId);
-      console.log('Meal Planner appKey:', mealPlannerAppKey);
+      console.log('🔧🔧🔧 USING DATABASE-MANAGED MEAL PLANNER CREDENTIALS 🔧🔧🔧');
+      console.log('Meal Planner appId:', mealPlannerKeys.appId);
+      console.log('Meal Planner appKey:', mealPlannerKeys.appKey);
       
       const headers: HeadersInit = {
         'accept': 'application/json',
@@ -503,15 +571,15 @@ export class EdamamService {
         headers['Edamam-Account-User'] = currentUser;
         console.log(`🔄 ATTEMPT ${attemptCount}: Using Edamam-Account-User: ${currentUser}`);
 
-      // Use the correct Edamam Meal Planner API endpoint with hardcoded appId and type=public
-      const url = `${this.mealPlannerApiUrl}/${mealPlannerAppId}/select?type=public`;
+      // Use the correct Edamam Meal Planner API endpoint with dynamic appId and type=public
+      const url = `${this.mealPlannerApiUrl}/${mealPlannerKeys.appId}/select?type=public`;
       
       // Log credentials being used (masked)
       console.log('🔑🔑🔑 MEAL PLANNER API CREDENTIALS 🔑🔑🔑');
-      console.log('Using appId:', this.appId ? this.appId.substring(0, 8) + '...' : 'MISSING');
-      console.log('Using appKey:', this.appKey ? this.appKey.substring(0, 8) + '...' : 'MISSING');
-      console.log('Full appId:', this.appId);
-      console.log('Full appKey:', this.appKey);
+      console.log('Using appId:', mealPlannerKeys.appId ? mealPlannerKeys.appId.substring(0, 8) + '...' : 'MISSING');
+      console.log('Using appKey:', mealPlannerKeys.appKey ? mealPlannerKeys.appKey.substring(0, 8) + '...' : 'MISSING');
+      console.log('Full appId:', mealPlannerKeys.appId);
+      console.log('Full appKey:', mealPlannerKeys.appKey);
       
       // Generate the cURL command equivalent
       const requestBodyString = JSON.stringify(request);
@@ -655,10 +723,9 @@ export class EdamamService {
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 
-      // Use working meal planner credentials for Recipe API (as per Edamam docs)
-      const workingAppId = 'fb9b0e62';
-      const workingAppKey = '8a58a60fd0235f1bc39d3defab42922e';
-      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${workingAppId}&app_key=${workingAppKey}&type=public`;
+      // Get Recipe API credentials with automatic rotation
+      const recipeKeys = await this.getApiKeyWithRotation('recipe');
+      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${recipeKeys.appId}&app_key=${recipeKeys.appKey}&type=public`;
       console.log('🍽️ Edamam Service - Recipe API request details:');
       console.log('  - Method: GET');
       console.log('  - URL:', url);
@@ -1043,11 +1110,12 @@ export class EdamamService {
       console.log('ingredientText:', ingredientText);
       console.log('nutritionType:', nutritionType);
 
-      // Use hardcoded working credentials
+      // Get Nutrition API credentials with automatic rotation
+      const nutritionKeys = await this.getApiKeyWithRotation('nutrition');
       const url = `https://api.edamam.com/api/nutrition-data`;
       const params = new URLSearchParams({
-        app_id: '86a78566',
-        app_key: '0938eb1f14ffeb73a5ba2414fd4198d5',
+        app_id: nutritionKeys.appId,
+        app_key: nutritionKeys.appKey,
         'nutrition-type': nutritionType,
         ingr: ingredientText
       });
@@ -1103,11 +1171,12 @@ export class EdamamService {
         return [];
       }
 
-      // Use hardcoded working credentials for autocomplete
+      // Get Autocomplete API credentials with automatic rotation
+      const autocompleteKeys = await this.getApiKeyWithRotation('autocomplete');
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
-        app_id: '86a78566',
-        app_key: '0938eb1f14ffeb73a5ba2414fd4198d5',
+        app_id: autocompleteKeys.appId,
+        app_key: autocompleteKeys.appKey,
         q: query.trim()
       });
 
@@ -1155,11 +1224,12 @@ export class EdamamService {
         return null;
       }
 
-      // Use hardcoded working credentials for food database parser
+      // Get Nutrition API credentials with automatic rotation (same as food database parser)
+      const nutritionKeys = await this.getApiKeyWithRotation('nutrition');
       const url = 'https://api.edamam.com/api/food-database/v2/parser';
       const params = new URLSearchParams({
-        app_id: '86a78566',
-        app_key: '0938eb1f14ffeb73a5ba2414fd4198d5',
+        app_id: nutritionKeys.appId,
+        app_key: nutritionKeys.appKey,
         ingr: ingredient.trim(),
         'nutrition-type': nutritionType
       });
