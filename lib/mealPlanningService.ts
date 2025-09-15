@@ -928,26 +928,34 @@ export class MealPlanningService {
             meal.carbsGrams = Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / recipeYield * 100) / 100;
             meal.fatGrams = Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / recipeYield * 100) / 100;
             meal.fiberGrams = Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / recipeYield * 100) / 100;
-            // Use detailed ingredients with quantity, measure, etc.
-            meal.ingredients = recipe.ingredients?.map((ing: any) => ({
-              text: ing.text,
-              quantity: ing.quantity,
-              measure: ing.measure,
-              food: ing.food,
-              weight: ing.weight,
+            // Use detailed ingredients with quantity, measure, etc. - scaled per serving
+            meal.ingredients = recipe.ingredients?.map((ing: any) => {
+              const scaledWeight = (ing.weight || 0) / recipeYield;
+              return {
+                text: this.convertIngredientToGrams(ing.text, scaledWeight),
+                quantity: Math.round(scaledWeight),
+                measure: 'gram',
+                food: ing.food || this.extractFoodName(ing.text),
+                weight: scaledWeight,
               calories: ing.nutrients?.ENERC_KCAL?.quantity,
               protein: ing.nutrients?.PROCNT?.quantity,
               carbs: ing.nutrients?.CHOCDF?.quantity,
               fat: ing.nutrients?.FAT?.quantity,
               fiber: ing.nutrients?.FIBTG?.quantity
-            })) || recipe.ingredientLines || [];
+              };
+            }) || recipe.ingredientLines || [];
             
-            // Update totals to match per-serving values
-            meal.totalCalories = meal.caloriesPerServing;
-            meal.totalProtein = meal.proteinGrams;
-            meal.totalCarbs = meal.carbsGrams;
-            meal.totalFat = meal.fatGrams;
-            meal.totalFiber = meal.fiberGrams;
+            // Preserve original nutrition values if they exist, otherwise calculate from recipe
+            const servings = meal.servingsPerMeal || 1;
+            
+            // PRESERVE ORIGINAL NUTRITION VALUES - Don't overwrite with calculated values
+            // The original values from meal plan generation are correct
+            // Don't overwrite them with potentially incorrect Edamam recipe calculations
+            console.log(`🔍 Preserving original nutrition values for ${meal.mealType}:`, {
+              originalTotalProtein: meal.totalProtein,
+              calculatedProteinGrams: meal.proteinGrams,
+              servings: servings
+            });
             
             console.log(`✅ Meal Planning Debug - ${meal.mealType} meal enriched:`, JSON.stringify(meal, null, 2));
           } else {
@@ -2091,7 +2099,7 @@ export class MealPlanningService {
       console.error('❌ Multi-Day Meal Planning Service - Error details:', {
         name: error instanceof Error ? error.name : 'Unknown',
         message: error instanceof Error ? error.message : 'Unknown error',
-        cause: error instanceof Error ? error.cause : undefined
+        cause: (error as any).cause
       });
       return {
         success: false,
@@ -2475,7 +2483,8 @@ export class MealPlanningService {
     const cleanText = text.replace(/^\*\s*/, '').trim();
     
     // Extract the food name (remove only the quantity/measure at the beginning, keep the full food description)
-    const foodMatch = cleanText.match(/(?:\d+\s*(?:cups?|tablespoons?|teaspoons?|ounces?|lbs?|pounds?|whole|medium|large|small)?\s*(?:of\s+)?)?(.+?)(?:\s*\([^)]*\))?$/i);
+    // Handle fractions like "1/2 cup", "1 1/2 tablespoons", etc.
+    const foodMatch = cleanText.match(/^(?:\d+(?:\s+\d+\/\d+|\.\d+|\/\d+)?\s*(?:cups?|tablespoons?|teaspoons?|ounces?|lbs?|pounds?|whole|medium|large|small)?\s*(?:of\s+)?)\s*(.+?)(?:\s*\([^)]*\))?$/i);
     const foodName = foodMatch ? foodMatch[1].trim() : cleanText;
     
     // Convert to grams format, preserving the full food description
@@ -2520,7 +2529,7 @@ export class MealPlanningService {
       // "300g beef" → "300g beef steak" (add steak if missing)
       .replace(/(\d+g)\s+beef(?!\s+steak)/gi, '$1 beef steak')
       // "250g pork" → "250g pork chop" (add chop if missing)
-      .replace(/(\d+g)\s+pork(?!\s+chop)/gi, '$1 pork chop');
+      .replace(/(\d+g)\s+pork(?!\s+chop)/gi, '$1 pork chop')
     
     console.log(`🔧 Normalized ingredient: "${text}" → "${normalized}"`);
     return normalized;
@@ -2841,6 +2850,18 @@ export class MealPlanningService {
         const servings = recipe?.yield || 1;
         const mealOrder = parseInt(meal.mealKey?.split('_')[1]) || 1;
         
+        // Calculate scale factor based on target calories vs recipe total calories
+        const targetCalories = meal.targetCalories || 1000;
+        const recipeCalories = recipe?.calories || 4000;
+        const scaleFactor = targetCalories / recipeCalories;
+        
+        console.log(`🔍 MEAL SCALING DEBUG for ${meal.mealName}:`, {
+          targetCalories,
+          recipeCalories,
+          scaleFactor,
+          servings
+        });
+        
         return {
           id: `meal-${meal.mealKey || mealOrder}`,
           mealType: meal.edamamMealType || meal.mealName,
@@ -2849,28 +2870,32 @@ export class MealPlanningService {
           recipeUrl: recipe?.url || '',
           recipeImageUrl: recipe?.image || '',
           caloriesPerServing: Math.round((recipe?.calories || 0) / servings * 100) / 100,
-          proteinGrams: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
-          carbsGrams: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
-          fatGrams: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
-          fiberGrams: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
+          proteinGrams: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) * scaleFactor * 100) / 100,
+          carbsGrams: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) * scaleFactor * 100) / 100,
+          fatGrams: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) * scaleFactor * 100) / 100,
+          fiberGrams: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) * scaleFactor * 100) / 100,
           servingsPerMeal: servings,
-          totalCalories: Math.round((recipe?.calories || 0) / servings * 100) / 100, // Per-serving calories
-          totalProtein: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) / servings * 100) / 100,
-          totalCarbs: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) / servings * 100) / 100,
-          totalFat: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) / servings * 100) / 100,
-          totalFiber: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) / servings * 100) / 100,
-        ingredients: recipe?.ingredients?.map((ing: any) => ({
-          text: this.convertIngredientToGrams(ing.text, ing.weight),
-          quantity: Math.round(ing.weight || 0),
-          measure: 'gram',
-          food: this.extractFoodName(ing.text),
-          weight: ing.weight,
+          totalCalories: targetCalories,
+          totalProtein: Math.round((recipe?.totalNutrients?.PROCNT?.quantity || 0) * scaleFactor * 100) / 100,
+          totalCarbs: Math.round((recipe?.totalNutrients?.CHOCDF?.quantity || 0) * scaleFactor * 100) / 100,
+          totalFat: Math.round((recipe?.totalNutrients?.FAT?.quantity || 0) * scaleFactor * 100) / 100,
+          totalFiber: Math.round((recipe?.totalNutrients?.FIBTG?.quantity || 0) * scaleFactor * 100) / 100,
+        ingredients: recipe?.ingredients?.map((ing: any) => {
+          // Scale ingredients by calorie ratio (target calories / recipe calories)
+          const scaledWeight = (ing.weight || 0) * scaleFactor;
+          return {
+            text: this.convertIngredientToGrams(ing.text, scaledWeight),
+            quantity: Math.round(scaledWeight),
+            measure: 'gram',
+            food: ing.food || this.extractFoodName(ing.text),
+            weight: scaledWeight,
             calories: ing.nutrients?.ENERC_KCAL?.quantity,
             protein: ing.nutrients?.PROCNT?.quantity,
             carbs: ing.nutrients?.CHOCDF?.quantity,
             fat: ing.nutrients?.FAT?.quantity,
             fiber: ing.nutrients?.FIBTG?.quantity
-          })) || (recipe?.ingredientLines?.map((line: string) => ({
+          };
+        }) || (recipe?.ingredientLines?.map((line: string) => ({
             text: line,
             quantity: 1,
             measure: 'serving',
@@ -3205,23 +3230,36 @@ export class MealPlanningService {
         fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
         fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
         servingsPerMeal: meal.recipe?.yield || meal.recipe?.nutritionSummary?.servings || 1,
-        totalCalories: meal.recipe?.nutritionSummary?.calories || 0,
-        totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
-        totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
-        totalFat: meal.recipe?.nutritionSummary?.fat || 0,
-        totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
-        ingredients: meal.recipe?.ingredients?.map((ing: any) => ({
-          text: this.convertIngredientToGrams(ing.text, ing.weight),
-          quantity: Math.round(ing.weight || 0),
-          measure: 'gram',
-          food: this.extractFoodName(ing.text),
-          weight: ing.weight,
+        totalCalories: meal.targetCalories || meal.recipe?.nutritionSummary?.calories || 0,
+        totalProtein: (meal.recipe?.totalNutrients?.PROCNT?.quantity || 0) * (meal.targetCalories || 1000) / (meal.recipe?.calories || 4000),
+        totalCarbs: (meal.recipe?.totalNutrients?.CHOCDF?.quantity || 0) * (meal.targetCalories || 1000) / (meal.recipe?.calories || 4000),
+        totalFat: (meal.recipe?.totalNutrients?.FAT?.quantity || 0) * (meal.targetCalories || 1000) / (meal.recipe?.calories || 4000),
+        totalFiber: (meal.recipe?.totalNutrients?.FIBTG?.quantity || 0) * (meal.targetCalories || 1000) / (meal.recipe?.calories || 4000),
+        ingredients: meal.recipe?.ingredients?.map((ing: any) => {
+          const scaleFactor = (meal.targetCalories || 1000) / (meal.recipe?.calories || 4000);
+          const scaledWeight = (ing.weight || 0) * scaleFactor;
+          console.log(`🔍 INGREDIENT SCALING DEBUG:`, {
+            ingredientText: ing.text,
+            originalWeight: ing.weight,
+            targetCalories: meal.targetCalories,
+            recipeCalories: meal.recipe?.calories,
+            scaleFactor: scaleFactor,
+            scaledWeight: scaledWeight,
+            finalText: this.convertIngredientToGrams(ing.text, scaledWeight)
+          });
+          return {
+            text: this.convertIngredientToGrams(ing.text, scaledWeight),
+            quantity: Math.round(scaledWeight),
+            measure: 'gram',
+            food: ing.food || this.extractFoodName(ing.text),
+            weight: scaledWeight,
           calories: ing.nutrients?.ENERC_KCAL?.quantity,
           protein: ing.nutrients?.PROCNT?.quantity,
           carbs: ing.nutrients?.CHOCDF?.quantity,
           fat: ing.nutrients?.FAT?.quantity,
           fiber: ing.nutrients?.FIBTG?.quantity
-        })) || (meal.recipe?.ingredientLines?.map((line: string) => ({
+          };
+        }) || (meal.recipe?.ingredientLines?.map((line: string) => ({
           text: line,
           quantity: 1,
           measure: 'serving',
@@ -4918,6 +4956,14 @@ export class MealPlanningService {
 
       const meal = rawMeals[mealIndex];
 
+      console.log('🔍 MEAL OBJECT RIGHT AFTER FETCH:', {
+        'meal.totalProtein': meal.totalProtein,
+        'meal.protein': meal.protein,
+        'meal.proteinGrams': meal.proteinGrams,
+        'meal object keys': Object.keys(meal),
+        'meal ID': meal.id
+      });
+
       // Check if ingredients exist
       // The GeneratedMeal format has ingredients as an array of strings
       if (!meal.ingredients || ingredientIndex >= meal.ingredients.length) {
@@ -4984,17 +5030,40 @@ export class MealPlanningService {
 
       // Get current total nutrition from the meal (these are total values, not per-serving)
       let totalCalories = meal.totalCalories || 0;
-      let totalProtein = meal.protein || meal.totalProtein || 0;
-      let totalCarbs = meal.carbs || meal.totalCarbs || 0;
-      let totalFat = meal.fat || meal.totalFat || 0;
-      let totalFiber = meal.fiber || meal.totalFiber || 0;
+      let totalProtein = meal.totalProtein || meal.protein || 0;
+      let totalCarbs = meal.totalCarbs || meal.carbs || 0;
+      let totalFat = meal.totalFat || meal.fat || 0;
+      let totalFiber = meal.totalFiber || meal.fiber || 0;
 
+      console.log('🔍 RAW MEAL DATA FROM DATABASE:', {
+        'meal.protein': meal.protein,
+        'meal.totalProtein': meal.totalProtein,
+        'meal.proteinGrams': meal.proteinGrams,
+        'meal object keys': Object.keys(meal)
+      });
+      
       console.log('📊 CURRENT MEAL TOTALS:', {
         totalCalories,
         totalProtein,
         totalCarbs,
         totalFat,
         totalFiber
+      });
+
+      console.log('🔍 DETAILED MEAL DATA:', {
+        mealId: meal.id,
+        mealType: meal.mealType,
+        mealOrder: meal.mealOrder,
+        originalTotalCalories: meal.totalCalories,
+        originalTotalProtein: meal.totalProtein,
+        originalProtein: meal.protein,
+        originalCarbs: meal.carbs,
+        originalTotalCarbs: meal.totalCarbs,
+        originalFat: meal.fat,
+        originalTotalFat: meal.totalFat,
+        originalFiber: meal.fiber,
+        originalTotalFiber: meal.totalFiber,
+        servingsPerMeal: meal.servingsPerMeal
       });
 
       // Subtract old ingredient nutrition (total values from Edamam)
@@ -5028,6 +5097,20 @@ export class MealPlanningService {
           fat: oldFat,
           fiber: oldFiber
         });
+
+        console.log('🧮 SUBTRACTION MATH:', {
+          step: 'After subtracting old ingredient',
+          totalCaloriesBefore: totalCalories + oldCalories,
+          totalCaloriesAfter: totalCalories,
+          totalProteinBefore: totalProtein + oldProtein,
+          totalProteinAfter: totalProtein,
+          totalCarbsBefore: totalCarbs + oldCarbs,
+          totalCarbsAfter: totalCarbs,
+          totalFatBefore: totalFat + oldFat,
+          totalFatAfter: totalFat,
+          totalFiberBefore: totalFiber + oldFiber,
+          totalFiberAfter: totalFiber
+        });
       }
 
       // Add new ingredient nutrition (total values from Edamam)
@@ -5059,12 +5142,64 @@ export class MealPlanningService {
         fiber: newFiber
       });
 
+      console.log('🧮 ADDITION MATH:', {
+        step: 'After adding new ingredient',
+        totalCaloriesBefore: totalCalories - newCalories,
+        totalCaloriesAfter: totalCalories,
+        totalProteinBefore: totalProtein - newProtein,
+        totalProteinAfter: totalProtein,
+        totalCarbsBefore: totalCarbs - newCarbs,
+        totalCarbsAfter: totalCarbs,
+        totalFatBefore: totalFat - newFat,
+        totalFatAfter: totalFat,
+        totalFiberBefore: totalFiber - newFiber,
+        totalFiberAfter: totalFiber
+      });
+
       console.log('📊 NUTRITION UPDATE:', {
         oldCalories: oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
         newCalories: newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
         totalCaloriesBefore: (meal.totalCalories || 0),
         totalCaloriesAfter: totalCalories,
         netChange: (newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0) - (oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0)
+      });
+
+      console.log('🎯 COMPLETE MATH SUMMARY:', {
+        step1_originalMealTotals: {
+          calories: meal.totalCalories || 0,
+          protein: meal.protein || meal.totalProtein || 0,
+          carbs: meal.carbs || meal.totalCarbs || 0,
+          fat: meal.fat || meal.totalFat || 0,
+          fiber: meal.fiber || meal.totalFiber || 0
+        },
+        step2_oldIngredientValues: {
+          calories: oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        },
+        step3_newIngredientValues: {
+          calories: newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        },
+        step4_finalCalculatedTotals: {
+          calories: totalCalories,
+          protein: totalProtein,
+          carbs: totalCarbs,
+          fat: totalFat,
+          fiber: totalFiber
+        },
+        step5_netChanges: {
+          calories: (newNutritionData?.calories || newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0) - (oldNutritionData?.calories || oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0),
+          protein: (newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0) - (oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0),
+          carbs: (newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0) - (oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0),
+          fat: (newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0) - (oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0),
+          fiber: (newNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0) - (oldNutritionData?.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0)
+        }
       });
 
       // Update meal nutrition data
@@ -5179,28 +5314,118 @@ export class MealPlanningService {
       }
 
       console.log('✅ EDIT PREVIEW MEAL INGREDIENT - SUCCESS');
+      
+      // Create days array structure to match consolidated GET API
+      const daysArray = [{
+        dayNumber: 1,
+        date: new Date().toISOString().split('T')[0],
+        meals: rawMeals.map((m: any) => ({
+          id: m.id,
+          mealType: m.mealType,
+          mealOrder: m.mealOrder,
+          mealName: m.mealType?.toUpperCase(),
+          recipeName: m.recipeName,
+          recipeUrl: m.recipeUrl,
+          recipeImage: m.recipeImageUrl,
+          caloriesPerServing: m.caloriesPerServing,
+          totalCalories: m.totalCalories,
+          protein: m.protein,
+          carbs: m.carbs,
+          fat: m.fat,
+          fiber: m.fiber,
+          ingredients: m.ingredients
+        })),
+        dailyNutrition: dailyNutrition,
+        mealCount: rawMeals.length
+      }];
+
+      // Calculate overall stats
+      const overallStats = {
+        totalDays: 1,
+        totalMeals: rawMeals.length,
+        averageMealsPerDay: rawMeals.length,
+        totalCalories: dailyNutrition.totalCalories,
+        totalProtein: dailyNutrition.totalProtein,
+        totalCarbs: dailyNutrition.totalCarbs,
+        totalFat: dailyNutrition.totalFat,
+        totalFiber: dailyNutrition.totalFiber,
+        averageCaloriesPerDay: dailyNutrition.totalCalories
+      };
+
+      // Create detailed calculation breakdown for debugging
+      const calculationBreakdown = {
+        step1_initial: {
+          calories: meal.totalCalories || 0,
+          protein: meal.totalProtein || meal.protein || 0,
+          carbs: meal.totalCarbs || meal.carbs || 0,
+          fat: meal.totalFat || meal.fat || 0,
+          fiber: meal.totalFiber || meal.fiber || 0
+        },
+        step2_oldSubtracted: oldNutritionData ? {
+          calories: oldNutritionData.calories || oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: oldNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        } : 'NO_OLD_DATA',
+        step3_newAdded: {
+          calories: newNutritionData.calories || newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.ENERC_KCAL?.quantity || 0,
+          protein: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.PROCNT?.quantity || 0,
+          carbs: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.CHOCDF?.quantity || 0,
+          fat: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FAT?.quantity || 0,
+          fiber: newNutritionData.ingredients?.[0]?.parsed?.[0]?.nutrients?.FIBTG?.quantity || 0
+        },
+        step4_final: {
+          calories: totalCalories,
+          protein: totalProtein,
+          carbs: totalCarbs,
+          fat: totalFat,
+          fiber: totalFiber
+        },
+        edamamRequests: {
+          oldIngredientText: oldIngredientText,
+          newIngredientText: newIngredientText
+        },
+        debugMealObject: {
+          'meal.totalProtein': meal.totalProtein,
+          'meal.protein': meal.protein,
+          'meal.proteinGrams': meal.proteinGrams,
+          'meal.totalCalories': meal.totalCalories,
+          'meal.totalCarbs': meal.totalCarbs,
+          'meal.totalFat': meal.totalFat,
+          'meal.totalFiber': meal.totalFiber,
+          'meal object keys': Object.keys(meal),
+          'meal ID': meal.id,
+          'firstIngredient': meal.ingredients?.[0]
+        }
+      };
+
       return { 
         success: true, 
         data: {
-          dailyNutrition: dailyNutrition,
-          updatedMeal: {
-            dayNumber,
-            mealOrder,
-            ingredientIndex,
-            newIngredient: newIngredientText,
-            updatedNutrition: {
-              caloriesPerServing: meal.caloriesPerServing,
-              proteinPerServing: meal.proteinGrams,
-              carbsPerServing: meal.carbsGrams,
-              fatPerServing: meal.fatGrams,
-              fiberPerServing: meal.fiberGrams,
-              totalCalories: meal.totalCalories,
-              totalProtein: meal.totalProtein,
-              totalCarbs: meal.totalCarbs,
-              totalFat: meal.totalFat,
-              totalFiber: meal.totalFiber
-            }
-          }
+          mealPlan: {
+            id: previewId,
+            meals: rawMeals.map((m: any) => ({
+              id: m.id,
+              mealType: m.mealType,
+              mealOrder: m.mealOrder,
+              mealName: m.mealType?.toUpperCase(),
+              recipeName: m.recipeName,
+              recipeUrl: m.recipeUrl,
+              recipeImage: m.recipeImageUrl,
+              caloriesPerServing: m.caloriesPerServing,
+              totalCalories: m.totalCalories,
+              protein: m.protein,
+              carbs: m.carbs,
+              fat: m.fat,
+              fiber: m.fiber,
+              ingredients: m.ingredients
+            }))
+          },
+          days: daysArray,
+          overallStats: overallStats,
+          totalDays: 1,
+          calculationBreakdown: calculationBreakdown
         }
       };
 
@@ -5226,19 +5451,14 @@ export class MealPlanningService {
       console.log('mealOrder:', mealOrder);
       console.log('ingredientIndex:', ingredientIndex);
 
-      // Get the raw preview data from database
-      const { data: previewPlan, error: planError } = await supabase
-        .from('meal_plans')
-        .select('*')
-        .eq('id', previewId)
-        .single();
-
-      if (planError || !previewPlan) {
+      // Get the meal plan data using the getMealPlan function (same as edit)
+      const mealPlan = await this.getMealPlan(previewId);
+      if (!mealPlan) {
         return { success: false, error: 'Preview not found' };
       }
 
-      // Get the raw meals data
-      const rawMeals = previewPlan.generated_meals as any[];
+      // Get the meals data
+      const rawMeals = mealPlan.meals;
       if (!Array.isArray(rawMeals)) {
         return { success: false, error: 'Invalid meal data structure' };
       }
@@ -5249,18 +5469,21 @@ export class MealPlanningService {
       console.log('🔍 Available meals:', rawMeals.map(m => ({ 
         mealOrder: m.mealOrder, 
         mealType: m.mealType,
-        mealKey: m.mealKey,
+        id: m.id,
         keys: Object.keys(m)
       })));
       
-      // The preview data structure uses mealKey instead of mealOrder
-      const meal = rawMeals.find(
-        (m: any) => m.mealKey === `meal_${mealOrder}` || m.mealOrder === mealOrder
+      // Find the specific meal in the data
+      const mealIndex = rawMeals.findIndex(
+        (m: any) => m.mealOrder === mealOrder
       );
 
-      if (!meal) {
+      if (mealIndex === -1) {
+        console.log('Available meals:', rawMeals.map(m => ({ mealOrder: m.mealOrder, mealType: m.mealType })));
         return { success: false, error: 'Meal not found in preview' };
       }
+
+      const meal = rawMeals[mealIndex];
 
       // Check if ingredients exist
       if (!meal.ingredients || ingredientIndex >= meal.ingredients.length) {
@@ -5280,7 +5503,7 @@ export class MealPlanningService {
       let deletedNutritionData: any = null;
       if (deletedIngredientText) {
         deletedNutritionData = await this.edamamService.getIngredientNutrition(deletedIngredientText);
-        console.log('🗑️ DELETED INGREDIENT NUTRITION:', deletedNutritionData);
+      console.log('🗑️ DELETED INGREDIENT NUTRITION:', deletedNutritionData);
       }
 
       // Remove the ingredient
@@ -5288,10 +5511,10 @@ export class MealPlanningService {
 
       // Get current total nutrition from the meal (same logic as edit)
       let totalCalories = meal.totalCalories || 0;
-      let totalProtein = meal.protein || meal.totalProtein || 0;
-      let totalCarbs = meal.carbs || meal.totalCarbs || 0;
-      let totalFat = meal.fat || meal.totalFat || 0;
-      let totalFiber = meal.fiber || meal.totalFiber || 0;
+      let totalProtein = meal.totalProtein || meal.protein || 0;
+      let totalCarbs = meal.totalCarbs || meal.carbs || 0;
+      let totalFat = meal.totalFat || meal.fat || 0;
+      let totalFiber = meal.totalFiber || meal.fiber || 0;
 
       console.log('📊 CURRENT MEAL TOTALS BEFORE DELETE:', {
         totalCalories,
@@ -5354,7 +5577,7 @@ export class MealPlanningService {
       meal.carbsGrams = Math.round(totalCarbs / servings * 100) / 100;
       meal.fatGrams = Math.round(totalFat / servings * 100) / 100;
       meal.fiberGrams = Math.round(totalFiber / servings * 100) / 100;
-      
+
       console.log('📊 RECALCULATED NUTRITION:', {
         totalCalories,
         totalProtein,
@@ -5373,7 +5596,6 @@ export class MealPlanningService {
 
       // Recalculate daily nutrition
       const dailyNutrition = this.calculateDailyNutrition(rawMeals);
-      previewPlan.nutrition_summary = dailyNutrition;
 
       // Update the meal plan in database
       const { error: updateError } = await supabase
@@ -5390,24 +5612,69 @@ export class MealPlanningService {
       }
 
       console.log('✅ DELETE PREVIEW MEAL INGREDIENT - SUCCESS');
+      
+      // Create days array structure to match consolidated GET API
+      const daysArray = [{
+        dayNumber: 1,
+        date: new Date().toISOString().split('T')[0],
+        meals: rawMeals.map((m: any) => ({
+          id: m.id,
+          mealType: m.mealType,
+          mealOrder: m.mealOrder,
+          mealName: m.mealType?.toUpperCase(),
+          recipeName: m.recipeName,
+          recipeUrl: m.recipeUrl,
+          recipeImage: m.recipeImageUrl,
+          caloriesPerServing: m.caloriesPerServing,
+          totalCalories: m.totalCalories,
+          protein: m.protein,
+          carbs: m.carbs,
+          fat: m.fat,
+          fiber: m.fiber,
+          ingredients: m.ingredients
+        })),
+        dailyNutrition: dailyNutrition,
+        mealCount: rawMeals.length
+      }];
+
+      // Calculate overall stats
+      const overallStats = {
+        totalDays: 1,
+        totalMeals: rawMeals.length,
+        averageMealsPerDay: rawMeals.length,
+        totalCalories: dailyNutrition.totalCalories,
+        totalProtein: dailyNutrition.totalProtein,
+        totalCarbs: dailyNutrition.totalCarbs,
+        totalFat: dailyNutrition.totalFat,
+        totalFiber: dailyNutrition.totalFiber,
+        averageCaloriesPerDay: dailyNutrition.totalCalories
+      };
+
       return { 
         success: true, 
         data: {
-          mealPlan: previewPlan,
-          dailyNutrition: dailyNutrition,
-          deletedMeal: {
-            dayNumber,
-            mealOrder,
-            ingredientIndex,
-            deletedIngredient: deletedIngredient,
-            updatedNutrition: {
-              caloriesPerServing: meal.recipe.nutritionSummary.calories,
-              proteinPerServing: meal.recipe.nutritionSummary.protein,
-              carbsPerServing: meal.recipe.nutritionSummary.carbs,
-              fatPerServing: meal.recipe.nutritionSummary.fat,
-              fiberPerServing: meal.recipe.nutritionSummary.fiber
-            }
-          }
+          mealPlan: {
+            id: previewId,
+            meals: rawMeals.map((m: any) => ({
+              id: m.id,
+              mealType: m.mealType,
+              mealOrder: m.mealOrder,
+              mealName: m.mealType?.toUpperCase(),
+              recipeName: m.recipeName,
+              recipeUrl: m.recipeUrl,
+              recipeImage: m.recipeImageUrl,
+              caloriesPerServing: m.caloriesPerServing,
+              totalCalories: m.totalCalories,
+              protein: m.protein,
+              carbs: m.carbs,
+              fat: m.fat,
+              fiber: m.fiber,
+              ingredients: m.ingredients
+            }))
+          },
+          days: daysArray,
+          overallStats: overallStats,
+          totalDays: 1
         }
       };
 
@@ -5489,10 +5756,10 @@ export class MealPlanningService {
 
       // Get current total nutrition from the meal (same logic as edit)
       let totalCalories = meal.totalCalories || 0;
-      let totalProtein = meal.protein || meal.totalProtein || 0;
-      let totalCarbs = meal.carbs || meal.totalCarbs || 0;
-      let totalFat = meal.fat || meal.totalFat || 0;
-      let totalFiber = meal.fiber || meal.totalFiber || 0;
+      let totalProtein = meal.totalProtein || meal.protein || 0;
+      let totalCarbs = meal.totalCarbs || meal.carbs || 0;
+      let totalFat = meal.totalFat || meal.fat || 0;
+      let totalFiber = meal.totalFiber || meal.fiber || 0;
 
       console.log('📊 CURRENT MEAL TOTALS BEFORE ADD:', {
         totalCalories,
@@ -5581,27 +5848,69 @@ export class MealPlanningService {
       }
 
       console.log('✅ ADD PREVIEW MEAL INGREDIENT - SUCCESS');
+      
+      // Create days array structure to match consolidated GET API
+      const daysArray = [{
+        dayNumber: 1,
+        date: new Date().toISOString().split('T')[0],
+        meals: rawMeals.map((m: any) => ({
+          id: m.id,
+          mealType: m.mealType,
+          mealOrder: m.mealOrder,
+          mealName: m.mealType?.toUpperCase(),
+          recipeName: m.recipeName,
+          recipeUrl: m.recipeUrl,
+          recipeImage: m.recipeImageUrl,
+          caloriesPerServing: m.caloriesPerServing,
+          totalCalories: m.totalCalories,
+          protein: m.protein,
+          carbs: m.carbs,
+          fat: m.fat,
+          fiber: m.fiber,
+          ingredients: m.ingredients
+        })),
+        dailyNutrition: dailyNutrition,
+        mealCount: rawMeals.length
+      }];
+
+      // Calculate overall stats
+      const overallStats = {
+        totalDays: 1,
+        totalMeals: rawMeals.length,
+        averageMealsPerDay: rawMeals.length,
+        totalCalories: dailyNutrition.totalCalories,
+        totalProtein: dailyNutrition.totalProtein,
+        totalCarbs: dailyNutrition.totalCarbs,
+        totalFat: dailyNutrition.totalFat,
+        totalFiber: dailyNutrition.totalFiber,
+        averageCaloriesPerDay: dailyNutrition.totalCalories
+      };
+
       return { 
         success: true, 
         data: {
-          dailyNutrition: dailyNutrition,
-          addedMeal: {
-            dayNumber,
-            mealOrder,
-            newIngredient: newIngredientText,
-            updatedNutrition: {
-              caloriesPerServing: meal.caloriesPerServing,
-              proteinPerServing: meal.proteinGrams,
-              carbsPerServing: meal.carbsGrams,
-              fatPerServing: meal.fatGrams,
-              fiberPerServing: meal.fiberGrams,
-              totalCalories: meal.totalCalories,
-              totalProtein: meal.totalProtein,
-              totalCarbs: meal.totalCarbs,
-              totalFat: meal.totalFat,
-              totalFiber: meal.totalFiber
-            }
-          }
+          mealPlan: {
+            id: previewId,
+            meals: rawMeals.map((m: any) => ({
+              id: m.id,
+              mealType: m.mealType,
+              mealOrder: m.mealOrder,
+              mealName: m.mealType?.toUpperCase(),
+              recipeName: m.recipeName,
+              recipeUrl: m.recipeUrl,
+              recipeImage: m.recipeImageUrl,
+              caloriesPerServing: m.caloriesPerServing,
+              totalCalories: m.totalCalories,
+              protein: m.protein,
+              carbs: m.carbs,
+              fat: m.fat,
+              fiber: m.fiber,
+              ingredients: m.ingredients
+            }))
+          },
+          days: daysArray,
+          overallStats: overallStats,
+          totalDays: 1
         }
       };
 
