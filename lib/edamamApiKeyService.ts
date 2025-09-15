@@ -89,10 +89,24 @@ export class EdamamApiKeyService {
     try {
       console.log(`🔑 Edamam API Key Service - Incrementing usage for ${apiType} key: ${appId}`);
       
+      // First get the current usage count
+      const { data: currentKey, error: fetchError } = await supabase
+        .from('edamam_api_keys')
+        .select('usage_count')
+        .eq('app_id', appId)
+        .eq('api_type', apiType)
+        .single();
+
+      if (fetchError || !currentKey) {
+        console.error(`❌ Edamam API Key Service - Error fetching current usage:`, fetchError);
+        return false;
+      }
+
+      // Then increment it
       const { error } = await supabase
         .from('edamam_api_keys')
         .update({
-          usage_count: supabase.raw('usage_count + 1'),
+          usage_count: currentKey.usage_count + 1,
           last_used_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })

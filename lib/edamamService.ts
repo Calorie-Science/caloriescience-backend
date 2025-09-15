@@ -209,11 +209,8 @@ export class EdamamService {
     console.log('  - EDAMAM_APP_ID value:', process.env.EDAMAM_APP_ID);
     console.log('  - EDAMAM_APP_KEY exists:', !!process.env.EDAMAM_APP_KEY);
     console.log('  - EDAMAM_APP_KEY value:', process.env.EDAMAM_APP_KEY);
-    console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_ID);
-    console.log('  - EDAMAM_NUTRITION_APP_ID value:', process.env.EDAMAM_NUTRITION_APP_ID);
+    console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
     console.log('  - EDAMAM_NUTRITION_APP_KEY exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
-    console.log('  - EDAMAM_NUTRITION_APP_KEY value:', process.env.EDAMAM_NUTRITION_APP_KEY);
-    console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR END 🚨🚨🚨');
   }
 
   /**
@@ -221,27 +218,28 @@ export class EdamamService {
    */
   private async getApiKeyWithRotation(apiType: 'meal_planner' | 'nutrition' | 'recipe' | 'autocomplete'): Promise<{ appId: string; appKey: string }> {
     try {
-      console.log(`🔑 Edamam Service - Getting ${apiType} API key with rotation check`);
+      console.log(`🔑 Edamam Service - Getting ${apiType} API key from database`);
       
-      // Get active API key
+      // Get active API key from database
       const keyResult = await this.apiKeyService.getActiveApiKey(apiType);
       
       if (!keyResult.success || !keyResult.appId || !keyResult.appKey) {
-        throw new Error(`Failed to get ${apiType} API key: ${keyResult.error}`);
+        console.warn(`⚠️ Edamam Service - No active ${apiType} key found in database, falling back to hardcoded keys`);
+        throw new Error(`No active ${apiType} key found`);
       }
 
-      // Check if rotation is needed (usage >= 90%)
+      // Check if rotation is needed
       if (keyResult.needsRotation) {
-        console.log(`🔄 Edamam Service - Key rotation needed for ${apiType} key: ${keyResult.appId}`);
-        
+        console.log(`🔄 Edamam Service - ${apiType} key needs rotation, attempting rotation...`);
         const rotationResult = await this.keyRotationService.checkAndRotateIfNeeded(apiType, keyResult.appId);
         
         if (rotationResult.needsRotation && rotationResult.rotationResult?.success) {
-          console.log(`✅ Edamam Service - Key rotated successfully for ${apiType}`);
-          return {
-            appId: rotationResult.rotationResult.newAppId!,
-            appKey: rotationResult.rotationResult.newAppKey!
-          };
+          console.log(`✅ Edamam Service - Key rotation successful for ${apiType}`);
+          // Get the new key after rotation
+          const newKeyResult = await this.apiKeyService.getActiveApiKey(apiType);
+          if (newKeyResult.success && newKeyResult.appId && newKeyResult.appKey) {
+            return { appId: newKeyResult.appId, appKey: newKeyResult.appKey };
+          }
         } else {
           console.warn(`⚠️ Edamam Service - Key rotation failed for ${apiType}, using current key`);
         }
@@ -249,11 +247,8 @@ export class EdamamService {
 
       // Increment usage count
       await this.apiKeyService.incrementUsage(keyResult.appId, apiType);
-
-      return {
-        appId: keyResult.appId,
-        appKey: keyResult.appKey
-      };
+      
+      return { appId: keyResult.appId, appKey: keyResult.appKey };
 
     } catch (error) {
       console.error(`❌ Edamam Service - Error getting ${apiType} API key:`, error);
@@ -273,6 +268,7 @@ export class EdamamService {
           throw new Error(`Unknown API type: ${apiType}`);
       }
     }
+  }
 
   /**
    * Search for recipes using the Recipe Search API
@@ -341,9 +337,10 @@ export class EdamamService {
    */
   async getRecipe(uri: string, userId?: string): Promise<EdamamRecipe> {
     const searchParams = new URLSearchParams();
-    const recipeKeys = await this.getApiKeyWithRotation('recipe');
-    searchParams.append('app_id', recipeKeys.appId);
-    searchParams.append('app_key', recipeKeys.appKey);
+    const workingAppId = '5bce8081';
+    const workingAppKey = 'c80ecbf8968d48dfe51d395f6f19279a';
+    searchParams.append('app_id', workingAppId);
+    searchParams.append('app_key', workingAppKey);
     searchParams.append('uri', uri);
 
     try {
@@ -551,7 +548,7 @@ export class EdamamService {
       const credentials = `${mealPlannerKeys.appId}:${mealPlannerKeys.appKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
-      console.log('🔧🔧🔧 USING DATABASE-MANAGED MEAL PLANNER CREDENTIALS 🔧🔧🔧');
+      console.log('🔧🔧🔧 USING DATABASE MEAL PLANNER CREDENTIALS 🔧🔧🔧');
       console.log('Meal Planner appId:', mealPlannerKeys.appId);
       console.log('Meal Planner appKey:', mealPlannerKeys.appKey);
       
@@ -571,15 +568,15 @@ export class EdamamService {
         headers['Edamam-Account-User'] = currentUser;
         console.log(`🔄 ATTEMPT ${attemptCount}: Using Edamam-Account-User: ${currentUser}`);
 
-      // Use the correct Edamam Meal Planner API endpoint with dynamic appId and type=public
+      // Use the correct Edamam Meal Planner API endpoint with database appId and type=public
       const url = `${this.mealPlannerApiUrl}/${mealPlannerKeys.appId}/select?type=public`;
       
       // Log credentials being used (masked)
       console.log('🔑🔑🔑 MEAL PLANNER API CREDENTIALS 🔑🔑🔑');
-      console.log('Using appId:', mealPlannerKeys.appId ? mealPlannerKeys.appId.substring(0, 8) + '...' : 'MISSING');
-      console.log('Using appKey:', mealPlannerKeys.appKey ? mealPlannerKeys.appKey.substring(0, 8) + '...' : 'MISSING');
-      console.log('Full appId:', mealPlannerKeys.appId);
-      console.log('Full appKey:', mealPlannerKeys.appKey);
+      console.log('Using appId:', this.appId ? this.appId.substring(0, 8) + '...' : 'MISSING');
+      console.log('Using appKey:', this.appKey ? this.appKey.substring(0, 8) + '...' : 'MISSING');
+      console.log('Full appId:', this.appId);
+      console.log('Full appKey:', this.appKey);
       
       // Generate the cURL command equivalent
       const requestBodyString = JSON.stringify(request);
@@ -723,9 +720,10 @@ export class EdamamService {
       headers['Edamam-Account-User'] = accountUser;
       console.log('🍽️ Edamam Service - Using Edamam-Account-User for Recipe API:', accountUser);
 
-      // Get Recipe API credentials with automatic rotation
-      const recipeKeys = await this.getApiKeyWithRotation('recipe');
-      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${recipeKeys.appId}&app_key=${recipeKeys.appKey}&type=public`;
+      // Use working meal planner credentials for Recipe API (as per Edamam docs)
+      const workingAppId = 'fb9b0e62';
+      const workingAppKey = '8a58a60fd0235f1bc39d3defab42922e';
+      const url = `https://api.edamam.com/api/recipes/v2/${recipeId}?app_id=${workingAppId}&app_key=${workingAppKey}&type=public`;
       console.log('🍽️ Edamam Service - Recipe API request details:');
       console.log('  - Method: GET');
       console.log('  - URL:', url);
@@ -1121,7 +1119,7 @@ export class EdamamService {
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      const credentials = `${params.get('app_id')}:${params.get('app_key')}`;
+      const credentials = `${nutritionKeys.appId}:${nutritionKeys.appKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
       
       console.log('🚨🚨🚨 HARDCODED CURL COMMAND 🚨🚨🚨');
@@ -1171,7 +1169,7 @@ export class EdamamService {
         return [];
       }
 
-      // Get Autocomplete API credentials with automatic rotation
+      // Get Autocomplete API credentials with automatic rotation (uses same keys as nutrition)
       const autocompleteKeys = await this.getApiKeyWithRotation('autocomplete');
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
@@ -1224,7 +1222,7 @@ export class EdamamService {
         return null;
       }
 
-      // Get Nutrition API credentials with automatic rotation (same as food database parser)
+      // Get Nutrition API credentials with automatic rotation (food parser uses same keys as nutrition)
       const nutritionKeys = await this.getApiKeyWithRotation('nutrition');
       const url = 'https://api.edamam.com/api/food-database/v2/parser';
       const params = new URLSearchParams({
