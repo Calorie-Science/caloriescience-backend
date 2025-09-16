@@ -208,58 +208,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           });
         }
       } else if (type === 'client-goal') {
-        // Handle client goal operations
-        if (action === 'update' && req.body.goalId) {
-          // Update existing client goal
-          const {
-            goalId,
-            eerGoalCalories,
-            proteinGoalMin,
-            proteinGoalMax,
-            carbsGoalMin,
-            carbsGoalMax,
-            fatGoalMin,
-            fatGoalMax,
-            fiberGoalGrams,
-            waterGoalLiters,
-            goalStartDate,
-            goalEndDate,
-            notes
-          } = req.body;
-
-          const result = await clientGoalsService.updateClientGoal(
-            goalId,
-            {
-              eerGoalCalories,
-              proteinGoalMin,
-              proteinGoalMax,
-              carbsGoalMin,
-              carbsGoalMax,
-              fatGoalMin,
-              fatGoalMax,
-              fiberGoalGrams,
-              waterGoalLiters,
-              goalStartDate,
-              goalEndDate,
-              notes
-            },
-            user.id
-          );
-
-          if (!result.success) {
-            return res.status(400).json({
-              error: 'Failed to update client goal',
-              message: result.error
-            });
-          }
-
-          return res.status(200).json({
-            success: true,
-            data: result.data,
-            message: 'Client goal updated successfully'
-          });
-        } else {
-          // Create new client goal
+        // Handle client goal operations - flexible upsert approach
+        // Always check if goal exists first, then update or create accordingly
+        {
+          // Flexible client goal handling - check if exists, update if yes, create if no
           const {
             eerGoalCalories,
             proteinGoalMin,
@@ -270,50 +222,96 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             fatGoalMax,
             fiberGoalGrams,
             waterGoalLiters,
+            allergies,
+            preferences,
+            cuisineTypes,
             goalStartDate,
             goalEndDate,
             notes
           } = req.body;
 
-          if (!eerGoalCalories || !proteinGoalMin || !proteinGoalMax || !carbsGoalMin || !carbsGoalMax || !fatGoalMin || !fatGoalMax) {
-            return res.status(400).json({
-              error: 'Missing required fields',
-              message: 'eerGoalCalories, proteinGoalMin, proteinGoalMax, carbsGoalMin, carbsGoalMax, fatGoalMin, and fatGoalMax are required'
+          // First, check if client goal already exists
+          const existingGoalResult = await clientGoalsService.getActiveClientGoal(clientId, user.id);
+          
+          if (existingGoalResult.success && existingGoalResult.data) {
+            // Client goal exists - UPDATE only the provided fields
+            console.log('🎯 Client goal exists, updating with provided fields only');
+            
+            const result = await clientGoalsService.updateClientGoal(
+              existingGoalResult.data.id,
+              {
+                eerGoalCalories,
+                proteinGoalMin,
+                proteinGoalMax,
+                carbsGoalMin,
+                carbsGoalMax,
+                fatGoalMin,
+                fatGoalMax,
+                fiberGoalGrams,
+                waterGoalLiters,
+                allergies,
+                preferences,
+                cuisineTypes,
+                goalStartDate,
+                goalEndDate,
+                notes
+              },
+              user.id
+            );
+
+            if (!result.success) {
+              return res.status(400).json({
+                error: 'Failed to update client goal',
+                message: result.error
+              });
+            }
+
+            return res.status(200).json({
+              success: true,
+              data: result.data,
+              message: 'Client goal updated successfully'
+            });
+            
+          } else {
+            // Client goal doesn't exist - CREATE with provided fields only
+            // No required fields validation - allow creating with just allergies, preferences, etc.
+            console.log('🎯 No client goal exists, creating new one with provided fields only');
+            
+            const result = await clientGoalsService.createClientGoal(
+              {
+                clientId,
+                eerGoalCalories: eerGoalCalories || 0, // Default to 0 if not provided
+                proteinGoalMin: proteinGoalMin || 0,
+                proteinGoalMax: proteinGoalMax || 0,
+                carbsGoalMin: carbsGoalMin || 0,
+                carbsGoalMax: carbsGoalMax || 0,
+                fatGoalMin: fatGoalMin || 0,
+                fatGoalMax: fatGoalMax || 0,
+                fiberGoalGrams,
+                waterGoalLiters,
+                allergies,
+                preferences,
+                cuisineTypes,
+                goalStartDate,
+                goalEndDate,
+                notes
+              },
+              user.id
+            );
+
+            if (!result.success) {
+              return res.status(400).json({
+                error: 'Failed to create client goal',
+                message: result.error
+              });
+            }
+
+            return res.status(201).json({
+              success: true,
+              data: result.data,
+              message: 'Client goal created successfully'
             });
           }
-
-          // Create client goal
-          const result = await clientGoalsService.createClientGoal(
-            {
-              clientId,
-              eerGoalCalories,
-              proteinGoalMin,
-              proteinGoalMax,
-              carbsGoalMin,
-              carbsGoalMax,
-              fatGoalMin,
-              fatGoalMax,
-              fiberGoalGrams,
-              waterGoalLiters,
-              goalStartDate,
-              goalEndDate,
-              notes
-            },
-            user.id
-          );
-
-          if (!result.success) {
-            return res.status(400).json({
-              error: 'Failed to create client goal',
-              message: result.error
-            });
-          }
-
-          return res.status(201).json({
-            success: true,
-            data: result.data,
-            message: 'Client goal created successfully'
-          });
         }
       } else {
         // Meal plan type - validate action
@@ -807,6 +805,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     } catch (error) {
       console.error('❌ Error in POST request:', error);
+      
+      // Check if this is the specific Edamam error
+      if (error instanceof Error && error.message === 'Unable to fetch meals from food database') {
+        return res.status(400).json({
+          success: false,
+          error: 'Meal planning failed',
+          message: 'Unable to fetch meals from food database'
+        });
+      }
+      
       const errorDetails = {
         message: error instanceof Error ? error.message : 'Failed to process request',
         stack: error instanceof Error ? error.stack : undefined,

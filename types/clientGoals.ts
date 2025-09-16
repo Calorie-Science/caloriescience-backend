@@ -108,13 +108,13 @@ export interface ClientGoal {
 
 export interface CreateClientGoalRequest {
   clientId: string;
-  eerGoalCalories: number;
-  proteinGoalMin: number;
-  proteinGoalMax: number;
-  carbsGoalMin: number;
-  carbsGoalMax: number;
-  fatGoalMin: number;
-  fatGoalMax: number;
+  eerGoalCalories?: number;
+  proteinGoalMin?: number;
+  proteinGoalMax?: number;
+  carbsGoalMin?: number;
+  carbsGoalMax?: number;
+  fatGoalMin?: number;
+  fatGoalMax?: number;
   fiberGoalGrams?: number;
   waterGoalLiters?: number;
   allergies?: Allergy[];

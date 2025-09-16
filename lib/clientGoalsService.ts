@@ -20,20 +20,28 @@ export class ClientGoalsService {
     try {
       console.log('🎯 Client Goals Service - Creating client goal:', JSON.stringify(request, null, 2));
       
-      // Validate request
-      if (!request.clientId || !request.eerGoalCalories) {
+      // Validate request - only clientId is required now
+      if (!request.clientId) {
         return {
           success: false,
-          error: 'Missing required fields: clientId and eerGoalCalories are required'
+          error: 'Missing required field: clientId is required'
         };
       }
 
-      // Validate macro ranges
-      if (!validateMacroRanges(
-        request.proteinGoalMin, request.proteinGoalMax,
-        request.carbsGoalMin, request.carbsGoalMax,
-        request.fatGoalMin, request.fatGoalMax
-      )) {
+      // Validate macro ranges only if they are provided and have meaningful values
+      const hasMacroValues = (request.proteinGoalMin !== undefined && request.proteinGoalMin > 0) ||
+                           (request.proteinGoalMax !== undefined && request.proteinGoalMax > 0) ||
+                           (request.carbsGoalMin !== undefined && request.carbsGoalMin > 0) ||
+                           (request.carbsGoalMax !== undefined && request.carbsGoalMax > 0) ||
+                           (request.fatGoalMin !== undefined && request.fatGoalMin > 0) ||
+                           (request.fatGoalMax !== undefined && request.fatGoalMax > 0);
+
+      if (hasMacroValues &&
+          !validateMacroRanges(
+            request.proteinGoalMin || 0, request.proteinGoalMax || 0,
+            request.carbsGoalMin || 0, request.carbsGoalMax || 0,
+            request.fatGoalMin || 0, request.fatGoalMax || 0
+          )) {
         return {
           success: false,
           error: 'Invalid macro ranges: min values must be less than max values and all values must be positive'
@@ -115,13 +123,13 @@ export class ClientGoalsService {
             .insert({
               client_id: request.clientId,
               nutritionist_id: nutritionistId,
-              eer_goal_calories: request.eerGoalCalories,
-              protein_goal_min: request.proteinGoalMin,
-              protein_goal_max: request.proteinGoalMax,
-              carbs_goal_min: request.carbsGoalMin,
-              carbs_goal_max: request.carbsGoalMax,
-              fat_goal_min: request.fatGoalMin,
-              fat_goal_max: request.fatGoalMax,
+              eer_goal_calories: request.eerGoalCalories || 0,
+              protein_goal_min: request.proteinGoalMin || 0,
+              protein_goal_max: request.proteinGoalMax || 0,
+              carbs_goal_min: request.carbsGoalMin || 0,
+              carbs_goal_max: request.carbsGoalMax || 0,
+              fat_goal_min: request.fatGoalMin || 0,
+              fat_goal_max: request.fatGoalMax || 0,
               fiber_goal_grams: request.fiberGoalGrams,
               water_goal_liters: request.waterGoalLiters,
               allergies: request.allergies,

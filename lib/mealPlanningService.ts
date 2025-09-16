@@ -528,8 +528,7 @@ export class MealPlanningService {
         if (!mealPlanResponse || !mealPlanResponse.selection || mealPlanResponse.selection.length === 0) {
           console.error('❌ Meal Planning Debug - Invalid or empty response from Meal Planner API');
           console.error('❌ Meal Planning Debug - Response status:', mealPlanResponse?.status);
-          console.log('🍽️ Meal Planning Debug - Falling back to placeholder meals due to empty response...');
-          return this.createFallbackMeals(mealDistribution);
+          throw new Error('Unable to fetch meals from food database');
         }
 
         // Convert the meal plan response to our meal format
