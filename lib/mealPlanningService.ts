@@ -1551,6 +1551,214 @@ export class MealPlanningService {
   }
 
   /**
+   * Handle Claude async meal plan retrieval
+   */
+  private async handleClaudeAsyncMealPlan(asyncMealPlan: any, mealPlanId: string): Promise<any> {
+    console.log('🤖 Handling Claude async meal plan');
+    
+    if (asyncMealPlan.status === 'pending') {
+      // Check Claude batch status
+      console.log('🤖 Checking Claude batch status');
+      
+      const { ClaudeService } = await import('./claudeService');
+      const claudeService = new ClaudeService();
+      
+      const claudeResponse = await claudeService.checkBatchStatus(asyncMealPlan.thread_id);
+      
+      if (claudeResponse.success && claudeResponse.status === 'completed') {
+        // Update database with completed result
+        await supabase
+          .from('async_meal_plans')
+          .update({
+            status: 'completed',
+            generated_meal_plan: claudeResponse.data,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', mealPlanId);
+        
+        // Extract days from the nested structure
+        const generatedData = claudeResponse.data;
+        const daysData = generatedData?.data?.mealPlan?.days || generatedData?.days || [];
+        
+        return {
+          success: true,
+          data: {
+            mealPlan: {
+              id: mealPlanId,
+              status: 'preview',
+              clientId: asyncMealPlan.client_id,
+              nutritionistId: asyncMealPlan.nutritionist_id,
+              completedAt: new Date().toISOString()
+            },
+            days: daysData,
+            overallStats: generatedData?.data?.mealPlan?.dailyNutrition || generatedData?.overallStats || null,
+            clientGoals: generatedData?.clientGoals || asyncMealPlan.client_goals || null,
+            generatedMealPlan: generatedData
+          }
+        };
+      } else if (claudeResponse.success && claudeResponse.status === 'pending') {
+        // Still processing
+        return {
+          success: true,
+          data: {
+            mealPlan: {
+              id: mealPlanId,
+              status: 'preview',
+              clientId: asyncMealPlan.client_id,
+              nutritionistId: asyncMealPlan.nutritionist_id,
+              estimatedCompletionTime: '30-60 seconds'
+            },
+            days: [],
+            overallStats: null,
+            clientGoals: asyncMealPlan.client_goals,
+            generatedMealPlan: null
+          }
+        };
+      } else {
+        // Update database with error
+        await supabase
+          .from('async_meal_plans')
+          .update({
+            status: 'failed',
+            error_message: claudeResponse.error || 'Claude generation failed'
+          })
+          .eq('id', mealPlanId);
+        
+        return {
+          success: false,
+          error: claudeResponse.error || 'Claude meal plan generation failed'
+        };
+      }
+    } else if (asyncMealPlan.status === 'completed') {
+      // Claude has completed
+      const generatedData = asyncMealPlan.generated_meal_plan;
+      const daysData = generatedData?.data?.mealPlan?.days || generatedData?.days || [];
+      
+      return {
+        success: true,
+        data: {
+          mealPlan: {
+            id: mealPlanId,
+            status: 'preview',
+            clientId: asyncMealPlan.client_id,
+            nutritionistId: asyncMealPlan.nutritionist_id,
+            completedAt: asyncMealPlan.completed_at
+          },
+          days: daysData,
+          overallStats: generatedData?.data?.mealPlan?.dailyNutrition || generatedData?.overallStats || null,
+          clientGoals: generatedData?.clientGoals || asyncMealPlan.client_goals || null,
+          generatedMealPlan: generatedData
+        }
+      };
+    } else if (asyncMealPlan.status === 'failed') {
+      return {
+        success: false,
+        error: asyncMealPlan.error_message || 'Claude meal plan generation failed'
+      };
+    }
+  }
+
+  /**
+   * Handle OpenAI async meal plan retrieval
+   */
+  private async handleOpenAIAsyncMealPlan(asyncMealPlan: any, mealPlanId: string): Promise<any> {
+    console.log('🤖 Handling OpenAI async meal plan');
+    
+    if (asyncMealPlan.status === 'pending') {
+      // Check with OpenAI Assistant
+      const { OpenAIAssistantService } = await import('./openaiAssistantService');
+      const openaiService = new OpenAIAssistantService();
+      
+      const assistantResponse = await openaiService.checkGenerationStatus(
+        asyncMealPlan.thread_id,
+        asyncMealPlan.run_id
+      );
+    
+      if (assistantResponse.status === 'completed') {
+        // Update status in database
+        await supabase
+          .from('async_meal_plans')
+          .update({
+            status: 'completed',
+            generated_meal_plan: assistantResponse.data,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', mealPlanId);
+        
+        // Extract days from the nested structure
+        const generatedData = assistantResponse.data;
+        const daysData = generatedData?.data?.mealPlan?.days || generatedData?.days || [];
+        
+        return {
+          success: true,
+          data: {
+            mealPlan: {
+              id: mealPlanId,
+              status: 'preview',
+              clientId: asyncMealPlan.client_id,
+              nutritionistId: asyncMealPlan.nutritionist_id,
+              completedAt: new Date().toISOString()
+            },
+            days: daysData,
+            overallStats: generatedData?.data?.mealPlan?.dailyNutrition || generatedData?.overallStats || null,
+            clientGoals: generatedData?.clientGoals || asyncMealPlan.client_goals || null,
+            generatedMealPlan: generatedData
+          }
+        };
+      } else if (assistantResponse.status === 'failed') {
+        return {
+          success: false,
+          error: assistantResponse.error || 'OpenAI meal plan generation failed'
+        };
+      } else {
+        // Still pending
+        return {
+          success: true,
+          data: {
+            mealPlan: {
+              id: mealPlanId,
+              status: 'preview',
+              clientId: asyncMealPlan.client_id,
+              nutritionistId: asyncMealPlan.nutritionist_id,
+              estimatedCompletionTime: '2-3 minutes'
+            },
+            days: [],
+            overallStats: null,
+            clientGoals: asyncMealPlan.client_goals,
+            generatedMealPlan: null
+          }
+        };
+      }
+    } else if (asyncMealPlan.status === 'completed') {
+      // Extract days from the nested structure
+      const generatedData = asyncMealPlan.generated_meal_plan;
+      const daysData = generatedData?.data?.mealPlan?.days || generatedData?.days || [];
+      
+      return {
+        success: true,
+        data: {
+          mealPlan: {
+            id: mealPlanId,
+            status: 'preview',
+            clientId: asyncMealPlan.client_id,
+            nutritionistId: asyncMealPlan.nutritionist_id,
+            completedAt: asyncMealPlan.completed_at
+          },
+          days: daysData,
+          overallStats: generatedData?.data?.mealPlan?.dailyNutrition || generatedData?.overallStats || null,
+          clientGoals: generatedData?.clientGoals || asyncMealPlan.client_goals || null,
+          generatedMealPlan: generatedData
+        }
+      };
+    } else if (asyncMealPlan.status === 'failed') {
+      return {
+        success: false,
+        error: asyncMealPlan.error_message || 'OpenAI meal plan generation failed'
+      };
+    }
+  }
+
+  /**
    * Get all meal plans for a client (optimized version)
    */
   async getClientMealPlans(clientId: string): Promise<GeneratedMealPlan[]> {
@@ -2167,6 +2375,27 @@ export class MealPlanningService {
     console.log(`🔍 Getting meal plan ${mealPlanId} with view: ${view}, day: ${dayNumber}`);
     
     try {
+      // Check if this is an async meal plan ID (UUID format)
+      if (mealPlanId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        // Try to find it in async_meal_plans table first
+        const { data: asyncMealPlan, error: asyncError } = await supabase
+          .from('async_meal_plans')
+          .select('*')
+          .eq('id', mealPlanId)
+          .single();
+        
+        if (!asyncError && asyncMealPlan) {
+          console.log(`🤖 ASYNC MEAL PLAN DETECTED: ${mealPlanId}, AI Model: ${asyncMealPlan.ai_model}`);
+          
+          // Handle based on AI model
+          if (asyncMealPlan.ai_model === 'claude') {
+            return this.handleClaudeAsyncMealPlan(asyncMealPlan, mealPlanId);
+          } else {
+            return this.handleOpenAIAsyncMealPlan(asyncMealPlan, mealPlanId);
+          }
+        }
+      }
+
       // Get meal plan basic info
       const { data: mealPlan, error: planError } = await supabase
         .from('meal_plans')
@@ -3007,12 +3236,25 @@ export class MealPlanningService {
       mappedResponse.previewId = previewId;
       console.log('🎯 Meal Planning Service - Added previewId to mappedResponse:', mappedResponse.previewId);
 
+      // Create days array structure for consistency with saved meal plans
+      const daysArray = [{
+        dayNumber: 1,
+        date: planDate,
+        meals: generatedMeals,
+        dailyNutrition: mappedResponse.dailyNutrition
+      }];
+      
+      // Add days array to mappedResponse
+      mappedResponse.days = daysArray;
+      
+      // Remove the meals property from mappedResponse to avoid duplication
+      const { meals: _, ...mappedResponseWithoutMeals } = mappedResponse;
+      
       return {
         success: true,
         data: {
           mealPlan: {
-            ...mappedResponse,
-            meals: generatedMeals
+            ...mappedResponseWithoutMeals
           },
           clientGoals: clientGoal,
           mealProgram: overrideMealProgram || {

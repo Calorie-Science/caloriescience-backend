@@ -6,11 +6,12 @@ declare global {
       SUPABASE_SERVICE_ROLE_KEY: string;
       SUPABASE_ANON_KEY: string;
       
-      // OpenAI
+      // AI Models
       OPENAI_API_KEY: string;
       OPENAI_MODEL?: string;
       OPENAI_MAX_TOKENS?: string;
       OPENAI_ASSISTANT_ID?: string;
+      ANTHROPIC_API_KEY: string;
       
       // JWT
       JWT_SECRET?: string;

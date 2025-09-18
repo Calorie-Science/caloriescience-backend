@@ -2,11 +2,13 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MealPlanningService, MealPlanGenerationRequest } from '../../lib/mealPlanningService';
 import { MealProgramService } from '../../lib/mealProgramService';
 import { ClientGoalsService } from '../../lib/clientGoalsService';
+import { AsyncMealPlanService } from '../../lib/asyncMealPlanService';
 import { requireAuth } from '../../lib/auth';
 
 const mealPlanningService = new MealPlanningService();
 const mealProgramService = new MealProgramService();
 const clientGoalsService = new ClientGoalsService();
+const asyncMealPlanService = new AsyncMealPlanService();
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Get user from request (set by requireAuth middleware)
@@ -25,7 +27,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     try {
         const {
           type = 'meal-plan', // 'meal-plan' or 'meal-program'
-          action = 'save', // 'preview', 'save', 'update', 'activate' (for meal-plan type)
+          action = 'save', // 'preview', 'save', 'update', 'activate', 'async-generate' (for meal-plan type)
           clientId,
           planDate,
           planType = 'daily',
@@ -40,6 +42,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // Override fields for UI-driven meal plan generation
           overrideMealProgram = null, // Override meal program data from UI
           overrideClientGoals = null, // Override client goals data from UI
+          // Async generation fields
+          additionalText, // Additional text for AI Assistant
+          aiModel = 'openai', // AI model to use: 'openai' or 'claude'
           // Meal program fields
           name,
           description,
@@ -77,7 +82,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Validate clientId for operations that need it
       const needsClientId = type === 'meal-program' || 
                            type === 'client-goal' || 
-                           (type === 'meal-plan' && ['preview', 'save'].includes(action));
+                           (type === 'meal-plan' && ['preview', 'save', 'async-generate'].includes(action));
       
       if (needsClientId && !clientId) {
         return res.status(400).json({
@@ -315,10 +320,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       } else {
         // Meal plan type - validate action
-        if (!['preview', 'save', 'save-from-preview', 'multi-day-edit-ingredient', 'multi-day-delete-ingredient', 'multi-day-add-ingredient', 'create-manual', 'add-manual-meal', 'add-manual-ingredient', 'remove-manual-ingredient', 'delete-manual-meal'].includes(action)) {
+        if (!['preview', 'save', 'save-from-preview', 'async-generate', 'multi-day-edit-ingredient', 'multi-day-delete-ingredient', 'multi-day-add-ingredient', 'create-manual', 'add-manual-meal', 'add-manual-ingredient', 'remove-manual-ingredient', 'delete-manual-meal'].includes(action)) {
           return res.status(400).json({
             error: 'Invalid action',
-            message: 'action must be one of: "preview", "save", "save-from-preview", "multi-day-edit-ingredient", "multi-day-delete-ingredient", "multi-day-add-ingredient", "create-manual", "add-manual-meal", "add-manual-ingredient", "remove-manual-ingredient", "delete-manual-meal"'
+            message: 'action must be one of: "preview", "save", "save-from-preview", "async-generate", "multi-day-edit-ingredient", "multi-day-delete-ingredient", "multi-day-add-ingredient", "create-manual", "add-manual-meal", "add-manual-ingredient", "remove-manual-ingredient", "delete-manual-meal"'
           });
         }
 
@@ -593,6 +598,47 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                 ...generatedMealPlan,
                 id: 'preview-' + Date.now(), // Temporary ID for preview
                 status: 'preview'
+              }
+            }
+          });
+        } else if (action === 'async-generate') {
+          // Start async meal plan generation with OpenAI Assistant
+          console.log('🤖 Starting async meal plan generation for client:', clientId);
+          
+          // Get client goals for async generation
+          const goalsResponse = await clientGoalsService.getActiveClientGoal(clientId, user.id);
+          if (!goalsResponse.success || !goalsResponse.data) {
+            return res.status(400).json({
+              error: 'No active client goals found. Please set client goals first.'
+            });
+          }
+
+          // Start async generation
+           const asyncResult = await asyncMealPlanService.startGeneration(
+             clientId,
+             user.id,
+             goalsResponse.data,
+             additionalText,
+             aiModel
+           );
+
+          if (!asyncResult.success) {
+            return res.status(500).json({
+              error: asyncResult.error || 'Failed to start async meal plan generation'
+            });
+          }
+
+          // Return preview ID immediately - UI can use this to check status
+          return res.status(200).json({
+            success: true,
+            message: 'Async meal plan generation started',
+            data: {
+              mealPlan: {
+                id: asyncResult.data?.id, // This is the preview ID
+                status: 'preview',
+                clientId: clientId,
+                nutritionistId: user.id,
+                estimatedCompletionTime: '2-3 minutes'
               }
             }
           });
