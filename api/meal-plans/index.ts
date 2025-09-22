@@ -32,8 +32,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           clientId,
           planDate,
           planType = 'daily',
-          dietaryRestrictions = [],
-          cuisinePreferences = [],
+          // Override fields for client goals
+          allergies = [], // Override client goal allergies
+          preferences = [], // Override client goal preferences  
+          cuisineTypes = [], // Override client goal cuisine types
           mealPreferences = {},
           targetCalories,
           macroTargets = null, // New field for macro targets
@@ -430,13 +432,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           if (days && days > 1) {
             console.log(`🎯 API - Generating multi-day meal plan for ${days} days starting ${effectiveStartDate}`);
             
+            // Combine allergies and preferences into health labels for Edamam
+            const healthLabels = [
+              ...allergies,     // Safety-critical allergies
+              ...preferences    // Lifestyle preferences
+            ].filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
+            
+            console.log('🎯 API - Multi-day health labels (allergies + preferences):', healthLabels);
+            console.log('🎯 API - Multi-day cuisine types (for meal sections):', cuisineTypes);
+            
             // Generate multi-day meal plan
             generatedMealPlan = await mealPlanningService.generateMultiDayMealPlan(
               clientId,
               effectiveStartDate,
               days,
-              dietaryRestrictions,
-              cuisinePreferences,
+              healthLabels,
+              cuisineTypes,
               user.id,
               overrideMealProgram,
               overrideClientGoals
@@ -478,12 +489,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               hasOverrideClientGoals: !!overrideClientGoals
             });
             
+            // Combine allergies and preferences into health labels for Edamam
+            const healthLabels = [
+              ...allergies,     // Safety-critical allergies
+              ...preferences    // Lifestyle preferences
+            ].filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
+            
+            console.log('🎯 API - Health labels (allergies + preferences):', healthLabels);
+            console.log('🎯 API - Cuisine types (for meal sections):', cuisineTypes);
+            
             // Generate meal plan based on meal program (with possible overrides)
             generatedMealPlan = await mealPlanningService.generateMealPlanFromProgramWithOverrides(
               clientId,
               effectiveStartDate,
-              dietaryRestrictions,
-              cuisinePreferences,
+              healthLabels,
+              cuisineTypes,
               user.id,
               overrideMealProgram,
               overrideClientGoals

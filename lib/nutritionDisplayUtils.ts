@@ -546,13 +546,18 @@ export function formatNutritionDisplay(
   // Format dates to DD-MON-YYYY
   formatAllDates(formattedData);
 
-  // Handle Edamam meal plan structure: mealPlan.days[].meals[].recipe.ingredients[]
+  // Handle Edamam meal plan structure: mealPlan.days[].meals[]
   if (formattedData.mealPlan && formattedData.mealPlan.days && Array.isArray(formattedData.mealPlan.days)) {
     formattedData.mealPlan.days = formattedData.mealPlan.days.map((day: any) => ({
       ...day,
       meals: day.meals && Array.isArray(day.meals) ? 
         day.meals.map((meal: any) => ({
           ...meal,
+          // Format ingredients directly on meal level
+          ingredients: meal.ingredients ? 
+            meal.ingredients.map((ing: any) => formatIngredient(ing, measurementSystem)) : 
+            meal.ingredients,
+          // Also handle nested recipe structure if it exists
           recipe: meal.recipe ? {
             ...meal.recipe,
             ingredients: meal.recipe.ingredients ? 

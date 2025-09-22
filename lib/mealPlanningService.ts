@@ -2914,11 +2914,21 @@ export class MealPlanningService {
       
       console.log('🎯 Meal Planning Service - Meal distribution:', JSON.stringify(mealDistribution, null, 2));
       
-      // 4. Create Edamam meal plan request
+      // 4. Determine cuisine preferences: request override takes precedence, client goals as fallback
+      const clientGoalsCuisineTypes = mapCuisineTypesForEdamam(clientGoal.cuisineTypes);
+      const effectiveCuisinePreferences = cuisinePreferences.length > 0 
+        ? cuisinePreferences // Request override takes precedence
+        : clientGoalsCuisineTypes; // Use client goals as fallback
+      
+      console.log('🎯 Meal Planning Service - Client goals cuisine types:', clientGoalsCuisineTypes);
+      console.log('🎯 Meal Planning Service - Request cuisine preferences:', cuisinePreferences);
+      console.log('🎯 Meal Planning Service - Effective cuisine preferences (applied to each meal):', effectiveCuisinePreferences);
+      
+      // Create Edamam meal plan request
       const edamamRequest = mealProgramMappingService.createEdamamMealPlanRequest(
         mealDistribution,
         dietaryRestrictions,
-        cuisinePreferences,
+        effectiveCuisinePreferences,
         clientGoal,
         undefined // No individual meal overrides since we're using program/goal overrides
       );

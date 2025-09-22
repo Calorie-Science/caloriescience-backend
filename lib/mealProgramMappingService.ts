@@ -173,13 +173,17 @@ export class MealProgramMappingService {
       
       // Set meal type constraint and calorie range at section level
       const sectionCalories = mealCalories || 0;
+      const sectionConstraints: any[] = [
+        {
+          meal: [edamamMealType]
+        }
+      ];
+      
+      // Cuisine preferences are now handled at plan level, not section level
+      
       sections[sectionName] = {
         accept: {
-          all: [
-            {
-              meal: [edamamMealType]
-            }
-          ]
+          all: sectionConstraints
         },
         fit: {
           ENERC_KCAL: {
@@ -231,28 +235,25 @@ export class MealProgramMappingService {
       }
     };
 
-    // Add constraints properly - combine all filters in a single object
-    if (dietaryRestrictions && dietaryRestrictions.length > 0 || cuisinePreferences && cuisinePreferences.length > 0) {
-      const constraints: any = {};
-      
-      // Add dietary restrictions as health labels - convert to Edamam format
-      if (dietaryRestrictions && dietaryRestrictions.length > 0) {
-        constraints.health = dietaryRestrictions.map(restriction => 
-          restriction.toUpperCase().replace(/-/g, '_')
-        );
-      }
-      
-      // Add cuisine preferences
-      if (cuisinePreferences && cuisinePreferences.length > 0) {
-        constraints.cuisine = cuisinePreferences;
-      }
-      
-      // Only add accept constraints if we have any
-      if (Object.keys(constraints).length > 0) {
-        request.plan.accept = {
-          all: [constraints]
-        };
-      }
+    // Add health labels and cuisine preferences at plan level as separate objects
+    const planConstraints = [];
+    
+    if (dietaryRestrictions && dietaryRestrictions.length > 0) {
+      planConstraints.push({
+        health: dietaryRestrictions // Keep original format: lowercase with hyphens
+      });
+    }
+    
+    if (cuisinePreferences && cuisinePreferences.length > 0) {
+      planConstraints.push({
+        cuisine: cuisinePreferences
+      });
+    }
+    
+    if (planConstraints.length > 0) {
+      request.plan.accept = {
+        all: planConstraints
+      };
     }
 
     console.log('🎯 Meal Program Mapping Service - Final Edamam request (WITH RANGE CONSTRAINTS):', JSON.stringify(request, null, 2));
