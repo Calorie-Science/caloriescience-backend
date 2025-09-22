@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MealPlanningService } from '../../lib/mealPlanningService';
 import { requireAuth } from '../../lib/auth';
+import { enhanceResponseWithUserProfile } from '../../lib/userProfileMeasurementMiddleware';
 
 const mealPlanningService = new MealPlanningService();
 
@@ -122,11 +123,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Return the saved meal plan
       const savedMealPlan = await mealPlanningService.getMealPlan(planId);
 
-      return res.status(201).json({
+      const responseData = {
         message: 'Preview meal plan saved successfully',
         action: 'save_preview',
         mealPlan: savedMealPlan
+      };
+
+      // Apply measurement system formatting
+      const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+        formatNutrition: true,
+        formatPhysicalMeasurements: true,
+        formatDates: true
       });
+
+      return res.status(201).json(enhancedResponse);
 
     } catch (error) {
       console.error('Error saving preview meal plan:', error);

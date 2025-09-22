@@ -200,19 +200,26 @@ export class MealProgramMappingService {
             min: Math.round(totalCalories * 0.8), // Use totalCalories (sum of individual meals)
             max: Math.round(totalCalories * 1.2)  // Use totalCalories (sum of individual meals)
           },
-          // Add macro constraints from client goals
-          PROCNT: {
-            min: clientGoal.proteinGoalMin || 0,
-            max: clientGoal.proteinGoalMax || 0
-          },
-          CHOCDF: {
-            min: clientGoal.carbsGoalMin || 0,
-            max: clientGoal.carbsGoalMax || 0
-          },
-          FAT: {
-            min: clientGoal.fatGoalMin || 0,
-            max: clientGoal.fatGoalMax || 0
-          },
+          // Apply proportional macro constraints based on total calories vs client's daily goal
+          // Calculate the proportion this meal represents of the daily calorie goal
+          PROCNT: (() => {
+            const proportion = totalCalories / (clientGoal.eerGoalCalories || 2000);
+            const minProtein = Math.round((clientGoal.proteinGoalMin || 0) * proportion * 0.5); // 50% flexibility
+            const maxProtein = Math.round((clientGoal.proteinGoalMax || 200) * proportion * 1.5); // 150% flexibility
+            return { min: Math.max(5, minProtein), max: maxProtein };
+          })(),
+          CHOCDF: (() => {
+            const proportion = totalCalories / (clientGoal.eerGoalCalories || 2000);
+            const minCarbs = Math.round((clientGoal.carbsGoalMin || 0) * proportion * 0.5);
+            const maxCarbs = Math.round((clientGoal.carbsGoalMax || 300) * proportion * 1.5);
+            return { min: Math.max(10, minCarbs), max: maxCarbs };
+          })(),
+          FAT: (() => {
+            const proportion = totalCalories / (clientGoal.eerGoalCalories || 2000);
+            const minFat = Math.round((clientGoal.fatGoalMin || 0) * proportion * 0.5);
+            const maxFat = Math.round((clientGoal.fatGoalMax || 100) * proportion * 1.5);
+            return { min: Math.max(3, minFat), max: maxFat };
+          })(),
           // Add fiber constraint if available
           ...(clientGoal.fiberGoalGrams && {
             FIBTG: {
@@ -224,26 +231,27 @@ export class MealProgramMappingService {
       }
     };
 
-    // Only add very basic constraints to see if we can get all meals working
+    // Add constraints properly - combine all filters in a single object
     if (dietaryRestrictions && dietaryRestrictions.length > 0 || cuisinePreferences && cuisinePreferences.length > 0) {
-      request.plan.accept = { all: [] };
+      const constraints: any = {};
       
-      // Add dietary restrictions
+      // Add dietary restrictions as health labels - convert to Edamam format
       if (dietaryRestrictions && dietaryRestrictions.length > 0) {
-        dietaryRestrictions.forEach(restriction => {
-          request.plan.accept.all.push({
-            health: [restriction.toUpperCase()]
-          });
-        });
+        constraints.health = dietaryRestrictions.map(restriction => 
+          restriction.toUpperCase().replace(/-/g, '_')
+        );
       }
       
       // Add cuisine preferences
       if (cuisinePreferences && cuisinePreferences.length > 0) {
-        cuisinePreferences.forEach(cuisine => {
-          request.plan.accept.all.push({
-            cuisine: [cuisine]
-          });
-        });
+        constraints.cuisine = cuisinePreferences;
+      }
+      
+      // Only add accept constraints if we have any
+      if (Object.keys(constraints).length > 0) {
+        request.plan.accept = {
+          all: [constraints]
+        };
       }
     }
 

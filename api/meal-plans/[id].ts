@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MealPlanningService } from '../../lib/mealPlanningService';
 import { requireAuth } from '../../lib/auth';
+import { enhanceResponseWithUserProfile } from '../../lib/userProfileMeasurementMiddleware';
 
 const mealPlanningService = new MealPlanningService();
 
@@ -49,13 +50,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      return res.status(200).json({
+      const responseData = {
         message: `Meal plan retrieved successfully (${viewParam || 'consolidated'} view)`,
         mealPlan: result.data.mealPlan,
         days: result.data.days || null,
         overallStats: result.data.overallStats || null,
         clientGoals: result.data.clientGoals || null
+      };
+
+      // Apply measurement system formatting
+      const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+        formatNutrition: true,
+        formatPhysicalMeasurements: true,
+        formatDates: true
       });
+
+      return res.status(200).json(enhancedResponse);
 
     } catch (error) {
       console.error('Error fetching meal plan:', error);
@@ -117,10 +127,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Get updated meal plan
       const updatedMealPlan = await mealPlanningService.getMealPlan(id);
 
-      return res.status(200).json({
+      const responseData = {
         message: 'Meal plan status updated successfully',
         mealPlan: updatedMealPlan
+      };
+
+      // Apply measurement system formatting
+      const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+        formatNutrition: true,
+        formatPhysicalMeasurements: true,
+        formatDates: true
       });
+
+      return res.status(200).json(enhancedResponse);
 
     } catch (error) {
       console.error('Error updating meal plan:', error);

@@ -4,6 +4,7 @@ import { MealProgramService } from '../../lib/mealProgramService';
 import { ClientGoalsService } from '../../lib/clientGoalsService';
 import { AsyncMealPlanService } from '../../lib/asyncMealPlanService';
 import { requireAuth } from '../../lib/auth';
+import { enhanceResponseWithUserProfile } from '../../lib/userProfileMeasurementMiddleware';
 
 const mealPlanningService = new MealPlanningService();
 const mealProgramService = new MealProgramService();
@@ -498,7 +499,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             // Always save program-based meal plans as drafts
             console.log('🎯 API - Returning program-based meal plan response with data:', JSON.stringify(generatedMealPlan.data, null, 2));
             console.log('🎯 API - PreviewId in mealPlan:', generatedMealPlan.data?.mealPlan?.previewId);
-            return res.status(200).json({
+            const responseData = {
               success: true,
               message: 'Meal plan generated successfully',
               data: {
@@ -509,7 +510,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                 dietaryRestrictions: generatedMealPlan.data.dietaryRestrictions,
                 cuisinePreferences: generatedMealPlan.data.cuisinePreferences
               }
+            };
+
+            // Apply measurement system formatting
+            const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+              formatNutrition: true,
+              formatPhysicalMeasurements: true,
+              formatDates: true
             });
+
+            return res.status(200).json(enhancedResponse);
           } else {
             console.log('🎯 API - No meal program found, using standard meal planning with possible overrides');
             
@@ -599,7 +609,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Handle based on action
         if (action === 'preview') {
           // Return preview without saving
-          return res.status(200).json({
+          const responseData = {
             success: true,
             message: 'Meal plan preview generated successfully',
             data: {
@@ -609,7 +619,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                 status: 'preview'
               }
             }
+          };
+
+          // Apply measurement system formatting to preview
+          const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+            formatNutrition: true,
+            formatPhysicalMeasurements: true,
+            formatDates: true
           });
+
+          return res.status(200).json(enhancedResponse);
         } else if (action === 'async-generate') {
           // Start async meal plan generation with OpenAI Assistant
           console.log('🤖 Starting async meal plan generation for client:', clientId);
@@ -654,7 +673,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
 
           // Return preview ID immediately - UI can use this to check status
-          return res.status(200).json({
+          const responseData = {
             success: true,
             message: 'Async meal plan generation started',
             data: {
@@ -666,7 +685,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                 estimatedCompletionTime: '2-3 minutes'
               }
             }
+          };
+
+          // Apply measurement system formatting
+          const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+            formatNutrition: false, // No nutrition data yet for async start
+            formatPhysicalMeasurements: false, 
+            formatDates: true
           });
+
+          return res.status(200).json(enhancedResponse);
         } else if (action === 'save-from-preview') {
           const { previewId, planName, isActive } = req.body;
 
@@ -1002,11 +1030,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Default mode: get meal plans for the client
         const mealPlans = await mealPlanningService.getClientMealPlans(clientId);
 
-        return res.status(200).json({
+        const responseData = {
           message: 'Meal plans retrieved successfully',
           mealPlans,
           count: mealPlans.length
+        };
+
+        // Apply measurement system formatting
+        const enhancedResponse = await enhanceResponseWithUserProfile(responseData, req, {
+          formatNutrition: true,
+          formatPhysicalMeasurements: true,
+          formatDates: true
         });
+
+        return res.status(200).json(enhancedResponse);
       }
 
     } catch (error) {

@@ -61,6 +61,7 @@ export interface Database {
           qualification?: string;
           experience_years?: number;
           specialization?: string[];
+          preferred_measurement_system: 'metric' | 'imperial';
           created_at: string;
           updated_at: string;
           last_login_at?: string;
@@ -74,6 +75,7 @@ export interface Database {
           qualification?: string;
           experience_years?: number;
           specialization?: string[];
+          preferred_measurement_system?: 'metric' | 'imperial';
         };
         Update: Partial<Database['public']['Tables']['users']['Insert']>;
       };
@@ -99,6 +101,7 @@ export interface Database {
           source?: string;
           notes?: string;
           preferred_contact_method: string;
+          preferred_measurement_system: 'metric' | 'imperial';
           created_at: string;
           updated_at: string;
           converted_to_active_at?: string;
@@ -122,6 +125,7 @@ export interface Database {
           target_weight_kg?: number;
           source?: string;
           notes?: string;
+          preferred_measurement_system?: 'metric' | 'imperial';
         };
         Update: Partial<Database['public']['Tables']['clients']['Insert']>;
       };

@@ -261,7 +261,7 @@ export class EdamamService {
           return { appId: '858bc297', appKey: '7b2f0ca26ac245692d8d180302246bd2' };
         case 'nutrition':
         case 'autocomplete':
-          return { appId: '86a78566', appKey: '0938eb1f14ffeb73a5ba2414fd4198d5' };
+          return { appId: 'b26e8df0', appKey: '6353e4a8c1d8c9b940d13da95db872e9' };
         case 'recipe':
           return { appId: '5bce8081', appKey: 'c80ecbf8968d48dfe51d395f6f19279a' };
         default:

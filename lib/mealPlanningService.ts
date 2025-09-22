@@ -1332,9 +1332,9 @@ export class MealPlanningService {
       // Insert individual meals - only those with valid recipes
       const mealInserts = mealPlan.meals
         .filter(meal => {
-          // Enhanced validation: Only include meals with valid recipe data and meaningful nutrition
+          // Enhanced validation: Only include meals with valid recipe data
           const hasValidData = meal.edamamRecipeId && 
-                              meal.caloriesPerServing > 0 && 
+                              meal.caloriesPerServing >= 0 && // Allow low-calorie recipes (like tea, water)
                               meal.recipeName && 
                               meal.recipeName.trim() !== '';
           

@@ -105,6 +105,10 @@ export const clientSchema = Joi.object({
     }),
   source: Joi.string().max(100).optional(),
   notes: Joi.string().max(2000).optional(),
+  preferredMeasurementSystem: Joi.string().valid('metric', 'imperial').optional()
+    .messages({
+      'any.only': 'Preferred measurement system must be either "metric" or "imperial"'
+    }),
   // Macros data - optional for client creation
   macrosData: Joi.object({
     Protein: Joi.object({
