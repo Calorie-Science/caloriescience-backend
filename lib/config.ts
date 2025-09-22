@@ -13,6 +13,13 @@ export const config = {
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '1000')
   },
 
+  // Gemini Configuration
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY!,
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp',
+    maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS || '8000')
+  },
+
   // Edamam API Configuration
   edamam: {
     appId: process.env.EDAMAM_APP_ID!,
@@ -68,6 +75,7 @@ export function validateConfig() {
     'SUPABASE_SERVICE_ROLE_KEY', 
     'SUPABASE_ANON_KEY',
     'OPENAI_API_KEY',
+    'GEMINI_API_KEY',
     'JWT_SECRET',
     'EDAMAM_APP_ID',
     'EDAMAM_APP_KEY'

@@ -1,13 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
-
-export interface ClaudeMealPlanRequest {
+export interface GeminiMealPlanRequest {
   clientGoals: any;
   additionalText?: string;
   clientId: string;
   nutritionistId: string;
 }
 
-export interface ClaudeMealPlanResponse {
+export interface GeminiMealPlanResponse {
   success: boolean;
   data?: any;
   error?: string;
@@ -16,46 +14,65 @@ export interface ClaudeMealPlanResponse {
   batchId?: string;
 }
 
-export class ClaudeService {
-  private claude: Anthropic;
+export class GeminiService {
+  private apiKey: string;
   private model: string;
+  private baseUrl: string;
 
   constructor() {
-    this.claude = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-    // Default to a commonly available Claude model
-    this.model = 'claude-opus-4-1-20250805';
+    this.apiKey = process.env.GEMINI_API_KEY || 'AIzaSyCxWPyeQrOQIrd39LbfyUC2GT-KDXolwJc'; // Fallback to provided key
+    this.model = 'gemini-2.0-flash-exp'; // Use the latest Gemini model
+    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+    
+    if (!this.apiKey) {
+      throw new Error('GEMINI_API_KEY environment variable is required');
+    }
   }
 
   /**
-   * Generate meal plan using Claude
+   * Generate meal plan using Gemini
    */
-  async generateMealPlan(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
+  async generateMealPlan(request: GeminiMealPlanRequest): Promise<GeminiMealPlanResponse> {
     try {
-      console.log('🤖 Claude Service - Starting meal plan generation');
+      console.log('🤖 Gemini Service - Starting meal plan generation');
       console.log('🤖 Client Goals:', JSON.stringify(request.clientGoals, null, 2));
       
       // Prepare the input message
       const inputMessage = this.prepareInputMessage(request);
       
-      // Send message to Claude
-      const response = await this.claude.messages.create({
-        model: 'claude-opus-4-1',  // Latest Claude Opus model
-        max_tokens: 8000,  // Increased to handle longer responses
-        messages: [
-          {
-            role: 'user',
-            content: inputMessage
+      // Send request to Gemini API
+      const response = await fetch(`${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: inputMessage
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 8000,
+            topP: 0.8,
+            topK: 40
           }
-        ]
+        })
       });
 
-      console.log('🤖 Claude response received');
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Gemini API error:', errorData);
+        throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
+      }
 
-      if (response.content && response.content[0].type === 'text') {
-        let content = response.content[0].text;
-        console.log('🤖 Claude response content:', content);
+      const responseData = await response.json();
+      console.log('🤖 Gemini response received');
+
+      if (responseData.candidates && responseData.candidates[0]?.content?.parts?.[0]?.text) {
+        let content = responseData.candidates[0].content.parts[0].text;
+        console.log('🤖 Gemini response content:', content);
         
         try {
           // Extract JSON from markdown code block if present
@@ -89,28 +106,28 @@ export class ClaudeService {
             success: true,
             status: 'completed',
             data: mealPlanData,
-            messageId: response.id
+            messageId: responseData.responseId || `gemini-${Date.now()}`
           };
         } catch (parseError) {
-          console.error('❌ Failed to parse Claude response as JSON:', parseError);
+          console.error('❌ Failed to parse Gemini response as JSON:', parseError);
           console.error('❌ Raw content that failed to parse:', content);
           return {
             success: false,
-            error: 'Failed to parse Claude response as JSON',
+            error: 'Failed to parse Gemini response as JSON',
             status: 'failed',
-            messageId: response.id
+            messageId: responseData.responseId || `gemini-${Date.now()}`
           };
         }
       } else {
         return {
           success: false,
-          error: 'No valid response from Claude',
+          error: 'No valid response from Gemini',
           status: 'failed'
         };
       }
 
     } catch (error) {
-      console.error('❌ Claude Service - Error generating meal plan:', error);
+      console.error('❌ Gemini Service - Error generating meal plan:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -120,32 +137,48 @@ export class ClaudeService {
   }
 
   /**
-   * Generate meal plan using Claude Messages API (fast, synchronous)
+   * Generate meal plan using Gemini (synchronous version)
    */
-  async generateMealPlanSync(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
+  async generateMealPlanSync(request: GeminiMealPlanRequest): Promise<GeminiMealPlanResponse> {
     try {
-      console.log('🤖 Claude Service - Generating meal plan synchronously for client:', request.clientId);
+      console.log('🤖 Gemini Service - Generating meal plan synchronously for client:', request.clientId);
       
       // Prepare the input message
       const inputMessage = this.prepareInputMessage(request);
       
-      // Send message to Claude using Messages API (fast)
-      const response = await this.claude.messages.create({
-        model: this.model,
-        max_tokens: 8000,
-        messages: [
-          {
-            role: 'user',
-            content: inputMessage
+      // Send request to Gemini API
+      const response = await fetch(`${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: inputMessage
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 8000,
+            topP: 0.8,
+            topK: 40
           }
-        ]
+        })
       });
 
-      console.log('🤖 Claude response received');
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Gemini API error:', errorData);
+        throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
+      }
 
-      if (response.content && response.content[0].type === 'text') {
-        let content = response.content[0].text;
-        console.log('🤖 Claude response content received');
+      const responseData = await response.json();
+      console.log('🤖 Gemini response received');
+
+      if (responseData.candidates && responseData.candidates[0]?.content?.parts?.[0]?.text) {
+        let content = responseData.candidates[0].content.parts[0].text;
+        console.log('🤖 Gemini response content received');
         
         try {
           // Extract JSON from markdown code block if present
@@ -179,40 +212,40 @@ export class ClaudeService {
             success: true,
             status: 'completed',
             data: mealPlanData,
-            messageId: response.id
+            messageId: responseData.responseId || `gemini-${Date.now()}`
           };
         } catch (parseError) {
-          console.error('❌ Failed to parse Claude response as JSON:', parseError);
+          console.error('❌ Failed to parse Gemini response as JSON:', parseError);
           console.error('❌ Raw content that failed to parse:', content);
           return {
             success: false,
-            error: 'Failed to parse Claude response as JSON',
+            error: 'Failed to parse Gemini response as JSON',
             status: 'failed',
-            messageId: response.id
+            messageId: responseData.responseId || `gemini-${Date.now()}`
           };
         }
       } else {
         return {
           success: false,
-          error: 'No valid response from Claude',
+          error: 'No valid response from Gemini',
           status: 'failed'
         };
       }
 
     } catch (error) {
-      console.error('❌ Claude Service - Error generating meal plan:', error);
+      console.error('❌ Gemini Service - Error generating meal plan:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to generate meal plan with Claude',
+        error: error instanceof Error ? error.message : 'Failed to generate meal plan with Gemini',
         status: 'failed'
       };
     }
   }
 
   /**
-   * Prepare the input message for Claude
+   * Prepare the input message for Gemini
    */
-  private prepareInputMessage(request: ClaudeMealPlanRequest): string {
+  private prepareInputMessage(request: GeminiMealPlanRequest): string {
     const { clientGoals, additionalText } = request;
     
     let message = `Generate a comprehensive meal plan based on nutritional guidelines. Structure is JSON array of meals for the day with nutrition breakdown per meal. Give overall nutrition also in the JSON in end. Focus on healthy, balanced meals with accurate cooking recipes and detailed instructions inside each meal item.
@@ -278,7 +311,7 @@ Please generate a comprehensive meal plan based on the following nutritional gui
                 "totalCalcium": 1000,
                 "totalIron": 15
             },
-            "previewId": "claude-generated-plan",
+            "previewId": "gemini-generated-plan",
             "days": [
                 {
                     "dayNumber": 1,
@@ -346,7 +379,7 @@ Please generate a comprehensive meal plan based on the following nutritional gui
             "waterGoalLiters": 2.5
         },
         "mealProgram": {
-            "id": "claude-generated"
+            "id": "gemini-generated"
         },
         "planDate": "2025-09-17",
         "dietaryRestrictions": [],

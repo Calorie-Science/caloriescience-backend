@@ -44,7 +44,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           overrideClientGoals = null, // Override client goals data from UI
           // Async generation fields
           additionalText, // Additional text for AI Assistant
-          aiModel = 'openai', // AI model to use: 'openai' or 'claude'
+          aiModel = 'openai', // AI model to use: 'openai', 'claude', or 'gemini'
+          aiProvider, // Alias for aiModel (same behavior)
           // Meal program fields
           name,
           description,
@@ -54,6 +55,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           mealPlanId, // For editing meal plans
           isActive // For meal program activation
         } = req.body;
+
+      // Use aiProvider as fallback for aiModel if provided
+      let selectedAiModel = aiProvider || aiModel;
+      
+      // Map common aliases to standard values
+      if (selectedAiModel === 'chatgpt') {
+        selectedAiModel = 'openai';
+      }
 
       if (req.body.action === 'cleanup') {
         if (req.body.secret !== process.env.CLEANUP_SECRET) {
@@ -605,21 +614,37 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // Start async meal plan generation with OpenAI Assistant
           console.log('🤖 Starting async meal plan generation for client:', clientId);
           
-          // Get client goals for async generation
+          // Get client goals for async generation, or use default guidelines
           const goalsResponse = await clientGoalsService.getActiveClientGoal(clientId, user.id);
+          let clientGoals = goalsResponse.data;
+          
+          // If no client goals found, use default nutritional guidelines
           if (!goalsResponse.success || !goalsResponse.data) {
-            return res.status(400).json({
-              error: 'No active client goals found. Please set client goals first.'
-            });
+            console.log('🤖 No client goals found, using default nutritional guidelines');
+            clientGoals = {
+              eerGoalCalories: 2000, // Average adult calorie needs
+              proteinGoalMin: 50,    // Minimum protein (0.8g per kg body weight for average 60kg person)
+              proteinGoalMax: 100,    // Maximum protein (1.6g per kg body weight)
+              carbsGoalMin: 200,     // Minimum carbs (40% of calories)
+              carbsGoalMax: 300,     // Maximum carbs (60% of calories)
+              fatGoalMin: 44,        // Minimum fat (20% of calories)
+              fatGoalMax: 78,        // Maximum fat (35% of calories)
+              fiberGoalGrams: 25,    // Recommended daily fiber
+              waterGoalLiters: 2.5,  // Recommended daily water intake
+              allergies: [],
+              preferences: [],
+              cuisineTypes: [],
+              notes: 'Generated using general nutritional guidelines'
+            };
           }
 
           // Start async generation
            const asyncResult = await asyncMealPlanService.startGeneration(
              clientId,
              user.id,
-             goalsResponse.data,
+             clientGoals,
              additionalText,
-             aiModel
+             selectedAiModel
            );
 
           if (!asyncResult.success) {

@@ -1557,78 +1557,25 @@ export class MealPlanningService {
     console.log('🤖 Handling Claude async meal plan');
     
     if (asyncMealPlan.status === 'pending') {
-      // Check Claude batch status
-      console.log('🤖 Checking Claude batch status');
+      // Claude should be completed immediately (synchronous generation)
+      console.log('🤖 Claude meal plan should be completed immediately');
       
-      const { ClaudeService } = await import('./claudeService');
-      const claudeService = new ClaudeService();
-      
-      const claudeResponse = await claudeService.checkBatchStatus(asyncMealPlan.thread_id);
-      
-      if (claudeResponse.success && claudeResponse.status === 'completed') {
-        // Update database with completed result
-        await supabase
-          .from('async_meal_plans')
-          .update({
-            status: 'completed',
-            generated_meal_plan: claudeResponse.data,
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', mealPlanId);
-        
-        // Extract days from the nested structure
-        const generatedData = claudeResponse.data;
-        const daysData = generatedData?.data?.mealPlan?.days || generatedData?.days || [];
-        
-        return {
-          success: true,
-          data: {
-            mealPlan: {
-              id: mealPlanId,
-              status: 'preview',
-              clientId: asyncMealPlan.client_id,
-              nutritionistId: asyncMealPlan.nutritionist_id,
-              completedAt: new Date().toISOString()
-            },
-            days: daysData,
-            overallStats: generatedData?.data?.mealPlan?.dailyNutrition || generatedData?.overallStats || null,
-            clientGoals: generatedData?.clientGoals || asyncMealPlan.client_goals || null,
-            generatedMealPlan: generatedData
-          }
-        };
-      } else if (claudeResponse.success && claudeResponse.status === 'pending') {
-        // Still processing
-        return {
-          success: true,
-          data: {
-            mealPlan: {
-              id: mealPlanId,
-              status: 'preview',
-              clientId: asyncMealPlan.client_id,
-              nutritionistId: asyncMealPlan.nutritionist_id,
-              estimatedCompletionTime: '30-60 seconds'
-            },
-            days: [],
-            overallStats: null,
-            clientGoals: asyncMealPlan.client_goals,
-            generatedMealPlan: null
-          }
-        };
-      } else {
-        // Update database with error
-        await supabase
-          .from('async_meal_plans')
-          .update({
-            status: 'failed',
-            error_message: claudeResponse.error || 'Claude generation failed'
-          })
-          .eq('id', mealPlanId);
-        
-        return {
-          success: false,
-          error: claudeResponse.error || 'Claude meal plan generation failed'
-        };
-      }
+      return {
+        success: true,
+        data: {
+          mealPlan: {
+            id: mealPlanId,
+            status: 'preview',
+            clientId: asyncMealPlan.client_id,
+            nutritionistId: asyncMealPlan.nutritionist_id,
+            estimatedCompletionTime: 'Claude should be completed immediately'
+          },
+          days: [],
+          overallStats: null,
+          clientGoals: asyncMealPlan.client_goals,
+          generatedMealPlan: null
+        }
+      };
     } else if (asyncMealPlan.status === 'completed') {
       // Claude has completed
       const generatedData = asyncMealPlan.generated_meal_plan;

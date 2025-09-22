@@ -172,7 +172,7 @@ export class MealProgramMappingService {
       }
       
       // Set meal type constraint and calorie range at section level
-      const sectionCalories = meal.targetCalories || 0;
+      const sectionCalories = mealCalories || 0;
       sections[sectionName] = {
         accept: {
           all: [
@@ -199,8 +199,27 @@ export class MealProgramMappingService {
           ENERC_KCAL: {
             min: Math.round(totalCalories * 0.8), // Use totalCalories (sum of individual meals)
             max: Math.round(totalCalories * 1.2)  // Use totalCalories (sum of individual meals)
-          }
-          // Temporarily remove all macro constraints to see if they're causing issues
+          },
+          // Add macro constraints from client goals
+          PROCNT: {
+            min: clientGoal.proteinGoalMin || 0,
+            max: clientGoal.proteinGoalMax || 0
+          },
+          CHOCDF: {
+            min: clientGoal.carbsGoalMin || 0,
+            max: clientGoal.carbsGoalMax || 0
+          },
+          FAT: {
+            min: clientGoal.fatGoalMin || 0,
+            max: clientGoal.fatGoalMax || 0
+          },
+          // Add fiber constraint if available
+          ...(clientGoal.fiberGoalGrams && {
+            FIBTG: {
+              min: Math.round((clientGoal.fiberGoalGrams || 0) * 0.8),
+              max: Math.round((clientGoal.fiberGoalGrams || 0) * 1.2)
+            }
+          })
         }
       }
     };

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { OpenAIAssistantService, AssistantMealPlanRequest, AssistantMealPlanResponse } from './openaiAssistantService';
 import { ClaudeService, ClaudeMealPlanRequest, ClaudeMealPlanResponse } from './claudeService';
+import { GeminiService, GeminiMealPlanRequest, GeminiMealPlanResponse } from './geminiService';
 
 export interface AsyncMealPlan {
   id: string;
@@ -10,7 +11,7 @@ export interface AsyncMealPlan {
   runId: string;
   clientGoals: any;
   additionalText?: string;
-  aiModel: 'openai' | 'claude';
+  aiModel: 'openai' | 'claude' | 'gemini';
   status: 'pending' | 'completed' | 'failed';
   generatedMealPlan?: any;
   errorMessage?: string;
@@ -28,10 +29,12 @@ export interface AsyncMealPlanResponse {
 export class AsyncMealPlanService {
   private openaiService: OpenAIAssistantService;
   private claudeService: ClaudeService;
+  private geminiService: GeminiService;
 
   constructor() {
     this.openaiService = new OpenAIAssistantService();
     this.claudeService = new ClaudeService();
+    this.geminiService = new GeminiService();
   }
 
   /**
@@ -42,7 +45,7 @@ export class AsyncMealPlanService {
     nutritionistId: string,
     clientGoals: any,
     additionalText?: string,
-    aiModel: 'openai' | 'claude' = 'openai'
+    aiModel: 'openai' | 'claude' | 'gemini' = 'openai'
   ): Promise<AsyncMealPlanResponse> {
     try {
       console.log('🔄 Async Meal Plan Service - Starting generation for client:', clientId, 'using AI model:', aiModel);
@@ -52,8 +55,30 @@ export class AsyncMealPlanService {
       let status: 'pending' | 'completed' | 'failed' = 'pending';
       let generatedMealPlan: any = null;
 
-      if (aiModel === 'claude') {
-        // Claude: Submit batch request and store batch ID
+      if (aiModel === 'gemini') {
+        // Gemini: Generate meal plan synchronously (fast)
+        const geminiRequest: GeminiMealPlanRequest = {
+          clientGoals,
+          additionalText,
+          clientId,
+          nutritionistId
+        };
+
+        const geminiResponse = await this.geminiService.generateMealPlanSync(geminiRequest);
+        
+        if (!geminiResponse.success) {
+          return {
+            success: false,
+            error: geminiResponse.error || 'Failed to generate Gemini meal plan'
+          };
+        }
+
+        threadId = geminiResponse.messageId || `thread-gemini-${Date.now()}`;
+        runId = `run-gemini-${Date.now()}`;
+        status = 'completed';
+        generatedMealPlan = geminiResponse.data;
+      } else if (aiModel === 'claude') {
+        // Claude: Generate meal plan synchronously (fast)
         const claudeRequest: ClaudeMealPlanRequest = {
           clientGoals,
           additionalText,
@@ -61,19 +86,19 @@ export class AsyncMealPlanService {
           nutritionistId
         };
 
-        const claudeResponse = await this.claudeService.submitBatchRequest(claudeRequest);
+        const claudeResponse = await this.claudeService.generateMealPlanSync(claudeRequest);
         
-        if (!claudeResponse.success || !claudeResponse.batchId) {
+        if (!claudeResponse.success) {
           return {
             success: false,
-            error: claudeResponse.error || 'Failed to submit Claude batch request'
+            error: claudeResponse.error || 'Failed to generate Claude meal plan'
           };
         }
 
-        threadId = claudeResponse.batchId; // Store batch ID as thread ID
-        runId = claudeResponse.messageId || `run-claude-${Date.now()}`;
-        status = 'pending';
-        generatedMealPlan = null;
+        threadId = claudeResponse.messageId || `thread-claude-${Date.now()}`;
+        runId = `run-claude-${Date.now()}`;
+        status = 'completed';
+        generatedMealPlan = claudeResponse.data;
       } else {
         // Use OpenAI Assistant for async generation
         const assistantRequest: AssistantMealPlanRequest = {

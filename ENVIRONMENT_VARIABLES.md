@@ -12,6 +12,9 @@ OPENAI_ASSISTANT_ID=asst_your-custom-assistant-id
 
 # Required for Claude meal plan generation
 ANTHROPIC_API_KEY=sk-ant-your-anthropic-api-key-here
+
+# Required for Gemini meal plan generation
+GEMINI_API_KEY=AIza-your-gemini-api-key-here
 ```
 
 ### Supabase Configuration
@@ -71,11 +74,16 @@ MAX_FILE_SIZE=10485760
    - Create a new API key
    - Add it to `ANTHROPIC_API_KEY`
 
-4. **Get Supabase credentials**:
+4. **Get Gemini API Key**:
+   - Go to https://ai.google.dev/
+   - Create a new API key
+   - Add it to `GEMINI_API_KEY`
+
+5. **Get Supabase credentials**:
    - Go to your Supabase project settings
    - Copy the URL and keys to the respective variables
 
-5. **Optional: Custom Assistant**:
+6. **Optional: Custom Assistant**:
    - Create a custom OpenAI Assistant if needed
    - Set the `OPENAI_ASSISTANT_ID` to your custom assistant ID
 
