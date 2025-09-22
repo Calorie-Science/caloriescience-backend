@@ -460,10 +460,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               });
             }
             
+            // Check if any meals were generated across all days
+            const totalMealsGenerated = generatedMealPlan.data?.mealPlan?.days?.reduce((total: number, day: any) => {
+              return total + (day.meals?.length || 0);
+            }, 0) || 0;
+            
+            let responseMessage = `${days}-day meal plan generated successfully`;
+            if (totalMealsGenerated === 0) {
+              responseMessage = 'No meals found with these filters in Edamam. Please broaden filters.';
+            }
+
+            console.log('🎯 API - Total meals generated across all days:', totalMealsGenerated);
+            
             // Always save multi-day meal plans as drafts
             return res.status(200).json({
               success: true,
-              message: `${days}-day meal plan generated successfully`,
+              message: responseMessage,
               data: generatedMealPlan.data
             });
           }
@@ -516,12 +528,23 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               });
             }
             
+            // Check if any meals were generated
+            const totalMealsGenerated = generatedMealPlan.data?.mealPlan?.days?.reduce((total: number, day: any) => {
+              return total + (day.meals?.length || 0);
+            }, 0) || 0;
+            
+            let responseMessage = 'Meal plan generated successfully';
+            if (totalMealsGenerated === 0) {
+              responseMessage = 'No meals found with these filters in Edamam. Please broaden filters.';
+            }
+
             // Always save program-based meal plans as drafts
             console.log('🎯 API - Returning program-based meal plan response with data:', JSON.stringify(generatedMealPlan.data, null, 2));
             console.log('🎯 API - PreviewId in mealPlan:', generatedMealPlan.data?.mealPlan?.previewId);
+            console.log('🎯 API - Total meals generated:', totalMealsGenerated);
             const responseData = {
               success: true,
-              message: 'Meal plan generated successfully',
+              message: responseMessage,
               data: {
                 mealPlan: generatedMealPlan.data.mealPlan,
                 clientGoals: generatedMealPlan.data.clientGoals,
