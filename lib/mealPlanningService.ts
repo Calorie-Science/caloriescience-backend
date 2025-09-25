@@ -5,6 +5,7 @@ import { ClientGoalsService } from './clientGoalsService';
 import { objectToCamelCase } from './caseTransform';
 import { calculateEER, calculateMacros } from './calculations';
 import { mapCuisineTypesForEdamam, mergeAllergiesAndPreferencesForEdamam } from './clientGoalsMealPlanningIntegration';
+import { NutritionCalculationService } from './nutritionCalculationService';
 
 export interface MealPlanGenerationRequest {
   clientId: string;
@@ -80,6 +81,7 @@ export interface GeneratedMeal {
   fiber?: number;
   ingredients: any[]; // Can be string[] or detailed ingredient objects
   edamamRecipeId: string;
+  totalNutrients?: { [key: string]: { label: string; quantity: number; unit: string } }; // All micronutrients from Edamam
 }
 
 export interface ManualMealIngredient {
@@ -148,10 +150,12 @@ export interface MealPlanPreferences {
 export class MealPlanningService {
   private edamamService: EdamamService;
   private clientGoalsService: ClientGoalsService;
+  private nutritionService: NutritionCalculationService;
 
   constructor() {
     this.edamamService = new EdamamService();
     this.clientGoalsService = new ClientGoalsService();
+    this.nutritionService = new NutritionCalculationService();
   }
 
   /**
@@ -980,6 +984,21 @@ export class MealPlanningService {
             meal.carbsGrams = Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / recipeYield * 100) / 100;
             meal.fatGrams = Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / recipeYield * 100) / 100;
             meal.fiberGrams = Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / recipeYield * 100) / 100;
+            
+            // Include ALL totalNutrients for micronutrient calculation (scaled per serving and standardized keys)
+            const scaledNutrients: { [key: string]: { label: string; quantity: number; unit: string } } = {};
+            if (recipe.totalNutrients) {
+              Object.entries(recipe.totalNutrients).forEach(([key, nutrientData]: [string, any]) => {
+                if (nutrientData && typeof nutrientData === 'object' && 'quantity' in nutrientData) {
+                  scaledNutrients[key] = {
+                    label: nutrientData.label || key,
+                    quantity: (nutrientData.quantity || 0) / recipeYield, // Scale per serving
+                    unit: nutrientData.unit || ''
+                  };
+                }
+              });
+            }
+            meal.totalNutrients = this.nutritionService.standardizeNutrientKeys(scaledNutrients);
             // Use detailed ingredients with quantity, measure, etc. - scaled per serving
             meal.ingredients = recipe.ingredients?.map((ing: any) => {
               const scaledWeight = (ing.weight || 0) / recipeYield;
@@ -1181,6 +1200,20 @@ export class MealPlanningService {
     const fatPerServing = Math.round((recipe.totalNutrients.FAT?.quantity || 0) / estimatedServings * 100) / 100;
     const fiberPerServing = Math.round((recipe.totalNutrients.FIBTG?.quantity || 0) / estimatedServings * 100) / 100;
     
+    // Include ALL totalNutrients for micronutrient calculation (scaled per serving and standardized keys)
+    const scaledNutrients: { [key: string]: { label: string; quantity: number; unit: string } } = {};
+    if (recipe.totalNutrients) {
+      Object.entries(recipe.totalNutrients).forEach(([key, nutrientData]: [string, any]) => {
+        if (nutrientData && typeof nutrientData === 'object' && 'quantity' in nutrientData) {
+          scaledNutrients[key] = {
+            label: nutrientData.label || key,
+            quantity: (nutrientData.quantity || 0) / estimatedServings * servingsPerMeal, // Scale per meal
+            unit: nutrientData.unit || ''
+          };
+        }
+      });
+    }
+
     return {
       id: '',
       mealType: mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack',
@@ -1200,7 +1233,8 @@ export class MealPlanningService {
       totalFat: Math.round(fatPerServing * servingsPerMeal * 100) / 100,
       totalFiber: Math.round(fiberPerServing * servingsPerMeal * 100) / 100,
       ingredients: recipe.ingredientLines,
-      edamamRecipeId: recipe.uri
+      edamamRecipeId: recipe.uri,
+      totalNutrients: this.nutritionService.standardizeNutrientKeys(scaledNutrients)
     };
   }
 
@@ -2391,6 +2425,7 @@ export class MealPlanningService {
             fiber_grams: meal.totalFiber,
             servings: meal.servingsPerMeal || 1,
             ingredients: meal.ingredients,
+            totalNutrients: meal.totalNutrients || {}, // Include all micronutrients from generated_meals
             nutrition: {
               calories: meal.totalCalories,
               protein: meal.totalProtein,
@@ -2529,14 +2564,7 @@ export class MealPlanningService {
               acc[dayKey] = {
                 dayNumber: meal.day_number,
                 date: meal.meal_date,
-                meals: [],
-                dailyNutrition: {
-                  totalCalories: 0,
-                  totalProtein: 0,
-                  totalCarbs: 0,
-                  totalFat: 0,
-                  totalFiber: 0
-                }
+                meals: []
               };
             }
             
@@ -2558,20 +2586,19 @@ export class MealPlanningService {
               carbs: meal.carbs_grams || 0,
               fat: meal.fat_grams || 0,
               fiber: meal.fiber_grams || 0,
-              ingredients: meal.ingredients
+              ingredients: meal.ingredients,
+              totalNutrients: meal.totalNutrients ? this.nutritionService.standardizeNutrientKeys(meal.totalNutrients) : {} // Include micronutrients with standardized keys
             };
 
             acc[dayKey].meals.push(mealData);
             
-            // Add to daily nutrition
-            acc[dayKey].dailyNutrition.totalCalories += meal.actual_calories || meal.total_calories || 0;
-            acc[dayKey].dailyNutrition.totalProtein += meal.protein_grams || 0;
-            acc[dayKey].dailyNutrition.totalCarbs += meal.carbs_grams || 0;
-            acc[dayKey].dailyNutrition.totalFat += meal.fat_grams || 0;
-            acc[dayKey].dailyNutrition.totalFiber += meal.fiber_grams || 0;
-            
             return acc;
           }, {});
+
+          // Calculate proper daily nutrition for each day using centralized function
+          Object.values(mealsByDay).forEach((day: any) => {
+            day.dailyNutrition = this.calculateDailyNutrition(day.meals);
+          });
 
           daysArray.push(...Object.values(mealsByDay));
         } else {
@@ -2764,48 +2791,11 @@ export class MealPlanningService {
   }
 
   /**
-   * Helper method to calculate daily nutrition totals
+   * Helper method to calculate daily nutrition totals with micronutrients
    */
   private calculateDailyNutrition(meals: any[]): any {
-    const dailyNutrition = {
-      totalCalories: 0,
-      totalProtein: 0,
-      totalCarbs: 0,
-      totalFat: 0,
-      totalFiber: 0,
-      totalSodium: 0,
-      totalSugar: 0,
-      totalCholesterol: 0,
-      totalCalcium: 0,
-      totalIron: 0
-    };
-
-    meals.forEach(meal => {
-      // Use direct meal nutrition fields
-      dailyNutrition.totalCalories += meal.totalCalories || 0;
-      dailyNutrition.totalProtein += meal.protein || 0;
-      dailyNutrition.totalCarbs += meal.carbs || 0;
-      dailyNutrition.totalFat += meal.fat || 0;
-      dailyNutrition.totalFiber += meal.fiber || 0;
-      dailyNutrition.totalSodium += meal.sodium || 0;
-      dailyNutrition.totalSugar += meal.sugar || 0;
-      dailyNutrition.totalCholesterol += meal.cholesterol || 0;
-      dailyNutrition.totalCalcium += meal.calcium || 0;
-      dailyNutrition.totalIron += meal.iron || 0;
-    });
-
-    return {
-      totalCalories: Math.round(dailyNutrition.totalCalories * 100) / 100,
-      totalProtein: Math.round(dailyNutrition.totalProtein * 100) / 100,
-      totalCarbs: Math.round(dailyNutrition.totalCarbs * 100) / 100,
-      totalFat: Math.round(dailyNutrition.totalFat * 100) / 100,
-      totalFiber: Math.round(dailyNutrition.totalFiber * 100) / 100,
-      totalSodium: Math.round(dailyNutrition.totalSodium * 100) / 100,
-      totalSugar: Math.round(dailyNutrition.totalSugar * 100) / 100,
-      totalCholesterol: Math.round(dailyNutrition.totalCholesterol * 100) / 100,
-      totalCalcium: Math.round(dailyNutrition.totalCalcium * 100) / 100,
-      totalIron: Math.round(dailyNutrition.totalIron * 100) / 100
-    };
+    // Use the nutrition service for comprehensive calculation including micronutrients
+    return this.nutritionService.calculateDailyNutrition(meals);
   }
 
   /**
@@ -2979,7 +2969,8 @@ export class MealPlanningService {
                   sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
                   sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
                   servings: servings
-                }
+                },
+                totalNutrients: recipe.totalNutrients || {} // Include raw totalNutrients (will be standardized later)
               };
               // Remove the now redundant 'details' if it was set
               delete meal.recipe.details;
@@ -3140,6 +3131,18 @@ export class MealPlanningService {
             food: line,
             weight: 0
           })) || []),
+          totalNutrients: recipe?.totalNutrients ? this.nutritionService.standardizeNutrientKeys(
+            Object.fromEntries(
+              Object.entries(recipe.totalNutrients).map(([key, nutrientData]: [string, any]) => [
+                key,
+                {
+                  label: nutrientData.label || key,
+                  quantity: (nutrientData.quantity || 0) * scaleFactor,
+                  unit: nutrientData.unit || ''
+                }
+              ])
+            )
+          ) : {},
           edamamRecipeId: recipe?.uri || ''
         };
       });
@@ -3386,7 +3389,8 @@ export class MealPlanningService {
                   sodium: Math.round((recipe.totalNutrients?.NA?.quantity || 0) / servings * 100) / 100,
                   sugar: Math.round((recipe.totalNutrients?.SUGAR?.quantity || 0) / servings * 100) / 100,
                   servings: servings
-                }
+                },
+                totalNutrients: recipe.totalNutrients || {} // Include raw totalNutrients (will be standardized later)
               };
               // Remove the now redundant 'details' if it was set
               delete meal.recipe.details;
