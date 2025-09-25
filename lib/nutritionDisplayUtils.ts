@@ -190,9 +190,21 @@ export function formatIngredient(
 
   // Add display properties for the current measurement system
   if (measurementSystem === 'imperial') {
-    // Convert text display for imperial
+    // Only convert weight units, preserve volume units (tbsp, tsp, cup, ml, l)
     if (ingredient.text) {
-      originalIngredient.textDisplay = convertServingSize(ingredient.text, measurementSystem);
+      // Check if the ingredient has weight units that need conversion
+      const weightUnits = ['g', 'gram', 'grams', 'kg', 'kilogram', 'kilograms', 'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds'];
+      const hasWeightUnit = weightUnits.some(unit => ingredient.text.toLowerCase().includes(unit));
+      
+      if (hasWeightUnit) {
+        // Convert only weight units in the text
+        originalIngredient.textDisplay = convertServingSize(ingredient.text, measurementSystem);
+        originalIngredient.text = convertServingSize(ingredient.text, measurementSystem);
+      } else {
+        // Preserve volume units as-is
+        originalIngredient.textDisplay = ingredient.text;
+        originalIngredient.text = ingredient.text;
+      }
     }
 
     // Add imperial weight display
@@ -201,17 +213,19 @@ export function formatIngredient(
       originalIngredient.weightDisplay = `${converted.value} ${converted.unit}`;
     }
 
-    // Add imperial quantity display if applicable
+    // Add imperial quantity display if applicable - only for weight units
     if (ingredient.quantity && ingredient.measure) {
       const weightMeasures = ['g', 'gram', 'grams', 'kg', 'kilogram', 'kilograms'];
-      const volumeMeasures = ['ml', 'milliliter', 'milliliters', 'l', 'liter', 'liters'];
       
       if (weightMeasures.includes(ingredient.measure.toLowerCase())) {
         const converted = convertWeight(ingredient.quantity, ingredient.measure, measurementSystem);
         originalIngredient.quantityDisplay = `${converted.value} ${converted.unit}`;
-      } else if (volumeMeasures.includes(ingredient.measure.toLowerCase())) {
-        const converted = convertVolume(ingredient.quantity, ingredient.measure, measurementSystem);
-        originalIngredient.quantityDisplay = `${converted.value} ${converted.unit}`;
+        // Also update the main quantity and measure fields
+        originalIngredient.quantity = converted.value;
+        originalIngredient.measure = converted.unit;
+      } else {
+        // For volume units (tbsp, tsp, cup, ml, l), keep as-is
+        originalIngredient.quantityDisplay = `${ingredient.quantity} ${ingredient.measure}`;
       }
     }
   } else {
@@ -546,9 +560,10 @@ export function formatNutritionDisplay(
   // Format dates to DD-MON-YYYY
   formatAllDates(formattedData);
 
-  // Handle Edamam meal plan structure: mealPlan.days[].meals[]
-  if (formattedData.mealPlan && formattedData.mealPlan.days && Array.isArray(formattedData.mealPlan.days)) {
-    formattedData.mealPlan.days = formattedData.mealPlan.days.map((day: any) => ({
+  // Handle Edamam meal plan structure: mealPlan.days[].meals[] or data.mealPlan.days[].meals[]
+  const mealPlan = formattedData.mealPlan || formattedData.data?.mealPlan;
+  if (mealPlan && mealPlan.days && Array.isArray(mealPlan.days)) {
+    mealPlan.days = mealPlan.days.map((day: any) => ({
       ...day,
       meals: day.meals && Array.isArray(day.meals) ? 
         day.meals.map((meal: any) => ({

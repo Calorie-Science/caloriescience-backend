@@ -1,6 +1,8 @@
 import { config } from './config';
 import { EdamamApiKeyService } from './edamamApiKeyService';
 import { EdamamKeyRotationService } from './edamamKeyRotationService';
+import { EdamamLoggingService, EdamamApiLogData } from './edamamLoggingService';
+import OpenAI from 'openai';
 
 export interface EdamamRecipe {
   uri: string;
@@ -178,6 +180,10 @@ export class EdamamService {
   // New API key management services
   private apiKeyService: EdamamApiKeyService;
   private keyRotationService: EdamamKeyRotationService;
+  private loggingService: EdamamLoggingService;
+  
+  // OpenAI client for unit suggestions
+  private openai: OpenAI;
   
   // Round-robin user management for Meal Planner API only
   private static mealPlannerUsers = ['test1', 'test2', 'test3', 'test4', 'test5'];
@@ -195,6 +201,12 @@ export class EdamamService {
     // Initialize API key management services
     this.apiKeyService = new EdamamApiKeyService();
     this.keyRotationService = new EdamamKeyRotationService();
+    this.loggingService = new EdamamLoggingService();
+    
+    // Initialize OpenAI client
+    this.openai = new OpenAI({
+      apiKey: config.openai.apiKey,
+    });
     
     // Log constructor values for debugging
     console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR 🚨🚨🚨');
@@ -211,6 +223,96 @@ export class EdamamService {
     console.log('  - EDAMAM_APP_KEY value:', process.env.EDAMAM_APP_KEY);
     console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
     console.log('  - EDAMAM_NUTRITION_APP_KEY exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
+  }
+
+  /**
+   * Wrapper method to log API calls
+   */
+  private async loggedApiCall<T>(
+    apiType: EdamamApiLogData['apiType'],
+    endpoint: string,
+    apiCall: () => Promise<Response>,
+    requestData?: {
+      payload?: any;
+      params?: any;
+      headers?: any;
+      userId?: string;
+      clientId?: string;
+      featureContext?: string;
+      httpMethod?: string;
+    }
+  ): Promise<T> {
+    const startTime = Date.now();
+    const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Prepare initial log data
+    const logData: EdamamApiLogData = {
+      userId: requestData?.userId,
+      clientId: requestData?.clientId,
+      sessionId,
+      apiType,
+      endpoint,
+      httpMethod: requestData?.httpMethod || 'GET',
+      requestPayload: requestData?.payload,
+      requestParams: requestData?.params,
+      requestHeaders: requestData?.headers,
+      featureContext: requestData?.featureContext || apiType,
+      apiKeyUsed: 'edamam-key', // Will be masked in logging service
+    };
+    
+    try {
+      // Make the API call
+      const response = await apiCall();
+      const responseTime = Date.now() - startTime;
+      
+      // Parse response
+      const responseData = await response.json();
+      const responseSizeBytes = JSON.stringify(responseData).length;
+      
+      // Update log data with response info
+      logData.responseStatus = response.status;
+      logData.responsePayload = responseData;
+      logData.responseSizeBytes = responseSizeBytes;
+      logData.responseTimeMs = responseTime;
+      logData.errorOccurred = !response.ok;
+      
+      if (!response.ok) {
+        logData.errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        logData.errorCode = response.status.toString();
+      }
+      
+      // Extract rate limit info from headers
+      const rateLimitRemaining = response.headers.get('x-ratelimit-remaining');
+      if (rateLimitRemaining) {
+        logData.rateLimitRemaining = parseInt(rateLimitRemaining);
+      }
+      
+      // Log the API call (don't await to avoid blocking)
+      this.loggingService.logApiCall(logData).catch(error => {
+        console.error('Failed to log Edamam API call:', error);
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Edamam API error: ${response.status} ${response.statusText}`);
+      }
+      
+      return responseData as T;
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      // Update log data with error info
+      logData.responseTimeMs = responseTime;
+      logData.errorOccurred = true;
+      logData.errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Log the failed API call
+      this.loggingService.logApiCall(logData).catch(logError => {
+        console.error('Failed to log Edamam API error:', logError);
+      });
+      
+      throw error;
+    }
   }
 
   /**
@@ -609,12 +711,19 @@ export class EdamamService {
           const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
           
           console.log(`🚨 EDAMAM - FETCH CALL STARTING (Attempt ${attemptCount}) 🚨`);
+          
+          // Log the API call manually since we need special handling for the meal planner
+          const startTime = Date.now();
+          const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          
           const response = await fetch(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(request),
             signal: controller.signal
           });
+          
+          const responseTime = Date.now() - startTime;
           
           clearTimeout(timeoutId);
           
@@ -630,6 +739,26 @@ export class EdamamService {
             console.log('  - Has selection:', !!data.selection);
             console.log('  - Selection count:', data.selection ? data.selection.length : 0);
             console.log('  - Status:', data.status);
+            
+            // Log successful API call
+            this.loggingService.logApiCall({
+              userId: userId,
+              sessionId,
+              apiType: 'meal_planner',
+              endpoint: url,
+              httpMethod: 'POST',
+              requestPayload: request,
+              requestHeaders: headers,
+              responseStatus: response.status,
+              responsePayload: data,
+              responseSizeBytes: JSON.stringify(data).length,
+              responseTimeMs: responseTime,
+              errorOccurred: false,
+              featureContext: 'meal_plan_generation',
+              apiKeyUsed: mealPlannerKeys.appId
+            }).catch(logError => {
+              console.error('Failed to log successful Edamam API call:', logError);
+            });
             
             // Log the full response structure for debugging
             if (data.selection && data.selection.length > 0) {
@@ -655,6 +784,28 @@ export class EdamamService {
           console.error('  - Status:', response.status);
           console.error('  - Status Text:', response.statusText);
           console.error('  - Error Body:', errorText);
+          
+          // Log failed API call
+          this.loggingService.logApiCall({
+            userId: userId,
+            sessionId,
+            apiType: 'meal_planner',
+            endpoint: url,
+            httpMethod: 'POST',
+            requestPayload: request,
+            requestHeaders: headers,
+            responseStatus: response.status,
+            responsePayload: errorText,
+            responseSizeBytes: errorText.length,
+            responseTimeMs: responseTime,
+            errorOccurred: true,
+            errorMessage: `HTTP ${response.status}: ${response.statusText}`,
+            errorCode: response.status.toString(),
+            featureContext: 'meal_plan_generation',
+            apiKeyUsed: mealPlannerKeys.appId
+          }).catch(logError => {
+            console.error('Failed to log failed Edamam API call:', logError);
+          });
           
           // If this is not the last attempt, try next user
           if (attemptCount < maxAttempts) {
@@ -1158,15 +1309,15 @@ export class EdamamService {
   }
 
   /**
-   * Get ingredient autocomplete suggestions
+   * Get ingredient autocomplete suggestions with optional unit suggestions
    */
-  async getIngredientAutocomplete(query: string): Promise<string[]> {
+  async getIngredientAutocomplete(query: string, mode: 'basic' | 'with_units' | 'units_only' = 'basic'): Promise<{suggestions: string[], unitSuggestions: Record<string, string[]>, units?: string[], unitsCount?: number}> {
     try {
       console.log('🔍 EDAMAM AUTOCOMPLETE API - START');
       console.log('query:', query);
 
       if (!query || query.trim().length === 0) {
-        return [];
+        return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
 
       // Get Autocomplete API credentials with automatic rotation (uses same keys as nutrition)
@@ -1182,30 +1333,173 @@ export class EdamamService {
       console.log('🔍 AUTOCOMPLETE CURL COMMAND');
       console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
 
-      const response = await fetch(fullUrl, {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json'
+      // Use logged API call wrapper
+      const suggestions = await this.loggedApiCall<string[]>(
+        'autocomplete',
+        fullUrl,
+        () => fetch(fullUrl, {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json'
+          }
+        }),
+        {
+          params: Object.fromEntries(params.entries()),
+          featureContext: 'ingredient_autocomplete'
         }
-      });
-
-      console.log('🔍 AUTOCOMPLETE RESPONSE STATUS:', response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log('❌ AUTOCOMPLETE ERROR RESPONSE:', errorText);
-        throw new Error(`Edamam Autocomplete API error: ${response.status}`);
-      }
-
-      const suggestions = await response.json();
+      );
       console.log('✅ AUTOCOMPLETE SUCCESS - Suggestions count:', suggestions?.length || 0);
       console.log('✅ AUTOCOMPLETE SUGGESTIONS:', suggestions);
 
-      return Array.isArray(suggestions) ? suggestions : [];
+      const validSuggestions = Array.isArray(suggestions) ? suggestions : [];
+      
+      // Handle different modes
+      if (mode === 'basic') {
+        // Return only suggestions without units for faster response
+        return {
+          suggestions: validSuggestions,
+          unitSuggestions: {}
+        };
+      } else if (mode === 'units_only') {
+        // Return only unit suggestions for a single ingredient
+        let units: string[] = [];
+        if (validSuggestions.length > 0) {
+          // For units_only mode, we only get units for the first (most relevant) suggestion
+          const unitSuggestions = await this.getIngredientUnitSuggestions([validSuggestions[0]]);
+          // Extract just the units array from the first ingredient
+          const firstIngredient = validSuggestions[0];
+          units = unitSuggestions[firstIngredient] || [];
+        }
+        return {
+          units: units,
+          suggestions: [],
+          unitSuggestions: {}
+        };
+      } else {
+        // mode === 'with_units' - return both suggestions and unit suggestions
+        let unitSuggestions = {};
+        if (validSuggestions.length > 0) {
+          unitSuggestions = await this.getIngredientUnitSuggestions(validSuggestions);
+        }
+        return {
+          suggestions: validSuggestions,
+          unitSuggestions
+        };
+      }
     } catch (error) {
       console.log('❌ AUTOCOMPLETE API ERROR:', error);
-      // Return empty array instead of throwing error for better UX
-      return [];
+      // Return empty object instead of throwing error for better UX
+      return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
+    }
+  }
+
+  /**
+   * Get unit suggestions for ingredients using OpenAI
+   */
+  async getIngredientUnitSuggestions(ingredients: string[]): Promise<Record<string, string[]>> {
+    try {
+      console.log('🤖 OPENAI UNIT SUGGESTIONS - START');
+      console.log('ingredients:', ingredients);
+
+      if (!ingredients || ingredients.length === 0) {
+        return {};
+      }
+
+      const systemPrompt = `You are a nutrition expert. For each ingredient provided, suggest the most common and practical units of measurement that are SUPPORTED BY EDAMAM API for cooking and food logging.
+
+CRITICAL: Only suggest units from this EDAMAM-SUPPORTED list:
+
+WEIGHT UNITS (most common for Edamam):
+- gram (preferred for most solids)
+- ounce, oz (imperial weight)
+- pound, lb (imperial weight) 
+- kilogram, kg (metric weight)
+
+VOLUME UNITS (for liquids and some solids):
+- ml, milliliter (preferred for liquids)
+- liter, litre (larger liquid volumes)
+- cup (US cup measure)
+- tablespoon, tbsp (cooking measure)
+- teaspoon, tsp (cooking measure)
+- fluid_ounce, fl_oz (imperial liquid)
+
+COUNT/PIECE UNITS (for discrete items):
+- large (e.g., "2 large eggs")
+- medium (e.g., "1 medium apple") 
+- small (e.g., "3 small onions")
+- slice (for bread, cheese, etc.)
+- clove (for garlic)
+- piece (generic count)
+- whole (for whole items)
+- fillet (for fish/meat)
+
+SPECIAL EDAMAM UNITS:
+- serving (generic serving size)
+- unit (generic unit measure)
+
+INGREDIENT-SPECIFIC GUIDELINES:
+- Chicken/Meat/Fish: gram, ounce, pound, fillet, piece
+- Eggs: large, medium, piece, gram
+- Rice/Grains: gram, cup, ounce
+- Milk/Liquids: ml, cup, liter, fl_oz
+- Bread: slice, gram, piece
+- Vegetables: gram, large, medium, small, piece
+- Fruits: gram, large, medium, small, piece
+- Nuts/Seeds: gram, ounce, tablespoon
+- Oils/Fats: ml, tablespoon, teaspoon
+- Spices: gram, teaspoon, tablespoon
+
+IMPORTANT: 
+- Prioritize "gram" and "ml" as they work best with Edamam
+- Avoid non-standard units like "bunch", "head", "dozen" 
+- Focus on units that Edamam can accurately convert to nutrition data
+- Provide 3-4 most relevant units per ingredient
+
+Return ONLY a JSON object where each ingredient is a key and the value is an array of unit strings. Do not include any other text or explanation.
+
+Example format:
+{
+  "chicken": ["gram", "ounce", "pound", "fillet"],
+  "eggs": ["large", "medium", "piece", "gram"],
+  "rice": ["gram", "cup", "ounce"],
+  "milk": ["ml", "cup", "liter", "fl_oz"],
+  "bread": ["slice", "gram", "piece"],
+  "spinach": ["gram", "ounce", "cup"],
+  "olive oil": ["ml", "tablespoon", "teaspoon"]
+}`;
+
+      const userPrompt = `Please provide unit suggestions for these ingredients: ${ingredients.join(', ')}`;
+
+      const response = await this.openai.chat.completions.create({
+        model: config.openai.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 1000
+      });
+
+      const content = response.choices[0].message.content;
+      if (!content) {
+        throw new Error('No response from OpenAI');
+      }
+
+      // Parse JSON response
+      let jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in OpenAI response');
+      }
+
+      const unitSuggestions = JSON.parse(jsonMatch[0]);
+      
+      console.log('✅ UNIT SUGGESTIONS SUCCESS:', unitSuggestions);
+      return unitSuggestions;
+
+    } catch (error) {
+      console.log('❌ UNIT SUGGESTIONS ERROR:', error);
+      // Return empty object instead of throwing error for better UX
+      return {};
     }
   }
 

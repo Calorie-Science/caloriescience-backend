@@ -980,7 +980,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         mode = 'meal-plans', 
         mealPlanId, 
         view = 'consolidated', // 'consolidated', 'day-wise', 'day'
-        day 
+        day,
+        page = '1', // Page number (default: 1)
+        pageSize = '10' // Page size (default: 10)
       } = req.query;
 
       if (!clientId || typeof clientId !== 'string') {
@@ -1070,13 +1072,38 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           message: `Meal plan fetched successfully (${view} view)`
         });
       } else {
-        // Default mode: get meal plans for the client
-        const mealPlans = await mealPlanningService.getClientMealPlans(clientId);
+        // Default mode: get meal plans for the client with pagination
+        const pageNum = parseInt(page as string);
+        const pageSizeNum = parseInt(pageSize as string);
+        
+        // Validate pagination parameters
+        if (isNaN(pageNum) || pageNum < 1) {
+          return res.status(400).json({
+            error: 'Invalid page parameter',
+            message: 'Page number must be greater than 0'
+          });
+        }
+        
+        if (isNaN(pageSizeNum) || pageSizeNum < 1 || pageSizeNum > 100) {
+          return res.status(400).json({
+            error: 'Invalid pageSize parameter',
+            message: 'Page size must be between 1 and 100'
+          });
+        }
+        
+        const result = await mealPlanningService.getClientMealPlansPaginated(clientId, pageNum, pageSizeNum);
 
         const responseData = {
           message: 'Meal plans retrieved successfully',
-          mealPlans,
-          count: mealPlans.length
+          mealPlans: result.mealPlans,
+          pagination: {
+            page: pageNum,
+            pageSize: pageSizeNum,
+            totalCount: result.totalCount,
+            totalPages: Math.ceil(result.totalCount / pageSizeNum),
+            hasNextPage: pageNum < Math.ceil(result.totalCount / pageSizeNum),
+            hasPreviousPage: pageNum > 1
+          }
         };
 
         // Apply measurement system formatting

@@ -301,6 +301,12 @@ function roundToCommonFraction(value: number): number {
 export function convertServingSize(servingText: string, toSystem: MeasurementSystem): string {
   if (!servingText) return servingText;
 
+  // Handle malformed text like "4g tbsp vegetable oil" by cleaning it up first
+  let cleanText = servingText;
+  
+  // Fix malformed patterns like "4g tbsp" -> "4g" (remove duplicate units)
+  cleanText = cleanText.replace(/(\d+(?:\.\d+)?)\s*(g|gram|grams)\s+(tbsp|tsp|cups?|tablespoons?|teaspoons?|ounces?|oz|lbs?|pounds?|lb)\s+/gi, '$1 $2 ');
+  
   // Extract numeric value and unit from serving text
   const patterns = [
     /(\d+(?:\.\d+)?)\s*(g|gram|grams|kg|kilogram|kilograms)/gi,
@@ -309,7 +315,7 @@ export function convertServingSize(servingText: string, toSystem: MeasurementSys
     /(\d+(?:\.\d+)?)\s*(cup|cups|fl\s*oz|fluid\s*ounce|fluid\s*ounces)/gi
   ];
 
-  let convertedText = servingText;
+  let convertedText = cleanText;
 
   for (const pattern of patterns) {
     convertedText = convertedText.replace(pattern, (match, value, unit) => {

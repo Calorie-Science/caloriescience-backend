@@ -36,14 +36,16 @@ The system already implements comprehensive nutrition updates when editing meal 
 ## Code Structure
 
 ### Key Files:
-- `lib/mealPlanningService.ts`: Contains `editPreviewIngredient()` and `deletePreviewIngredient()`
+- `lib/mealPlanningService.ts`: Contains multi-day ingredient editing methods
 - `api/meal-plans/index.ts`: API endpoint handlers
 - `lib/edamamService.ts`: Nutrition data fetching
 
 ### Key Functions:
-- `editPreviewIngredient()`: Lines 1767-1942 in mealPlanningService.ts
-- `deletePreviewIngredient()`: Lines 1947-2122 in mealPlanningService.ts  
-- `calculateDailyNutrition()`: Lines 2166-2212 in mealPlanningService.ts
+- `editPreviewMealIngredientMultiDay()`: Multi-day preview ingredient editing
+- `editSavedMealIngredientMultiDay()`: Multi-day saved meal ingredient editing
+- `deletePreviewMealIngredientMultiDay()`: Multi-day preview ingredient deletion
+- `deleteSavedMealIngredientMultiDay()`: Multi-day saved meal ingredient deletion
+- `calculateDailyNutrition()`: Daily nutrition calculation with micronutrients
 
 ## Nutrition Calculation Details
 

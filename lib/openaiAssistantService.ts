@@ -5,6 +5,7 @@ export interface AssistantMealPlanRequest {
   additionalText?: string;
   clientId: string;
   nutritionistId: string;
+  mealProgram?: any;
 }
 
 export interface AssistantMealPlanResponse {
@@ -158,9 +159,21 @@ export class OpenAIAssistantService {
    * Prepare the input message for the assistant
    */
   private prepareInputMessage(request: AssistantMealPlanRequest): string {
-    const { clientGoals, additionalText } = request;
+    const { clientGoals, additionalText, mealProgram } = request;
     
-    let message = `Please generate a comprehensive meal plan based on the following client goals:\n\n`;
+    let message = `Please generate a comprehensive meal plan based on the following client goals:
+
+CRITICAL ALLERGEN AND DIETARY RESTRICTION INSTRUCTIONS:
+- NEVER include any allergens or ingredients that the client is allergic to, even in trace amounts
+- NEVER include any form, derivative, or cross-contamination risk of client allergies
+- If a client has a nut allergy, exclude ALL nuts, nut oils, nut flours, nut milks, and anything processed in facilities with nuts
+- If a client has a gluten allergy/intolerance, exclude ALL wheat, barley, rye, and ANY processed foods that may contain gluten
+- If a client has a dairy allergy/intolerance, exclude ALL milk, cheese, butter, cream, yogurt, whey, casein, and any dairy derivatives
+- Double-check every ingredient in every recipe to ensure ZERO allergen contamination
+- When in doubt about an ingredient's allergen content, DO NOT include it
+- Prioritize client safety over recipe variety - it's better to be overly cautious
+
+`;
     
     // Add client goals information
     message += `CLIENT GOALS:\n`;
@@ -177,20 +190,47 @@ export class OpenAIAssistantService {
       message += `- Water Goal: ${clientGoals.waterGoalLiters} liters\n`;
     }
     
+    // CRITICAL: Add strong allergen exclusion
     if (clientGoals.allergies && clientGoals.allergies.length > 0) {
-      message += `- Allergies: ${clientGoals.allergies.join(', ')}\n`;
+      message += `\n⚠️ CRITICAL ALLERGIES (MUST EXCLUDE COMPLETELY): ${clientGoals.allergies.join(', ')}\n`;
+      message += `- These allergies are LIFE-THREATENING. Exclude ALL forms, derivatives, and cross-contamination risks.\n`;
+      message += `- Do NOT include any ingredient that could contain traces of these allergens.\n`;
+      message += `- Check every single ingredient in every recipe for allergen content.\n`;
     }
     
     if (clientGoals.preferences && clientGoals.preferences.length > 0) {
       message += `- Dietary Preferences: ${clientGoals.preferences.join(', ')}\n`;
+      message += `  * Follow these dietary restrictions strictly (e.g., vegan = no animal products, vegetarian = no meat/fish, keto = low carb high fat)\n`;
+      message += `  * Ensure all meals and ingredients align with these dietary choices\n`;
     }
     
     if (clientGoals.cuisineTypes && clientGoals.cuisineTypes.length > 0) {
       message += `- Cuisine Preferences: ${clientGoals.cuisineTypes.join(', ')}\n`;
+      message += `  * Focus on recipes and flavors from these cuisine types\n`;
+      message += `  * Use authentic ingredients and cooking methods when possible\n`;
+      message += `  * Balance variety across different cuisine types if multiple are specified\n`;
     }
     
     if (clientGoals.notes) {
       message += `- Additional Notes: ${clientGoals.notes}\n`;
+    }
+    
+    // CRITICAL: Add meal program constraints
+    if (mealProgram && mealProgram.meals && mealProgram.meals.length > 0) {
+      message += `\n🍽️ MEAL PROGRAM STRUCTURE (MUST FOLLOW EXACTLY):\n`;
+      message += `- You must generate exactly ${mealProgram.meals.length} meals as specified below\n`;
+      message += `- Each meal must match the specified timing, type, and calorie targets\n`;
+      message += `- Do NOT add extra meals or skip any meals from this program\n\n`;
+      
+      mealProgram.meals.forEach((meal: any, index: number) => {
+        message += `Meal ${meal.mealOrder}: ${meal.mealName}\n`;
+        message += `  - Meal Type: ${meal.mealType || 'Not specified'}\n`;
+        message += `  - Scheduled Time: ${meal.mealTime}\n`;
+        message += `  - Target Calories: ${meal.targetCalories || 'Proportional to daily target'}\n`;
+        if (index < mealProgram.meals.length - 1) message += `\n`;
+      });
+      
+      message += `\n⚠️ CRITICAL: Your response must include exactly these ${mealProgram.meals.length} meals in the specified order with matching calorie targets.\n`;
     }
     
     message += `\n`;
@@ -200,7 +240,15 @@ export class OpenAIAssistantService {
       message += `ADDITIONAL REQUIREMENTS:\n${additionalText}\n\n`;
     }
     
-    message += `\nReturn the meal plan as a valid JSON object.`;
+    message += `\nIMPORTANT REMINDERS:
+- EXCLUDE ALL ALLERGENS COMPLETELY - no exceptions, no trace amounts
+- FOLLOW MEAL PROGRAM STRUCTURE EXACTLY - correct number of meals, timing, and calorie targets
+- Ensure all nutrition calculations are accurate
+- Provide detailed, actionable cooking instructions
+- Focus on balanced, nutritious meals that meet the client's goals
+- Follow dietary preferences strictly and incorporate preferred cuisine types
+
+Return the meal plan as a valid JSON object.`;
     
     return message;
   }

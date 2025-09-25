@@ -25,7 +25,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { q } = req.query;
+    const { q, mode } = req.query;
 
     // Validate query parameter
     if (!q || typeof q !== 'string') {
@@ -51,14 +51,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Get autocomplete suggestions
-    const suggestions = await edamamService.getIngredientAutocomplete(q);
+    // Validate mode parameter (optional)
+    const validModes = ['basic', 'with_units', 'units_only'];
+    const finalMode = mode && typeof mode === 'string' && validModes.includes(mode) 
+      ? mode as 'basic' | 'with_units' | 'units_only'
+      : 'basic';
+
+    // Get autocomplete suggestions with unit suggestions
+    const result = await edamamService.getIngredientAutocomplete(q, finalMode);
+
+    // For units_only mode, return only the units field
+    if (finalMode === 'units_only') {
+      return res.status(200).json({
+        units: result.units || []
+      });
+    }
 
     return res.status(200).json({
       success: true,
       query: q,
-      suggestions,
-      count: suggestions.length
+      mode: finalMode,
+      suggestions: result.suggestions,
+      unitSuggestions: result.unitSuggestions,
+      count: result.suggestions.length
     });
 
   } catch (error) {

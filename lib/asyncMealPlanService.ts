@@ -38,6 +38,58 @@ export class AsyncMealPlanService {
   }
 
   /**
+   * Get client's meal program data
+   */
+  private async getClientMealProgram(clientId: string): Promise<any> {
+    try {
+      const { data: mealProgram, error } = await supabase
+        .from('meal_programs')
+        .select(`
+          *,
+          meals:meal_program_meals(
+            id,
+            meal_order,
+            meal_name,
+            meal_time,
+            target_calories,
+            meal_type,
+            created_at,
+            updated_at
+          )
+        `)
+        .eq('client_id', clientId)
+        .single();
+
+      if (error || !mealProgram) {
+        console.log('⚠️ No meal program found for client:', clientId);
+        return null;
+      }
+
+      // Transform to match expected structure
+      return {
+        id: mealProgram.id,
+        clientId: mealProgram.client_id,
+        nutritionistId: mealProgram.nutritionist_id,
+        createdAt: mealProgram.created_at,
+        updatedAt: mealProgram.updated_at,
+        meals: mealProgram.meals.map((meal: any) => ({
+          id: meal.id,
+          mealOrder: meal.meal_order,
+          mealName: meal.meal_name,
+          mealTime: meal.meal_time,
+          targetCalories: meal.target_calories,
+          mealType: meal.meal_type,
+          createdAt: meal.created_at,
+          updatedAt: meal.updated_at
+        })).sort((a: any, b: any) => a.mealOrder - b.mealOrder)
+      };
+    } catch (error) {
+      console.error('❌ Error fetching meal program:', error);
+      return null;
+    }
+  }
+
+  /**
    * Start async meal plan generation and return preview ID
    */
   async startGeneration(
@@ -50,6 +102,10 @@ export class AsyncMealPlanService {
     try {
       console.log('🔄 Async Meal Plan Service - Starting generation for client:', clientId, 'using AI model:', aiModel);
       
+      // Get client's meal program
+      const mealProgram = await this.getClientMealProgram(clientId);
+      console.log('🍽️ Meal program for client:', mealProgram ? `${mealProgram.meals.length} meals` : 'No meal program found');
+      
       let threadId: string;
       let runId: string;
       let status: 'pending' | 'completed' | 'failed' = 'pending';
@@ -61,7 +117,8 @@ export class AsyncMealPlanService {
           clientGoals,
           additionalText,
           clientId,
-          nutritionistId
+          nutritionistId,
+          mealProgram
         };
 
         const geminiResponse = await this.geminiService.generateMealPlanSync(geminiRequest);
@@ -83,7 +140,8 @@ export class AsyncMealPlanService {
           clientGoals,
           additionalText,
           clientId,
-          nutritionistId
+          nutritionistId,
+          mealProgram
         };
 
         const claudeResponse = await this.claudeService.generateMealPlanSync(claudeRequest);
@@ -105,7 +163,8 @@ export class AsyncMealPlanService {
           clientGoals,
           additionalText,
           clientId,
-          nutritionistId
+          nutritionistId,
+          mealProgram
         };
 
         const assistantResponse = await this.openaiService.generateMealPlanAsync(assistantRequest);
@@ -430,11 +489,15 @@ export class AsyncMealPlanService {
     try {
       console.log('🤖 Starting Claude generation in background for thread:', threadId);
       
+      // Get client's meal program
+      const mealProgram = await this.getClientMealProgram(clientId);
+      
       const claudeRequest: ClaudeMealPlanRequest = {
         clientGoals,
         additionalText,
         clientId,
-        nutritionistId
+        nutritionistId,
+        mealProgram
       };
 
       const claudeResponse = await this.claudeService.generateMealPlan(claudeRequest);
