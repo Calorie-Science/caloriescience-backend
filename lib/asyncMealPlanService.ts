@@ -153,10 +153,50 @@ export class AsyncMealPlanService {
           };
         }
 
+        // Handle case where Claude JSON parsing failed but we have rawText
+        let processedMealPlan = claudeResponse.data;
+        if (claudeResponse.data?.jsonParsingFailed && claudeResponse.data?.rawText) {
+          console.log('🔧 Claude JSON parsing failed, attempting to parse rawText directly...');
+          try {
+            // The rawText is already a proper JSON string, just parse it directly
+            const parsedMealPlan = JSON.parse(claudeResponse.data.rawText);
+            
+            // Validate the parsed result
+            if (this.isValidMealPlanResponse(parsedMealPlan)) {
+              console.log('✅ Successfully recovered Claude meal plan from rawText');
+              processedMealPlan = parsedMealPlan;
+            } else {
+              console.log('❌ Parsed JSON is not a valid meal plan structure');
+            }
+          } catch (parseError) {
+            console.error('❌ Failed to parse rawText directly:', parseError);
+            console.log('🔍 Attempting with unescaping...');
+            
+            try {
+              // Fallback: try unescaping if direct parsing fails
+              let unescapedJson = claudeResponse.data.rawText;
+              unescapedJson = unescapedJson.replace(/\\"/g, '"');
+              unescapedJson = unescapedJson.replace(/\\n/g, '\n');
+              unescapedJson = unescapedJson.replace(/\\r/g, '\r');
+              unescapedJson = unescapedJson.replace(/\\t/g, '\t');
+              unescapedJson = unescapedJson.replace(/\\\\/g, '\\');
+              
+              const parsedMealPlan = JSON.parse(unescapedJson);
+              
+              if (this.isValidMealPlanResponse(parsedMealPlan)) {
+                console.log('✅ Successfully recovered Claude meal plan with unescaping');
+                processedMealPlan = parsedMealPlan;
+              }
+            } catch (secondParseError) {
+              console.error('❌ Both parsing attempts failed:', secondParseError);
+            }
+          }
+        }
+
         threadId = claudeResponse.messageId || `thread-claude-${Date.now()}`;
         runId = `run-claude-${Date.now()}`;
         status = 'completed';
-        generatedMealPlan = claudeResponse.data;
+        generatedMealPlan = processedMealPlan;
       } else {
         // Use OpenAI Assistant for async generation
         const assistantRequest: AssistantMealPlanRequest = {
@@ -503,12 +543,52 @@ export class AsyncMealPlanService {
       const claudeResponse = await this.claudeService.generateMealPlan(claudeRequest);
       
       if (claudeResponse.success) {
+        // Handle case where Claude JSON parsing failed but we have rawText
+        let processedMealPlan = claudeResponse.data;
+        if (claudeResponse.data?.jsonParsingFailed && claudeResponse.data?.rawText) {
+          console.log('🔧 Claude JSON parsing failed in background, attempting to parse rawText directly...');
+          try {
+            // The rawText is already a proper JSON string, just parse it directly
+            const parsedMealPlan = JSON.parse(claudeResponse.data.rawText);
+            
+            // Validate the parsed result
+            if (this.isValidMealPlanResponse(parsedMealPlan)) {
+              console.log('✅ Successfully recovered Claude meal plan from rawText in background');
+              processedMealPlan = parsedMealPlan;
+            } else {
+              console.log('❌ Parsed JSON is not a valid meal plan structure in background');
+            }
+          } catch (parseError) {
+            console.error('❌ Failed to parse rawText directly in background:', parseError);
+            console.log('🔍 Attempting with unescaping in background...');
+            
+            try {
+              // Fallback: try unescaping if direct parsing fails
+              let unescapedJson = claudeResponse.data.rawText;
+              unescapedJson = unescapedJson.replace(/\\"/g, '"');
+              unescapedJson = unescapedJson.replace(/\\n/g, '\n');
+              unescapedJson = unescapedJson.replace(/\\r/g, '\r');
+              unescapedJson = unescapedJson.replace(/\\t/g, '\t');
+              unescapedJson = unescapedJson.replace(/\\\\/g, '\\');
+              
+              const parsedMealPlan = JSON.parse(unescapedJson);
+              
+              if (this.isValidMealPlanResponse(parsedMealPlan)) {
+                console.log('✅ Successfully recovered Claude meal plan with unescaping in background');
+                processedMealPlan = parsedMealPlan;
+              }
+            } catch (secondParseError) {
+              console.error('❌ Both parsing attempts failed in background:', secondParseError);
+            }
+          }
+        }
+
         // Update database with completed result
         await supabase
           .from('async_meal_plans')
           .update({
             status: 'completed',
-            generated_meal_plan: claudeResponse.data,
+            generated_meal_plan: processedMealPlan,
             completed_at: new Date().toISOString()
           })
           .eq('thread_id', threadId)
@@ -547,6 +627,47 @@ export class AsyncMealPlanService {
    * Map database record to AsyncMealPlan interface
    */
   private mapDbToAsyncMealPlan(dbRecord: any): AsyncMealPlan {
+    let processedGeneratedMealPlan = dbRecord.generated_meal_plan;
+    
+    // Handle existing broken Claude records with jsonParsingFailed
+    if (dbRecord.generated_meal_plan?.jsonParsingFailed && dbRecord.generated_meal_plan?.rawText) {
+      console.log('🔧 Found existing broken Claude record, attempting to parse rawText directly...');
+      try {
+        // The rawText is already a proper JSON string, just parse it directly
+        const parsedMealPlan = JSON.parse(dbRecord.generated_meal_plan.rawText);
+        
+        // Validate the parsed result
+        if (this.isValidMealPlanResponse(parsedMealPlan)) {
+          console.log('✅ Successfully recovered existing Claude meal plan from rawText');
+          processedGeneratedMealPlan = parsedMealPlan;
+        } else {
+          console.log('❌ Parsed JSON from existing record is not a valid meal plan structure');
+        }
+      } catch (parseError) {
+        console.error('❌ Failed to parse rawText directly from existing record:', parseError);
+        console.log('🔍 Attempting with unescaping from existing record...');
+        
+        try {
+          // Fallback: try unescaping if direct parsing fails
+          let unescapedJson = dbRecord.generated_meal_plan.rawText;
+          unescapedJson = unescapedJson.replace(/\\"/g, '"');
+          unescapedJson = unescapedJson.replace(/\\n/g, '\n');
+          unescapedJson = unescapedJson.replace(/\\r/g, '\r');
+          unescapedJson = unescapedJson.replace(/\\t/g, '\t');
+          unescapedJson = unescapedJson.replace(/\\\\/g, '\\');
+          
+          const parsedMealPlan = JSON.parse(unescapedJson);
+          
+          if (this.isValidMealPlanResponse(parsedMealPlan)) {
+            console.log('✅ Successfully recovered existing Claude meal plan with unescaping');
+            processedGeneratedMealPlan = parsedMealPlan;
+          }
+        } catch (secondParseError) {
+          console.error('❌ Both parsing attempts failed for existing record:', secondParseError);
+        }
+      }
+    }
+
     return {
       id: dbRecord.id,
       clientId: dbRecord.client_id,
@@ -557,11 +678,42 @@ export class AsyncMealPlanService {
       additionalText: dbRecord.additional_text,
       aiModel: dbRecord.ai_model || 'openai',
       status: dbRecord.status,
-      generatedMealPlan: dbRecord.generated_meal_plan,
+      generatedMealPlan: processedGeneratedMealPlan,
       errorMessage: dbRecord.error_message,
       createdAt: dbRecord.created_at,
       updatedAt: dbRecord.updated_at,
       completedAt: dbRecord.completed_at
     };
+  }
+
+  /**
+   * Validate meal plan response structure (copied from ClaudeService)
+   */
+  private isValidMealPlanResponse(data: any): boolean {
+    try {
+      // Check basic structure
+      if (!data || typeof data !== 'object') return false;
+      if (!data.success || !data.message || !data.data) return false;
+      if (!data.data.mealPlan) return false;
+      
+      const mealPlan = data.data.mealPlan;
+      
+      // Check for required mealPlan properties
+      if (!mealPlan.days || !Array.isArray(mealPlan.days)) return false;
+      if (!mealPlan.dailyNutrition || typeof mealPlan.dailyNutrition !== 'object') return false;
+      
+      // Check that we have at least one day with meals
+      if (mealPlan.days.length === 0) return false;
+      
+      const firstDay = mealPlan.days[0];
+      if (!firstDay.meals || !Array.isArray(firstDay.meals)) return false;
+      if (firstDay.meals.length === 0) return false;
+      
+      console.log('✅ Meal plan response structure is valid');
+      return true;
+    } catch (error) {
+      console.error('❌ Meal plan validation error:', error);
+      return false;
+    }
   }
 }

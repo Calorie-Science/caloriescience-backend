@@ -126,11 +126,18 @@ export class ClaudeService {
               throw new Error(`Invalid JSON structure: starts with '${jsonContent.charAt(0)}', ends with '${jsonContent.charAt(jsonContent.length - 1)}'`);
             }
             
-            // Try to fix common JSON issues before parsing
-            jsonContent = this.fixCommonJsonIssues(jsonContent);
-            
-            // Parse the JSON response
-            const mealPlanData = JSON.parse(jsonContent);
+            // First try parsing without any fixes
+            let mealPlanData;
+            try {
+              mealPlanData = JSON.parse(jsonContent);
+              console.log('✅ JSON parsed successfully without fixes');
+            } catch (firstParseError) {
+              console.log('🔧 Initial parse failed, attempting fixes...');
+              // Only apply fixes if initial parsing failed
+              const fixedJsonContent = this.fixCommonJsonIssues(jsonContent);
+              mealPlanData = JSON.parse(fixedJsonContent);
+              console.log('✅ JSON parsed successfully with fixes');
+            }
             console.log('✅ Successfully parsed JSON response');
             
             // Validate the response structure

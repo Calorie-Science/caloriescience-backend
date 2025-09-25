@@ -1891,6 +1891,180 @@ export class MealPlanningService {
   }
 
   /**
+   * Get client meal plans with pagination
+   */
+  async getClientMealPlansPaginated(clientId: string, page: number = 1, pageSize: number = 10): Promise<{
+    mealPlans: GeneratedMealPlan[];
+    totalCount: number;
+  }> {
+    try {
+      // First, get the total count
+      const { count, error: countError } = await supabase
+        .from('meal_plans')
+        .select('*', { count: 'exact', head: true })
+        .eq('client_id', clientId);
+
+      if (countError) throw countError;
+
+      const totalCount = count || 0;
+
+      // Calculate offset for pagination
+      const offset = (page - 1) * pageSize;
+
+      // Get paginated meal plans with their meals
+      const { data: plans, error: plansError } = await supabase
+        .from('meal_plans')
+        .select(`
+          *,
+          meal_plan_meals (*)
+        `)
+        .eq('client_id', clientId)
+        .order('plan_date', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (plansError) throw plansError;
+
+      // Process all plans in parallel (no sequential DB calls)
+      const mealPlans: GeneratedMealPlan[] = plans.map(plan => {
+        let generatedMeals: GeneratedMeal[] = [];
+
+        // Check if meals are stored in generated_meals JSONB field (preview/manual meals)
+        if (plan.generated_meals && typeof plan.generated_meals === 'object') {
+          const generatedMealsData = plan.generated_meals as any;
+          
+          // Handle manual meal plans
+          if (generatedMealsData.isManual && generatedMealsData.meals) {
+            generatedMeals = generatedMealsData.meals.map((meal: any) => ({
+              id: meal.id,
+              mealType: meal.mealType,
+              mealOrder: meal.mealOrder,
+              recipeName: meal.recipeName,
+              recipeUrl: '',
+              recipeImageUrl: '',
+              caloriesPerServing: meal.nutrition?.calories || 0,
+              proteinGrams: meal.nutrition?.protein || 0,
+              carbsGrams: meal.nutrition?.carbs || 0,
+              fatGrams: meal.nutrition?.fat || 0,
+              fiberGrams: meal.nutrition?.fiber || 0,
+              servingsPerMeal: meal.servings || 1,
+              totalCalories: (meal.nutrition?.calories || 0) * (meal.servings || 1),
+              totalProtein: (meal.nutrition?.protein || 0) * (meal.servings || 1),
+              totalCarbs: (meal.nutrition?.carbs || 0) * (meal.servings || 1),
+              totalFat: (meal.nutrition?.fat || 0) * (meal.servings || 1),
+              totalFiber: (meal.nutrition?.fiber || 0) * (meal.servings || 1),
+              ingredients: meal.ingredients?.map((ing: any) => ({
+              text: ing.text,
+              quantity: ing.quantity,
+              measure: ing.measure,
+              food: ing.food,
+              weight: ing.weight,
+              calories: ing.nutrients?.ENERC_KCAL?.quantity,
+              protein: ing.nutrients?.PROCNT?.quantity,
+              carbs: ing.nutrients?.CHOCDF?.quantity,
+              fat: ing.nutrients?.FAT?.quantity,
+              fiber: ing.nutrients?.FIBTG?.quantity
+            })) || [],
+              edamamRecipeId: ''
+            }));
+          } 
+          // Handle preview meal plans (generated from Edamam)
+          else if (Array.isArray(generatedMealsData)) {
+            generatedMeals = generatedMealsData.map((meal: any) => ({
+              id: meal.id || `meal-${meal.mealOrder || 0}`,
+              mealType: meal.mealType,
+              mealOrder: meal.mealOrder,
+              recipeName: meal.recipeName || meal.recipe?.label,
+              recipeUrl: meal.recipe?.url || '',
+              recipeImageUrl: meal.recipe?.image || '',
+              caloriesPerServing: meal.recipe?.nutritionSummary?.calories || 0,
+              proteinGrams: meal.recipe?.nutritionSummary?.protein || 0,
+              carbsGrams: meal.recipe?.nutritionSummary?.carbs || 0,
+              fatGrams: meal.recipe?.nutritionSummary?.fat || 0,
+              fiberGrams: meal.recipe?.nutritionSummary?.fiber || 0,
+              servingsPerMeal: meal.recipe?.yield || 1,
+              totalCalories: meal.recipe?.nutritionSummary?.calories || 0,
+              totalProtein: meal.recipe?.nutritionSummary?.protein || 0,
+              totalCarbs: meal.recipe?.nutritionSummary?.carbs || 0,
+              totalFat: meal.recipe?.nutritionSummary?.fat || 0,
+              totalFiber: meal.recipe?.nutritionSummary?.fiber || 0,
+              ingredients: meal.recipe?.ingredients?.map((ing: any) => ({
+                text: ing.text,
+                quantity: ing.quantity,
+                measure: ing.measure,
+                food: ing.food,
+                weight: ing.weight,
+                calories: ing.nutrients?.ENERC_KCAL?.quantity,
+                protein: ing.nutrients?.PROCNT?.quantity,
+                carbs: ing.nutrients?.CHOCDF?.quantity,
+                fat: ing.nutrients?.FAT?.quantity,
+                fiber: ing.nutrients?.FIBTG?.quantity
+              })) || meal.recipe?.ingredientLines || [],
+              edamamRecipeId: meal.recipe?.uri || ''
+            }));
+          }
+        } 
+        // Handle saved meal plans from meal_plan_meals table
+        else if (plan.meal_plan_meals && Array.isArray(plan.meal_plan_meals)) {
+          generatedMeals = plan.meal_plan_meals
+            .sort((a: any, b: any) => a.meal_order - b.meal_order)
+            .map((meal: any) => ({
+              id: meal.id,
+              mealType: meal.meal_type,
+              mealOrder: meal.meal_order,
+              recipeName: meal.recipe_name,
+              recipeUrl: meal.recipe_url || '',
+              recipeImageUrl: meal.recipe_image_url || '',
+              caloriesPerServing: meal.calories_per_serving || 0,
+              proteinGrams: meal.protein_grams || 0,
+              carbsGrams: meal.carbs_grams || 0,
+              fatGrams: meal.fat_grams || 0,
+              fiberGrams: meal.fiber_grams || 0,
+              servingsPerMeal: meal.servings_per_meal || 1,
+              totalCalories: meal.total_calories || 0,
+              totalProtein: meal.total_protein_grams || 0,
+              totalCarbs: meal.total_carbs_grams || 0,
+              totalFat: meal.total_fat_grams || 0,
+              totalFiber: meal.total_fiber_grams || 0,
+              ingredients: meal.ingredients || [],
+              edamamRecipeId: meal.edamam_recipe_id || ''
+            }));
+        }
+
+        return {
+          id: plan.id,
+          clientId: plan.client_id,
+          nutritionistId: plan.nutritionist_id,
+          planName: plan.plan_name,
+          planDate: plan.plan_date,
+          planType: plan.plan_type,
+          status: plan.status,
+          targetCalories: plan.target_calories,
+          targetProtein: plan.target_protein_grams,
+          targetCarbs: plan.target_carbs_grams,
+          targetFat: plan.target_fat_grams,
+          targetFiber: plan.target_fiber_grams || 0,
+          dietaryRestrictions: plan.dietary_restrictions || [],
+          cuisinePreferences: plan.cuisine_preferences || [],
+          meals: generatedMeals,
+          nutritionSummary: plan.nutrition_summary || {},
+          generatedAt: plan.generated_at || plan.created_at
+        };
+      });
+
+      return {
+        mealPlans,
+        totalCount
+      };
+    } catch (error) {
+      console.error('Error fetching paginated client meal plans:', error);
+      return {
+        mealPlans: [],
+        totalCount: 0
+      };
+    }
+  }
+
+  /**
    * Update meal plan status
    */
   async updateMealPlanStatus(planId: string, status: string): Promise<boolean> {
