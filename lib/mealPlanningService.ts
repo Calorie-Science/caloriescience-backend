@@ -2581,33 +2581,42 @@ export class MealPlanningService {
         
         // Convert GeneratedMeal format to meal_plan_meals format for consistency
         if (Array.isArray(generatedMeals)) {
-          meals = generatedMeals.map((meal: any, index: number) => ({
-            id: meal.id || `preview-meal-${index}`,
-            meal_plan_id: mealPlanId,
-            day_number: 1, // Preview plans are single-day by default
-            meal_order: meal.mealOrder || index,
-            meal_type: meal.mealType,
-            recipe_name: meal.recipeName,
-            recipe_url: meal.recipeUrl,
-            recipe_image_url: meal.recipeImageUrl,
-            target_calories: meal.targetCalories || meal.totalCalories,
-            actual_calories: meal.totalCalories,
-            servingsPerMeal: meal.servingsPerMeal || 1,
-            protein_grams: meal.totalProtein,
-            carbs_grams: meal.totalCarbs,
-            fat_grams: meal.totalFat,
-            fiber_grams: meal.totalFiber,
-            servings: meal.servingsPerMeal || 1,
-            ingredients: meal.ingredients,
-            totalNutrients: meal.totalNutrients || {}, // Include all micronutrients from generated_meals
-            nutrition: {
-              calories: meal.totalCalories,
-              protein: meal.totalProtein,
-              carbs: meal.totalCarbs,
-              fat: meal.totalFat,
-              fiber: meal.totalFiber
-            }
-          }));
+          console.log(`🔍 DEBUG - First generated meal:`, JSON.stringify(generatedMeals[0], null, 2));
+          meals = generatedMeals.map((meal: any, index: number) => {
+            // Extract recipe data - the structure has a 'recipe' object with all the data
+            const recipe = meal.recipe || {};
+            const nutritionSummary = recipe.nutritionSummary || {};
+            
+            return {
+              id: meal.id || `preview-meal-${index}`,
+              meal_plan_id: mealPlanId,
+              day_number: 1, // Preview plans are single-day by default
+              meal_order: meal.mealOrder || index,
+              meal_type: meal.mealType || meal.edamamMealType,
+              recipe_name: recipe.label || meal.recipeName,
+              recipe_url: recipe.url || meal.recipeUrl,
+              recipe_image_url: recipe.image || meal.recipeImageUrl,
+              target_calories: meal.targetCalories || nutritionSummary.calories || recipe.calories,
+              actual_calories: nutritionSummary.calories || recipe.calories || 0,
+              servingsPerMeal: recipe.yield || meal.servingsPerMeal || 1,
+              protein_grams: nutritionSummary.protein || (recipe.totalNutrients?.PROCNT?.quantity) || 0,
+              carbs_grams: nutritionSummary.carbs || (recipe.totalNutrients?.CHOCDF?.quantity) || 0,
+              fat_grams: nutritionSummary.fat || (recipe.totalNutrients?.FAT?.quantity) || 0,
+              fiber_grams: nutritionSummary.fiber || (recipe.totalNutrients?.FIBTG?.quantity) || 0,
+              servings: recipe.yield || meal.servingsPerMeal || 1,
+              ingredients: recipe.ingredients || meal.ingredients || [],
+              totalNutrients: recipe.totalNutrients || meal.totalNutrients || {}, // Include all micronutrients from generated_meals
+              nutrition: {
+                calories: nutritionSummary.calories || recipe.calories || 0,
+                protein: nutritionSummary.protein || (recipe.totalNutrients?.PROCNT?.quantity) || 0,
+                carbs: nutritionSummary.carbs || (recipe.totalNutrients?.CHOCDF?.quantity) || 0,
+                fat: nutritionSummary.fat || (recipe.totalNutrients?.FAT?.quantity) || 0,
+                fiber: nutritionSummary.fiber || (recipe.totalNutrients?.FIBTG?.quantity) || 0,
+                sodium: nutritionSummary.sodium || (recipe.totalNutrients?.NA?.quantity) || 0,
+                sugar: nutritionSummary.sugar || (recipe.totalNutrients?.SUGAR?.quantity) || 0
+              }
+            };
+          });
           console.log(`✅ PREVIEW MEALS FOUND: ${meals.length} meals`);
         }
       } else {
