@@ -1,6 +1,5 @@
 import { config } from './config';
 import { EdamamApiKeyService } from './edamamApiKeyService';
-import { EdamamKeyRotationService } from './edamamKeyRotationService';
 import { EdamamLoggingService, EdamamApiLogData } from './edamamLoggingService';
 import OpenAI from 'openai';
 
@@ -179,7 +178,6 @@ export class EdamamService {
   
   // New API key management services
   private apiKeyService: EdamamApiKeyService;
-  private keyRotationService: EdamamKeyRotationService;
   private loggingService: EdamamLoggingService;
   
   // OpenAI client for unit suggestions
@@ -188,6 +186,10 @@ export class EdamamService {
   // Round-robin user management for Meal Planner API only
   private static mealPlannerUsers = ['test1', 'test2', 'test3', 'test4', 'test5'];
   private static currentMealPlannerUserIndex = 0;
+  
+  // Round-robin user management for Recipe API
+  private static recipeApiUsers = ['test1', 'test2', 'test3', 'test4', 'test5', 'test6', 'test7', 'test8', 'test9', 'test10'];
+  private static currentRecipeApiUserIndex = 0;
 
   constructor() {
     this.appId = config.edamam.appId;
@@ -200,7 +202,6 @@ export class EdamamService {
     
     // Initialize API key management services
     this.apiKeyService = new EdamamApiKeyService();
-    this.keyRotationService = new EdamamKeyRotationService();
     this.loggingService = new EdamamLoggingService();
     
     // Initialize OpenAI client
@@ -330,22 +331,22 @@ export class EdamamService {
         throw new Error(`No active ${apiType} key found`);
       }
 
-      // Check if rotation is needed
-      if (keyResult.needsRotation) {
-        console.log(`🔄 Edamam Service - ${apiType} key needs rotation, attempting rotation...`);
-        const rotationResult = await this.keyRotationService.checkAndRotateIfNeeded(apiType, keyResult.appId);
-        
-        if (rotationResult.needsRotation && rotationResult.rotationResult?.success) {
-          console.log(`✅ Edamam Service - Key rotation successful for ${apiType}`);
-          // Get the new key after rotation
-          const newKeyResult = await this.apiKeyService.getActiveApiKey(apiType);
-          if (newKeyResult.success && newKeyResult.appId && newKeyResult.appKey) {
-            return { appId: newKeyResult.appId, appKey: newKeyResult.appKey };
-          }
-        } else {
-          console.warn(`⚠️ Edamam Service - Key rotation failed for ${apiType}, using current key`);
-        }
-      }
+      // Key rotation disabled - using static keys
+      // if (keyResult.needsRotation) {
+      //   console.log(`🔄 Edamam Service - ${apiType} key needs rotation, attempting rotation...`);
+      //   const rotationResult = await this.keyRotationService.checkAndRotateIfNeeded(apiType, keyResult.appId);
+      //   
+      //   if (rotationResult.needsRotation && rotationResult.rotationResult?.success) {
+      //     console.log(`✅ Edamam Service - Key rotation successful for ${apiType}`);
+      //     // Get the new key after rotation
+      //     const newKeyResult = await this.apiKeyService.getActiveApiKey(apiType);
+      //     if (newKeyResult.success && newKeyResult.appId && newKeyResult.appKey) {
+      //       return { appId: newKeyResult.appId, appKey: newKeyResult.appKey };
+      //     }
+      //   } else {
+      //     console.warn(`⚠️ Edamam Service - Key rotation failed for ${apiType}, using current key`);
+      //   }
+      // }
 
       // Increment usage count
       await this.apiKeyService.incrementUsage(keyResult.appId, apiType);
@@ -373,6 +374,15 @@ export class EdamamService {
   }
 
   /**
+   * Get the next recipe API user for round-robin distribution
+   */
+  private static getNextRecipeApiUser(): string {
+    const user = EdamamService.recipeApiUsers[EdamamService.currentRecipeApiUserIndex];
+    EdamamService.currentRecipeApiUserIndex = (EdamamService.currentRecipeApiUserIndex + 1) % EdamamService.recipeApiUsers.length;
+    return user;
+  }
+
+  /**
    * Search for recipes using the Recipe Search API
    */
   async searchRecipes(params: RecipeSearchParams, userId?: string): Promise<MealPlanResponse> {
@@ -383,6 +393,9 @@ export class EdamamService {
     searchParams.append('app_id', recipeKeys.appId);
     searchParams.append('app_key', recipeKeys.appKey);
     searchParams.append('type', 'public');
+    
+    // Add debugging for input parameters
+    console.log('🔍 Edamam searchRecipes - Input params:', JSON.stringify(params, null, 2));
     
     // Add search parameters
     if (params.query) searchParams.append('q', params.query);
@@ -398,16 +411,21 @@ export class EdamamService {
     if (params.random) searchParams.append('random', 'true');
     if (params.beta) searchParams.append('beta', 'true');
     if (params.co2EmissionsClass) searchParams.append('co2EmissionsClass', params.co2EmissionsClass);
+    
+    // Add debugging for final URL parameters
+    console.log('🔍 Edamam searchRecipes - Final URL params:', searchParams.toString());
+    console.log('🔍 Edamam searchRecipes - Full URL:', `${this.recipeApiUrl}?${searchParams.toString()}`);
 
     try {
       const headers: HeadersInit = {
         'Content-Type': 'application/json'
       };
       
-      // Add user ID header if provided (required for Active User Tracking)
-      if (userId) {
-        headers['Edamam-Account-User'] = userId;
-      }
+      // Add user ID header (required for Active User Tracking)
+      // Use cycling test users instead of actual userId to avoid format issues
+      const cyclingUserId = EdamamService.getNextRecipeApiUser();
+      headers['Edamam-Account-User'] = cyclingUserId;
+      console.log(`🔄 Recipe Search - Using cycling user: ${cyclingUserId}`);
 
       const response = await fetch(`${this.recipeApiUrl}?${searchParams.toString()}`, {
         headers
@@ -419,6 +437,8 @@ export class EdamamService {
       if (!response.ok) {
         const errorText = await response.text();
         console.log('❌ Edamam API Error Response:', errorText);
+        console.log('❌ Edamam API Error - Request URL:', `${this.recipeApiUrl}?${searchParams.toString()}`);
+        console.log('❌ Edamam API Error - Request params:', JSON.stringify(params, null, 2));
         throw new Error(`Edamam API error: ${response.status} ${response.statusText}`);
       }
 

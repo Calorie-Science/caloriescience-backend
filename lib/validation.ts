@@ -33,7 +33,11 @@ export const userRegistrationSchema = Joi.object({
     }),
   qualification: Joi.string().max(500).optional(),
   experienceYears: Joi.number().integer().min(0).max(50).optional(),
-  specialization: Joi.array().items(Joi.string()).optional()
+  specialization: Joi.array().items(Joi.string()).optional(),
+  preferredMeasurementSystem: Joi.string().valid('metric', 'imperial').optional().default('metric')
+    .messages({
+      'any.only': 'Preferred measurement system must be either "metric" or "imperial"'
+    })
 });
 
 // User login validation
@@ -258,7 +262,11 @@ export const clientUpdateSchema = Joi.object({
   status: Joi.string().valid('prospective', 'active', 'inactive', 'archived').optional(),
   source: Joi.string().max(100).optional(),
   notes: Joi.string().optional(),
-  preferredContactMethod: Joi.string().valid('email', 'phone', 'sms').optional().default('email')
+  preferredContactMethod: Joi.string().valid('email', 'phone', 'sms').optional().default('email'),
+  preferredMeasurementSystem: Joi.string().valid('metric', 'imperial').optional().default('metric')
+    .messages({
+      'any.only': 'Preferred measurement system must be either "metric" or "imperial"'
+    })
 });
 
 // EER calculation validation - Updated for OpenAI Assistant

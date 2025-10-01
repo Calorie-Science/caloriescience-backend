@@ -92,9 +92,10 @@ async function handleRegistration(req: VercelRequest, res: VercelResponse): Prom
         specialization: userData.specialization || null,
         full_name: fullName,
         role: 'nutritionist',
-        is_email_verified: false
+        is_email_verified: false,
+        preferred_measurement_system: userData.preferred_measurement_system || 'metric'
       })
-      .select('id, email, first_name, last_name, full_name, role, created_at')
+      .select('id, email, first_name, last_name, full_name, role, preferred_measurement_system, created_at')
       .single();
 
     if (error) {
@@ -147,7 +148,7 @@ async function handleLogin(req: VercelRequest, res: VercelResponse): Promise<Ver
     // Get user by email
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, password_hash, first_name, last_name, full_name, role')
+      .select('id, email, password_hash, first_name, last_name, full_name, role, preferred_measurement_system')
       .eq('email', email.toLowerCase())
       .eq('role', 'nutritionist')
       .single();
@@ -185,7 +186,8 @@ async function handleLogin(req: VercelRequest, res: VercelResponse): Promise<Ver
       first_name: user.first_name,
       last_name: user.last_name,
       full_name: user.full_name,
-      role: user.role
+      role: user.role,
+      preferred_measurement_system: user.preferred_measurement_system || 'metric'
     }, FIELD_MAPPINGS.snakeToCamel);
 
     return res.status(200).json({

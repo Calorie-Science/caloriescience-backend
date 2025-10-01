@@ -2581,7 +2581,6 @@ export class MealPlanningService {
         
         // Convert GeneratedMeal format to meal_plan_meals format for consistency
         if (Array.isArray(generatedMeals)) {
-          console.log(`🔍 DEBUG - First generated meal:`, JSON.stringify(generatedMeals[0], null, 2));
           meals = generatedMeals.map((meal: any, index: number) => {
             // Extract recipe data - the structure has a 'recipe' object with all the data
             const recipe = meal.recipe || {};

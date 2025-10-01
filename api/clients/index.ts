@@ -121,6 +121,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       if (fatGrams) createData.fat_grams = fatGrams;
       if (fiberGrams) createData.fiber_grams = fiberGrams;
       if (status) createData.status = status;
+      
+      // Add measurement system preference if provided
+      if (validation.value.preferredMeasurementSystem) {
+        createData.preferred_measurement_system = validation.value.preferredMeasurementSystem;
+      }
 
       // Always use snake_case for database fields  
       const transformedData = transformWithMapping(createData, FIELD_MAPPINGS.camelToSnake);

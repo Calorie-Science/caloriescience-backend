@@ -101,6 +101,7 @@ export const FIELD_MAPPINGS = {
     convertedToActiveAt: 'converted_to_active_at',
     lastInteractionAt: 'last_interaction_at',
     preferredContactMethod: 'preferred_contact_method',
+    preferredMeasurementSystem: 'preferred_measurement_system',
     nutritionistId: 'nutritionist_id',
     clientId: 'client_id',
     userId: 'user_id',

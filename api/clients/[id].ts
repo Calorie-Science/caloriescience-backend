@@ -73,6 +73,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       
       const response = {
         ...clientWithoutSystemFields,
+        // Ensure measurement system is included
+        preferredMeasurementSystem: client.preferred_measurement_system || 'metric',
         // EER data
         eerCalories: nutritionReq?.eer_calories ?? null,
         nutritionistNotes: nutritionReq?.nutritionist_notes || null,
@@ -151,7 +153,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null,
         
         // Micronutrient data - categorized into vitamins, minerals, and miscellaneous
-        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq.micronutrient_recommendations || {}, true) : {
+        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations || {}, true) : {
           vitamins: {},
           minerals: {},
           miscellaneous: {}
@@ -1558,7 +1560,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null,
         
         // Micronutrient data - categorized into vitamins, minerals, and miscellaneous
-        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq.micronutrient_recommendations, true) : {
+        micronutrients: micronutrientReq ? categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations || {}, true) : {
           vitamins: {},
           minerals: {},
           miscellaneous: {}
@@ -1575,7 +1577,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         clientGoal: clientGoalData ?? null,
         eerGuideline: eer_guideline,
         healthMetrics: calculateHealthMetrics(updatedClient.height_cm, updatedClient.weight_kg),
-        categorizedMicronutrients: categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations, true)
+        categorizedMicronutrients: categorizeMicronutrients(micronutrientReq?.micronutrient_recommendations || {}, true)
       };
 
       // Remove nested arrays
