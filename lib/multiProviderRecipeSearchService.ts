@@ -20,6 +20,7 @@ export interface SpoonacularSearchParams {
   offset?: number;
   sort?: 'popularity' | 'healthiness' | 'price' | 'time' | 'random';
   sortDirection?: 'asc' | 'desc';
+  addRecipeNutrition?: boolean;
 }
 
 export interface SpoonacularRecipe {
@@ -101,6 +102,12 @@ export interface UnifiedRecipeSummary {
   source: 'edamam' | 'spoonacular';
   readyInMinutes?: number;
   servings?: number;
+  // Nutrition data (per serving)
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
 }
 
 // Unified recipe interface for detailed view
@@ -339,6 +346,7 @@ export class MultiProviderRecipeSearchService {
     if (params.offset) searchParams.append('offset', params.offset.toString());
     if (params.sort) searchParams.append('sort', params.sort);
     if (params.sortDirection) searchParams.append('sortDirection', params.sortDirection);
+    if (params.addRecipeNutrition) searchParams.append('addRecipeNutrition', 'true');
 
     const url = `https://api.spoonacular.com/recipes/complexSearch?${searchParams}`;
     console.log('🍽️ Spoonacular API URL:', url);
@@ -432,7 +440,8 @@ export class MultiProviderRecipeSearchService {
       diet: params.diet,
       intolerances: params.health, // Map health labels to intolerances
       number: params.maxResults || 20,
-      sort: 'random'
+      sort: 'random',
+      addRecipeNutrition: true
     };
 
     // Map meal types to Spoonacular's expected values
@@ -517,14 +526,36 @@ export class MultiProviderRecipeSearchService {
    * Convert Edamam recipe to light summary for search results
    */
   private convertEdamamToSummary(recipe: EdamamRecipe): UnifiedRecipeSummary {
+    // Extract the ID part from URI and ensure it has the recipe_ prefix
+    const uriParts = recipe.uri.split('#');
+    let recipeId = uriParts[1] || uriParts[0];
+    
+    // Ensure the ID starts with 'recipe_' for consistency with recipe details API
+    if (!recipeId.startsWith('recipe_')) {
+      recipeId = `recipe_${recipeId}`;
+    }
+    
+    // Calculate per-serving nutrition
+    const servings = recipe.yield || 1;
+    const caloriesPerServing = Math.round(recipe.calories / servings);
+    const proteinPerServing = Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / servings * 10) / 10;
+    const carbsPerServing = Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / servings * 10) / 10;
+    const fatPerServing = Math.round((recipe.totalNutrients?.FAT?.quantity || 0) / servings * 10) / 10;
+    const fiberPerServing = Math.round((recipe.totalNutrients?.FIBTG?.quantity || 0) / servings * 10) / 10;
+    
     return {
-      id: recipe.uri.split('#')[1], // Extract the ID part from URI
+      id: recipeId,
       title: recipe.label,
       image: recipe.image,
       sourceUrl: recipe.url,
       source: 'edamam',
       readyInMinutes: recipe.totalTime > 0 ? recipe.totalTime : undefined,
-      servings: recipe.yield || undefined
+      servings: servings,
+      calories: caloriesPerServing,
+      protein: proteinPerServing,
+      carbs: carbsPerServing,
+      fat: fatPerServing,
+      fiber: fiberPerServing
     };
   }
 
@@ -563,6 +594,9 @@ export class MultiProviderRecipeSearchService {
    * Convert Spoonacular recipe to light summary for search results
    */
   private convertSpoonacularToSummary(recipe: SpoonacularRecipe): UnifiedRecipeSummary {
+    // Extract nutrition data from Spoonacular recipe (now available with addRecipeNutrition=true)
+    const nutrition = this.extractNutritionFromSpoonacular(recipe);
+    
     return {
       id: recipe.id.toString(),
       title: recipe.title,
@@ -570,7 +604,12 @@ export class MultiProviderRecipeSearchService {
       sourceUrl: recipe.sourceUrl || '',
       source: 'spoonacular',
       readyInMinutes: recipe.readyInMinutes || undefined,
-      servings: recipe.servings ? recipe.servings : undefined
+      servings: recipe.servings ? recipe.servings : undefined,
+      calories: nutrition.calories,
+      protein: nutrition.protein,
+      carbs: nutrition.carbs,
+      fat: nutrition.fat,
+      fiber: nutrition.fiber
     };
   }
 

@@ -2,89 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../../lib/auth';
 import { RecipeCacheService } from '../../../lib/recipeCacheService';
 import { MultiProviderRecipeSearchService } from '../../../lib/multiProviderRecipeSearchService';
-
-interface DetailedRecipe {
-  id: string;
-  title: string;
-  image?: string;
-  sourceUrl?: string;
-  source: 'edamam' | 'spoonacular';
-  servings: number;
-  readyInMinutes?: number;
-  fromCache: boolean;
-  
-  // Detailed nutrition information
-  nutrition: {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber?: number;
-    sugar?: number;
-    sodium?: number;
-    cholesterol?: number;
-    saturatedFat?: number;
-    transFat?: number;
-    monounsaturatedFat?: number;
-    polyunsaturatedFat?: number;
-    potassium?: number;
-    calcium?: number;
-    iron?: number;
-    vitaminA?: number;
-    vitaminC?: number;
-    vitaminD?: number;
-    vitaminE?: number;
-    vitaminK?: number;
-    thiamin?: number;
-    riboflavin?: number;
-    niacin?: number;
-    vitaminB6?: number;
-    folate?: number;
-    vitaminB12?: number;
-    biotin?: number;
-    pantothenicAcid?: number;
-    phosphorus?: number;
-    iodine?: number;
-    magnesium?: number;
-    zinc?: number;
-    selenium?: number;
-    copper?: number;
-    manganese?: number;
-    chromium?: number;
-    molybdenum?: number;
-  };
-  
-  // Detailed ingredients
-  ingredients: Array<{
-    id?: string;
-    name: string;
-    amount: number;
-    unit: string;
-    originalString?: string;
-    image?: string;
-    aisle?: string;
-    meta?: string[];
-    measures?: {
-      us?: { amount: number; unitShort: string; unitLong: string };
-      metric?: { amount: number; unitShort: string; unitLong: string };
-    };
-  }>;
-  
-  // Instructions
-  instructions?: Array<{
-    number: number;
-    step: string;
-  }>;
-  
-  // Additional metadata
-  summary?: string;
-  cuisines?: string[];
-  dishTypes?: string[];
-  diets?: string[];
-  healthLabels?: string[];
-  cautions?: string[];
-  tags?: string[];
-}
+import { RecipeResponseStandardizationService, StandardizedRecipeResponse } from '../../../lib/recipeResponseStandardizationService';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const user = (req as any).user;
@@ -112,6 +30,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         recipeId: id
       });
 
+      // Initialize standardization service
+      const standardizationService = new RecipeResponseStandardizationService();
+
       // Step 1: Check cache first
       const cacheService = new RecipeCacheService();
       const cachedRecipe = await cacheService.getRecipeById(id);
@@ -119,11 +40,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       if (cachedRecipe) {
         console.log('✅ Found recipe in cache:', cachedRecipe.id);
         
-        const detailedRecipe = transformCachedRecipeToDetailed(cachedRecipe);
+        // Standardize the cached recipe response
+        const standardizedRecipe = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
+        
         return res.status(200).json({
           success: true,
-          data: detailedRecipe,
-          message: 'Recipe details retrieved from cache'
+          data: standardizedRecipe,
+          message: 'Recipe details retrieved from cache (standardized)'
         });
       }
 
@@ -176,13 +99,64 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       
       await cacheService.storeRecipe(cacheRecipeData);
 
-      // Step 4: Transform and return
-      const detailedRecipe = transformExternalRecipeToDetailed(externalRecipe);
+      // Step 4: Standardize and return the external recipe
+      console.log('🔧 Standardizing external recipe response...');
+      
+      // Convert external recipe to format expected by standardization service
+      const recipeForStandardization = {
+        id: externalRecipe.id,
+        provider: externalRecipe.source,
+        external_recipe_id: externalRecipe.id.startsWith('recipe_') ? externalRecipe.id.replace('recipe_', '') : externalRecipe.id,
+        external_recipe_uri: externalRecipe.sourceUrl,
+        recipe_name: externalRecipe.title,
+        recipe_source: externalRecipe.sourceUrl,
+        recipe_url: externalRecipe.sourceUrl,
+        recipe_image_url: externalRecipe.image,
+        cuisine_types: externalRecipe.cuisines || [],
+        meal_types: externalRecipe.dishTypes || [],
+        dish_types: externalRecipe.dishTypes || [],
+        health_labels: externalRecipe.healthLabels || [],
+        diet_labels: externalRecipe.diets || [],
+        servings: externalRecipe.servings || 1,
+        prep_time_minutes: null,
+        cook_time_minutes: null,
+        total_time_minutes: externalRecipe.readyInMinutes,
+        total_calories: null,
+        total_protein_g: null,
+        total_carbs_g: null,
+        total_fat_g: null,
+        total_fiber_g: null,
+        total_sugar_g: null,
+        total_sodium_mg: null,
+        total_weight_g: null,
+        calories_per_serving: externalRecipe.nutrition?.calories?.quantity?.toString() || '0',
+        protein_per_serving_g: externalRecipe.nutrition?.macros?.protein?.quantity?.toString() || '0',
+        carbs_per_serving_g: externalRecipe.nutrition?.macros?.carbs?.quantity?.toString() || '0',
+        fat_per_serving_g: externalRecipe.nutrition?.macros?.fat?.quantity?.toString() || '0',
+        fiber_per_serving_g: externalRecipe.nutrition?.macros?.fiber?.quantity?.toString() || '0',
+        ingredients: externalRecipe.ingredients || [],
+        ingredient_lines: [],
+        cooking_instructions: externalRecipe.instructions || [],
+        nutrition_details: externalRecipe.nutrition || {},
+        original_api_response: externalRecipe,
+        cache_status: 'active',
+        api_fetch_count: 1,
+        last_api_fetch_at: new Date().toISOString(),
+        last_accessed_at: new Date().toISOString(),
+        has_complete_nutrition: !!(externalRecipe.nutrition?.calories?.quantity && externalRecipe.nutrition?.macros?.protein?.quantity),
+        has_detailed_ingredients: !!(externalRecipe.ingredients && externalRecipe.ingredients.length > 0),
+        has_cooking_instructions: !!(externalRecipe.instructions && externalRecipe.instructions.length > 0),
+        data_quality_score: calculateDataQuality(externalRecipe),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      const standardizedRecipe = standardizationService.standardizeRecipeResponse(recipeForStandardization);
       
       return res.status(200).json({
         success: true,
-        data: detailedRecipe,
-        message: 'Recipe details retrieved from external API and cached'
+        data: standardizedRecipe,
+        message: 'Recipe details retrieved from external API and cached (standardized)'
       });
 
     } catch (error) {
@@ -197,90 +171,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
-function transformCachedRecipeToDetailed(cachedRecipe: any): DetailedRecipe {
-  // Transform nutrition data to new format if it's in old format
-  let nutrition = cachedRecipe.nutrition_details || {};
-  
-  // Check if nutrition is in old flat format and needs transformation
-  if (nutrition && !nutrition.macros && !nutrition.micros) {
-    nutrition = transformOldNutritionFormat(nutrition);
-  }
-  
-  return {
-    id: cachedRecipe.id,
-    title: cachedRecipe.recipe_name,
-    image: cachedRecipe.recipe_image_url,
-    sourceUrl: cachedRecipe.recipe_url,
-    source: cachedRecipe.provider,
-    servings: cachedRecipe.servings || 1,
-    readyInMinutes: cachedRecipe.total_time_minutes,
-    fromCache: true,
-    nutrition: nutrition,
-    ingredients: cachedRecipe.ingredients || [],
-    instructions: cachedRecipe.cooking_instructions || [],
-    summary: cachedRecipe.summary,
-    cuisines: cachedRecipe.cuisine_types || [],
-    dishTypes: cachedRecipe.dish_types || [],
-    diets: cachedRecipe.diet_labels || [],
-    healthLabels: cachedRecipe.health_labels || [],
-    cautions: cachedRecipe.cautions || [],
-    tags: cachedRecipe.tags || []
-  };
-}
-
-/**
- * Transform old flat nutrition format to new structured format
- */
-function transformOldNutritionFormat(oldNutrition: any): any {
-  const nutrition = {
-    macros: {},
-    micros: {
-      vitamins: {},
-      minerals: {}
-    }
-  };
-
-  // Define nutrient categories
-  const macros = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'cholesterol', 'saturatedFat', 'transFat', 'monounsaturatedFat', 'polyunsaturatedFat'];
-  const vitamins = ['vitaminA', 'vitaminC', 'vitaminD', 'vitaminE', 'vitaminK', 'thiamin', 'riboflavin', 'niacin', 'vitaminB6', 'folate', 'vitaminB12', 'biotin', 'pantothenicAcid'];
-  const minerals = ['potassium', 'calcium', 'iron', 'phosphorus', 'iodine', 'magnesium', 'zinc', 'selenium', 'copper', 'manganese', 'chromium', 'molybdenum'];
-
-  // Categorize nutrients
-  for (const [key, value] of Object.entries(oldNutrition)) {
-    if (macros.includes(key)) {
-      nutrition.macros[key] = value;
-    } else if (vitamins.includes(key)) {
-      nutrition.micros.vitamins[key] = value;
-    } else if (minerals.includes(key)) {
-      nutrition.micros.minerals[key] = value;
-    }
-  }
-
-  return nutrition;
-}
-
-function transformExternalRecipeToDetailed(externalRecipe: any): DetailedRecipe {
-  return {
-    id: externalRecipe.id,
-    title: externalRecipe.title,
-    image: externalRecipe.image,
-    sourceUrl: externalRecipe.sourceUrl,
-    source: externalRecipe.source,
-    servings: externalRecipe.servings || 1,
-    readyInMinutes: externalRecipe.readyInMinutes,
-    fromCache: false,
-    nutrition: externalRecipe.nutrition || {},
-    ingredients: externalRecipe.ingredients || [],
-    instructions: externalRecipe.instructions || [],
-    summary: externalRecipe.summary,
-    cuisines: externalRecipe.cuisines || [],
-    dishTypes: externalRecipe.dishTypes || [],
-    diets: externalRecipe.diets || [],
-    healthLabels: externalRecipe.healthLabels || [],
-    cautions: externalRecipe.cautions || [],
-    tags: externalRecipe.tags || []
-  };
-}
+// Old transformation functions removed - now using standardization service
 
 /**
  * Calculate data quality score for a recipe (0-100)

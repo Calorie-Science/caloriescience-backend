@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { RecipeResponseStandardizationService, StandardizedRecipeResponse } from './recipeResponseStandardizationService';
 
 export interface CachedRecipe {
   id: string;
@@ -63,13 +64,18 @@ export interface RecipeSearchCacheParams {
 }
 
 export interface CacheSearchResult {
-  recipes: CachedRecipe[];
+  recipes: StandardizedRecipeResponse[];
   totalResults: number;
   fromCache: boolean;
   cacheHitRate: number;
 }
 
 export class RecipeCacheService {
+  private standardizationService: RecipeResponseStandardizationService;
+  
+  constructor() {
+    this.standardizationService = new RecipeResponseStandardizationService();
+  }
   
   /**
    * Search recipes in cache with full-text search and filters
@@ -173,8 +179,11 @@ export class RecipeCacheService {
         await this.updateLastAccessed(recipes.map(r => r.id));
       }
 
+      // Convert cached recipes to standardized format
+      const standardizedRecipes = recipes ? this.convertCachedRecipesToUnified(recipes) : [];
+
       return {
-        recipes: recipes || [],
+        recipes: standardizedRecipes,
         totalResults: count || 0,
         fromCache: true,
         cacheHitRate: recipes ? recipes.length / maxResults : 0
@@ -406,45 +415,69 @@ export class RecipeCacheService {
   }
 
   /**
-   * Convert cached recipe to unified format
+   * Convert cached recipe to unified format with standardization
    */
-  convertCachedToUnified(cachedRecipe: CachedRecipe): any {
-    return {
-      id: cachedRecipe.externalRecipeId,
-      title: cachedRecipe.recipeName,
-      image: cachedRecipe.recipeImageUrl || '',
-      sourceUrl: cachedRecipe.recipeUrl || '',
-      source: cachedRecipe.provider,
-      readyInMinutes: cachedRecipe.totalTimeMinutes || undefined,
-      servings: cachedRecipe.servings || undefined,
-      calories: cachedRecipe.caloriesPerServing || 0,
-      protein: cachedRecipe.proteinPerServingG || 0,
-      carbs: cachedRecipe.carbsPerServingG || 0,
-      fat: cachedRecipe.fatPerServingG || 0,
-      fiber: cachedRecipe.fiberPerServingG || 0,
+  convertCachedToUnified(cachedRecipe: CachedRecipe): StandardizedRecipeResponse {
+    // Convert the cached recipe to the format expected by the standardization service
+    const recipeForStandardization = {
+      id: cachedRecipe.id,
+      provider: cachedRecipe.provider,
+      external_recipe_id: cachedRecipe.externalRecipeId,
+      external_recipe_uri: cachedRecipe.externalRecipeUri || '',
+      recipe_name: cachedRecipe.recipeName,
+      recipe_source: cachedRecipe.recipeSource || '',
+      recipe_url: cachedRecipe.recipeUrl || '',
+      recipe_image_url: cachedRecipe.recipeImageUrl || '',
+      cuisine_types: cachedRecipe.cuisineTypes || [],
+      meal_types: cachedRecipe.mealTypes || [],
+      dish_types: cachedRecipe.dishTypes || [],
+      health_labels: cachedRecipe.healthLabels || [],
+      diet_labels: cachedRecipe.dietLabels || [],
+      servings: cachedRecipe.servings || 1,
+      prep_time_minutes: cachedRecipe.prepTimeMinutes || null,
+      cook_time_minutes: cachedRecipe.cookTimeMinutes || null,
+      total_time_minutes: cachedRecipe.totalTimeMinutes || null,
+      total_calories: cachedRecipe.totalCalories?.toString() || null,
+      total_protein_g: cachedRecipe.totalProteinG?.toString() || null,
+      total_carbs_g: cachedRecipe.totalCarbsG?.toString() || null,
+      total_fat_g: cachedRecipe.totalFatG?.toString() || null,
+      total_fiber_g: cachedRecipe.totalFiberG?.toString() || null,
+      total_sugar_g: cachedRecipe.totalSugarG?.toString() || null,
+      total_sodium_mg: cachedRecipe.totalSodiumMg?.toString() || null,
+      total_weight_g: cachedRecipe.totalWeightG?.toString() || null,
+      calories_per_serving: cachedRecipe.caloriesPerServing?.toString() || '0',
+      protein_per_serving_g: cachedRecipe.proteinPerServingG?.toString() || '0',
+      carbs_per_serving_g: cachedRecipe.carbsPerServingG?.toString() || '0',
+      fat_per_serving_g: cachedRecipe.fatPerServingG?.toString() || '0',
+      fiber_per_serving_g: cachedRecipe.fiberPerServingG?.toString() || '0',
       ingredients: cachedRecipe.ingredients || [],
-      healthLabels: cachedRecipe.healthLabels || [],
-      dietLabels: cachedRecipe.dietLabels || [],
-      cuisineType: cachedRecipe.cuisineTypes || [],
-      dishType: cachedRecipe.dishTypes || [],
-      mealType: cachedRecipe.mealTypes || [],
-      nutrition: {
-        calories: cachedRecipe.caloriesPerServing || 0,
-        protein: cachedRecipe.proteinPerServingG || 0,
-        carbs: cachedRecipe.carbsPerServingG || 0,
-        fat: cachedRecipe.fatPerServingG || 0,
-        fiber: cachedRecipe.fiberPerServingG || 0,
-        sodium: cachedRecipe.totalSodiumMg || 0,
-        sugar: cachedRecipe.totalSugarG || 0
-      },
-      // Cache metadata
-      fromCache: true,
-      cacheId: cachedRecipe.id,
-      dataQuality: cachedRecipe.dataQualityScore || 0,
-      lastFetched: cachedRecipe.lastApiFetchAt
+      ingredient_lines: cachedRecipe.ingredientLines || [],
+      cooking_instructions: cachedRecipe.cookingInstructions || [],
+      nutrition_details: cachedRecipe.nutritionDetails || {},
+      original_api_response: cachedRecipe.originalApiResponse || {},
+      cache_status: cachedRecipe.cacheStatus || 'active',
+      api_fetch_count: cachedRecipe.apiFetchCount || 0,
+      last_api_fetch_at: cachedRecipe.lastApiFetchAt || '',
+      last_accessed_at: cachedRecipe.lastAccessedAt || '',
+      has_complete_nutrition: cachedRecipe.hasCompleteNutrition || false,
+      has_detailed_ingredients: cachedRecipe.hasDetailedIngredients || false,
+      has_cooking_instructions: cachedRecipe.hasCookingInstructions || false,
+      data_quality_score: cachedRecipe.dataQualityScore || 0,
+      created_at: cachedRecipe.createdAt || '',
+      updated_at: cachedRecipe.updatedAt || ''
     };
+    
+    // Use the standardization service to ensure uniform structure
+    return this.standardizationService.standardizeRecipeResponse(recipeForStandardization);
   }
 
+  /**
+   * Convert multiple cached recipes to unified format with standardization
+   */
+  convertCachedRecipesToUnified(cachedRecipes: CachedRecipe[]): StandardizedRecipeResponse[] {
+    return cachedRecipes.map(recipe => this.convertCachedToUnified(recipe));
+  }
+  
   /**
    * Get cache statistics
    */

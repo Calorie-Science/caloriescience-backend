@@ -133,6 +133,12 @@ interface RecipeSuggestion {
   readyInMinutes?: number;
   fromCache: boolean;
   cacheId?: string;
+  // Nutrition data (per serving)
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
 }
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
@@ -737,7 +743,12 @@ async function getRecipesFromProvider(
       source: recipe.source,
       servings: recipe.servings || 1,
       readyInMinutes: recipe.readyInMinutes,
-      fromCache: false // Search results are always from API
+      fromCache: false, // Search results are always from API
+      calories: recipe.calories,
+      protein: recipe.protein,
+      carbs: recipe.carbs,
+      fat: recipe.fat,
+      fiber: recipe.fiber
     }));
 
     return { recipes: recipeSuggestions, searchParams };
