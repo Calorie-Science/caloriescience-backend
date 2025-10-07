@@ -1092,4 +1092,291 @@ export class MultiProviderRecipeSearchService {
 
     return nutritionData;
   }
+
+  /**
+   * Get ingredient suggestions from Spoonacular with optional unit suggestions
+   */
+  async getIngredientSuggestions(query: string, mode: 'basic' | 'with_units' | 'units_only' = 'basic'): Promise<{suggestions: string[], unitSuggestions: Record<string, string[]>, units?: string[]}> {
+    try {
+      console.log('🔍 SPOONACULAR INGREDIENT SUGGESTIONS - START');
+      console.log('query:', query, 'mode:', mode);
+
+      if (!query || query.trim().length === 0) {
+        return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
+      }
+
+      const url = 'https://api.spoonacular.com/food/ingredients/autocomplete';
+      const params = new URLSearchParams({
+        query: query.trim(),
+        number: '10',
+        apiKey: this.spoonacularApiKey
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🔍 SPOONACULAR INGREDIENT CURL COMMAND');
+      console.log(`curl -X GET '${fullUrl}'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+
+      console.log('🔍 SPOONACULAR INGREDIENT RESPONSE STATUS:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ SPOONACULAR INGREDIENT ERROR RESPONSE:', errorText);
+        return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
+      }
+
+      const data = await response.json();
+      console.log('✅ SPOONACULAR INGREDIENT SUCCESS - Results count:', data?.length || 0);
+
+      // Extract ingredient names from the response
+      const suggestions = Array.isArray(data) 
+        ? data.map((item: any) => item.name || item.title || item).filter(Boolean)
+        : [];
+
+      console.log('✅ SPOONACULAR INGREDIENT SUGGESTIONS:', suggestions);
+
+      // Handle different modes
+      if (mode === 'basic') {
+        return {
+          suggestions,
+          unitSuggestions: {}
+        };
+      } else if (mode === 'units_only') {
+        // For units_only mode, get units for the first (most relevant) suggestion
+        let units: string[] = [];
+        if (suggestions.length > 0) {
+          const unitSuggestions = await this.getIngredientUnitSuggestions([suggestions[0]]);
+          units = unitSuggestions[suggestions[0]] || [];
+        }
+        return {
+          units,
+          suggestions: [],
+          unitSuggestions: {}
+        };
+      } else {
+        // mode === 'with_units' - return both suggestions and unit suggestions
+        let unitSuggestions = {};
+        if (suggestions.length > 0) {
+          unitSuggestions = await this.getIngredientUnitSuggestions(suggestions);
+        }
+        return {
+          suggestions,
+          unitSuggestions
+        };
+      }
+
+    } catch (error) {
+      console.error('❌ SPOONACULAR INGREDIENT SUGGESTIONS ERROR:', error);
+      return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
+    }
+  }
+
+  /**
+   * Get unit suggestions for ingredients using OpenAI (same logic as Edamam)
+   */
+  async getIngredientUnitSuggestions(ingredients: string[]): Promise<Record<string, string[]>> {
+    try {
+      console.log('🤖 OPENAI UNIT SUGGESTIONS (for Spoonacular) - START');
+      console.log('ingredients:', ingredients);
+
+      if (!ingredients || ingredients.length === 0) {
+        return {};
+      }
+
+      const systemPrompt = `You are a nutrition expert. For each ingredient provided, suggest the most common and practical units of measurement for cooking and food logging.
+
+IMPORTANT: Return units that are commonly used in recipes and food databases.
+
+Common unit categories:
+- Weight: gram, kilogram, ounce, pound
+- Volume: milliliter, liter, cup, tablespoon, teaspoon, fluid ounce
+- Count: piece, slice, serving, whole, unit
+- Special: handful, pinch, dash (for spices/herbs)
+
+Return a JSON object where each key is an ingredient name and the value is an array of 5-8 most relevant unit suggestions, ordered by commonality.`;
+
+      const userPrompt = `Suggest appropriate units for these ingredients:\n${ingredients.join('\n')}`;
+
+      const openAIKey = process.env.OPENAI_API_KEY;
+      if (!openAIKey) {
+        console.warn('⚠️ OPENAI_API_KEY not configured, returning default units');
+        // Return default units for common ingredients
+        const defaultUnits: Record<string, string[]> = {};
+        ingredients.forEach(ingredient => {
+          defaultUnits[ingredient] = ['gram', 'ounce', 'cup', 'tablespoon', 'teaspoon', 'piece', 'serving'];
+        });
+        return defaultUnits;
+      }
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAIKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ OpenAI API error:', response.status, errorText);
+        // Return default units on error
+        const defaultUnits: Record<string, string[]> = {};
+        ingredients.forEach(ingredient => {
+          defaultUnits[ingredient] = ['gram', 'ounce', 'cup', 'tablespoon', 'teaspoon', 'piece', 'serving'];
+        });
+        return defaultUnits;
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new Error('No response from OpenAI');
+      }
+
+      // Parse JSON response
+      let jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in OpenAI response');
+      }
+
+      const unitSuggestions = JSON.parse(jsonMatch[0]);
+      
+      console.log('✅ UNIT SUGGESTIONS SUCCESS:', unitSuggestions);
+      return unitSuggestions;
+
+    } catch (error) {
+      console.log('❌ UNIT SUGGESTIONS ERROR:', error);
+      // Return default units on error
+      const defaultUnits: Record<string, string[]> = {};
+      ingredients.forEach(ingredient => {
+        defaultUnits[ingredient] = ['gram', 'ounce', 'cup', 'tablespoon', 'teaspoon', 'piece', 'serving'];
+      });
+      return defaultUnits;
+    }
+  }
+
+  /**
+   * Get ingredient nutrition from Spoonacular
+   */
+  async getIngredientNutrition(ingredientText: string): Promise<any> {
+    try {
+      console.log('🔍 SPOONACULAR INGREDIENT NUTRITION - START');
+      console.log('ingredientText:', ingredientText);
+
+      if (!ingredientText || ingredientText.trim().length === 0) {
+        return null;
+      }
+
+      const url = 'https://api.spoonacular.com/recipes/parseIngredients';
+      const params = new URLSearchParams({
+        ingredientList: ingredientText,
+        servings: '1',
+        includeNutrition: 'true',
+        apiKey: this.spoonacularApiKey
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🔍 SPOONACULAR NUTRITION CURL COMMAND');
+      console.log(`curl -X POST '${fullUrl}'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+
+      console.log('🔍 SPOONACULAR NUTRITION RESPONSE STATUS:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ SPOONACULAR NUTRITION ERROR RESPONSE:', errorText);
+        throw new Error(`Spoonacular nutrition API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ SPOONACULAR NUTRITION SUCCESS');
+
+      // Return first ingredient's nutrition data
+      if (Array.isArray(data) && data.length > 0) {
+        const ingredient = data[0];
+        const nutrition = ingredient.nutrition;
+
+        return {
+          calories: nutrition?.nutrients?.find((n: any) => n.name === 'Calories')?.amount || 0,
+          protein: nutrition?.nutrients?.find((n: any) => n.name === 'Protein')?.amount || 0,
+          carbs: nutrition?.nutrients?.find((n: any) => n.name === 'Carbohydrates')?.amount || 0,
+          fat: nutrition?.nutrients?.find((n: any) => n.name === 'Fat')?.amount || 0,
+          fiber: nutrition?.nutrients?.find((n: any) => n.name === 'Fiber')?.amount || 0,
+          rawData: ingredient
+        };
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error('❌ SPOONACULAR INGREDIENT NUTRITION ERROR:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get ingredient substitutes from Spoonacular
+   */
+  async getIngredientSubstitutes(recipeId: string, ingredientId: string): Promise<any[]> {
+    try {
+      console.log('🔄 SPOONACULAR INGREDIENT SUBSTITUTES - START');
+      console.log('recipeId:', recipeId, 'ingredientId:', ingredientId);
+
+      const url = `https://api.spoonacular.com/recipes/${recipeId}/substitutes/${ingredientId}`;
+      const params = new URLSearchParams({
+        apiKey: this.spoonacularApiKey
+      });
+
+      const fullUrl = `${url}?${params.toString()}`;
+      console.log('🔄 SPOONACULAR SUBSTITUTES CURL COMMAND');
+      console.log(`curl -X GET '${fullUrl}'`);
+
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+
+      console.log('🔄 SPOONACULAR SUBSTITUTES RESPONSE STATUS:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('❌ SPOONACULAR SUBSTITUTES ERROR RESPONSE:', errorText);
+        throw new Error(`Spoonacular substitutes API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ SPOONACULAR SUBSTITUTES SUCCESS');
+
+      // Return substitutes with additional metadata
+      return Array.isArray(data) ? data : [];
+
+    } catch (error) {
+      console.error('❌ SPOONACULAR INGREDIENT SUBSTITUTES ERROR:', error);
+      return [];
+    }
+  }
 }

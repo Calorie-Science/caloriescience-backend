@@ -1,8 +1,10 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { EdamamService } from '../../lib/edamamService';
+import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
 import { requireAuth } from '../../lib/auth';
 
 const edamamService = new EdamamService();
+const multiProviderService = new MultiProviderRecipeSearchService();
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Get user from request (set by requireAuth middleware)
@@ -25,7 +27,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { q, mode } = req.query;
+    const { q, mode, source, recipeId, ingredientId } = req.query;
 
     // Validate query parameter
     if (!q || typeof q !== 'string') {
@@ -52,13 +54,42 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Validate mode parameter (optional)
-    const validModes = ['basic', 'with_units', 'units_only'];
+    const validModes = ['basic', 'with_units', 'units_only', 'with_substitutes'];
     const finalMode = mode && typeof mode === 'string' && validModes.includes(mode) 
-      ? mode as 'basic' | 'with_units' | 'units_only'
+      ? mode as 'basic' | 'with_units' | 'units_only' | 'with_substitutes'
       : 'basic';
 
-    // Get autocomplete suggestions with unit suggestions
-    const result = await edamamService.getIngredientAutocomplete(q, finalMode);
+    // Validate source parameter (optional)
+    const validSources = ['edamam', 'spoonacular'];
+    const finalSource = source && typeof source === 'string' && validSources.includes(source)
+      ? source as 'edamam' | 'spoonacular'
+      : 'edamam';
+
+    let result: any = { suggestions: [], unitSuggestions: {}, substitutes: [] };
+
+    if (finalSource === 'edamam') {
+      // Use Edamam autocomplete
+      result = await edamamService.getIngredientAutocomplete(q, finalMode);
+    } else if (finalSource === 'spoonacular') {
+      // Use Spoonacular autocomplete with unit suggestions support
+      if (finalMode === 'with_substitutes' && recipeId && ingredientId) {
+        // Get substitutes from Spoonacular
+        const substitutes = await multiProviderService.getIngredientSubstitutes(
+          recipeId as string, 
+          ingredientId as string
+        );
+        result.substitutes = substitutes || [];
+      }
+      
+      // Get suggestions with unit support from Spoonacular
+      const spoonacularResult = await multiProviderService.getIngredientSuggestions(
+        q, 
+        finalMode === 'with_substitutes' ? 'basic' : finalMode
+      );
+      result.suggestions = spoonacularResult.suggestions || [];
+      result.unitSuggestions = spoonacularResult.unitSuggestions || {};
+      result.units = spoonacularResult.units || [];
+    }
 
     // For units_only mode, return only the units field
     if (finalMode === 'units_only') {
@@ -71,9 +102,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       success: true,
       query: q,
       mode: finalMode,
-      suggestions: result.suggestions,
-      unitSuggestions: result.unitSuggestions,
-      count: result.suggestions.length
+      source: finalSource,
+      suggestions: result.suggestions || [],
+      unitSuggestions: result.unitSuggestions || {},
+      substitutes: result.substitutes || [],
+      count: result.suggestions?.length || 0
     });
 
   } catch (error) {

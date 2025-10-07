@@ -7,6 +7,45 @@ import { calculateEER, calculateMacros } from './calculations';
 export class NutritionCalculationService {
 
   /**
+   * Get complete list of all vitamins with default 0 values
+   */
+  private getCompleteVitamins(): { [key: string]: { label: string; quantity: number; unit: string } } {
+    return {
+      vitaminA: { label: 'Vitamin A', quantity: 0, unit: 'µg' },
+      vitaminC: { label: 'Vitamin C', quantity: 0, unit: 'mg' },
+      vitaminD: { label: 'Vitamin D', quantity: 0, unit: 'µg' },
+      vitaminE: { label: 'Vitamin E', quantity: 0, unit: 'mg' },
+      vitaminK: { label: 'Vitamin K', quantity: 0, unit: 'µg' },
+      thiamin: { label: 'Thiamin (B1)', quantity: 0, unit: 'mg' },
+      riboflavin: { label: 'Riboflavin (B2)', quantity: 0, unit: 'mg' },
+      niacin: { label: 'Niacin (B3)', quantity: 0, unit: 'mg' },
+      vitaminB6: { label: 'Vitamin B6', quantity: 0, unit: 'mg' },
+      vitaminB12: { label: 'Vitamin B12', quantity: 0, unit: 'µg' },
+      folate: { label: 'Folate', quantity: 0, unit: 'µg' },
+      pantothenicAcid: { label: 'Pantothenic Acid (B5)', quantity: 0, unit: 'mg' },
+      biotin: { label: 'Biotin', quantity: 0, unit: 'µg' }
+    };
+  }
+
+  /**
+   * Get complete list of all minerals with default 0 values
+   */
+  private getCompleteMinerals(): { [key: string]: { label: string; quantity: number; unit: string } } {
+    return {
+      calcium: { label: 'Calcium', quantity: 0, unit: 'mg' },
+      iron: { label: 'Iron', quantity: 0, unit: 'mg' },
+      magnesium: { label: 'Magnesium', quantity: 0, unit: 'mg' },
+      phosphorus: { label: 'Phosphorus', quantity: 0, unit: 'mg' },
+      potassium: { label: 'Potassium', quantity: 0, unit: 'mg' },
+      sodium: { label: 'Sodium', quantity: 0, unit: 'mg' },
+      zinc: { label: 'Zinc', quantity: 0, unit: 'mg' },
+      copper: { label: 'Copper', quantity: 0, unit: 'mg' },
+      selenium: { label: 'Selenium', quantity: 0, unit: 'µg' },
+      iodine: { label: 'Iodine', quantity: 0, unit: 'µg' }
+    };
+  }
+
+  /**
    * Calculate daily nutrition from meals with micronutrient categorization
    */
   calculateDailyNutrition(meals: any[]): any {
@@ -149,9 +188,11 @@ export class NutritionCalculationService {
    */
   private categorizeNutrients(totalNutrients: { [key: string]: { label: string; quantity: number; unit: string } }): any {
     const macros: { [key: string]: { label: string; quantity: number; unit: string } } = {};
+    
+    // Start with complete lists of all vitamins and minerals (with 0 defaults)
     const micros = {
-      vitamins: {} as { [key: string]: { label: string; quantity: number; unit: string } },
-      minerals: {} as { [key: string]: { label: string; quantity: number; unit: string } }
+      vitamins: this.getCompleteVitamins(),
+      minerals: this.getCompleteMinerals()
     };
 
     // Define Edamam nutrient codes for categorization
@@ -239,37 +280,39 @@ export class NutritionCalculationService {
       } else if (vitaminMappings[key]) {
         // Handle Edamam vitamin keys
         const standardKey = vitaminMappings[key];
-        if (micros.vitamins[standardKey]) {
-          // Combine quantities if multiple Edamam keys map to same standard key (e.g., folate)
-          micros.vitamins[standardKey].quantity += nutrientData.quantity;
-        } else {
-          micros.vitamins[standardKey] = { ...nutrientData };
-        }
+        // Since we start with complete list, we always have the key
+        micros.vitamins[standardKey].quantity += nutrientData.quantity;
+        // Preserve label and unit from actual data if available
+        if (nutrientData.label) micros.vitamins[standardKey].label = nutrientData.label;
+        if (nutrientData.unit) micros.vitamins[standardKey].unit = nutrientData.unit;
       } else if (reverseVitaminMappings[key]) {
         // Handle already standardized vitamin keys
-        if (micros.vitamins[key]) {
-          micros.vitamins[key].quantity += nutrientData.quantity;
-        } else {
-          micros.vitamins[key] = { ...nutrientData };
-        }
+        micros.vitamins[key].quantity += nutrientData.quantity;
+        if (nutrientData.label) micros.vitamins[key].label = nutrientData.label;
+        if (nutrientData.unit) micros.vitamins[key].unit = nutrientData.unit;
       } else if (mineralMappings[key]) {
         // Handle Edamam mineral keys
         const standardKey = mineralMappings[key];
-        if (micros.minerals[standardKey]) {
-          // Combine quantities if multiple Edamam keys map to same standard key
-          micros.minerals[standardKey].quantity += nutrientData.quantity;
-        } else {
-          micros.minerals[standardKey] = { ...nutrientData };
-        }
+        // Since we start with complete list, we always have the key
+        micros.minerals[standardKey].quantity += nutrientData.quantity;
+        // Preserve label and unit from actual data if available
+        if (nutrientData.label) micros.minerals[standardKey].label = nutrientData.label;
+        if (nutrientData.unit) micros.minerals[standardKey].unit = nutrientData.unit;
       } else if (reverseMineralMappings[key]) {
         // Handle already standardized mineral keys
-        if (micros.minerals[key]) {
-          micros.minerals[key].quantity += nutrientData.quantity;
-        } else {
-          micros.minerals[key] = { ...nutrientData };
-        }
+        micros.minerals[key].quantity += nutrientData.quantity;
+        if (nutrientData.label) micros.minerals[key].label = nutrientData.label;
+        if (nutrientData.unit) micros.minerals[key].unit = nutrientData.unit;
       }
       // Note: Removed the fallback to avoid unmapped nutrients cluttering the response
+    });
+
+    // Round all quantities to 2 decimal places
+    Object.keys(micros.vitamins).forEach(key => {
+      micros.vitamins[key].quantity = Math.round(micros.vitamins[key].quantity * 100) / 100;
+    });
+    Object.keys(micros.minerals).forEach(key => {
+      micros.minerals[key].quantity = Math.round(micros.minerals[key].quantity * 100) / 100;
     });
 
     return { macros, micros };

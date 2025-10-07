@@ -2,9 +2,13 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { supabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/auth';
 import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
+import { MealPlanDraftService } from '../../lib/mealPlanDraftService';
+import { RecipeCacheService } from '../../lib/recipeCacheService';
 import Joi from 'joi';
 
 const multiProviderService = new MultiProviderRecipeSearchService();
+const draftService = new MealPlanDraftService();
+const cacheService = new RecipeCacheService();
 
 // Utility function to parse YYYY-MM-DD format
 function parseStartDate(dateString: string): Date {
@@ -139,6 +143,15 @@ interface RecipeSuggestion {
   carbs?: number;
   fat?: number;
   fiber?: number;
+  // Detailed information from cache (optional)
+  ingredients?: any[];
+  instructions?: any[];
+  nutrition?: any;
+  healthLabels?: string[];
+  dietLabels?: string[];
+  cuisineTypes?: string[];
+  dishTypes?: string[];
+  mealTypes?: string[];
 }
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
@@ -248,9 +261,34 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         mealPlan.push(dayMealPlan);
       }
 
+      // Step 4: Create draft to preserve suggestions
+      const searchParams = {
+        clientGoals,
+        dietaryPreferences,
+        overrideClientGoals: overrideClientGoals || null,
+        overrideMealProgram: overrideMealProgram || null,
+        mealProgram: mealProgram ? {
+          id: mealProgram.id,
+          meals: mealProgram.meals
+        } : null,
+        startDate: startDateObj.toISOString().split('T')[0],
+        days
+      };
+
+      // Enrich meal plan suggestions with cached recipe data
+      const enrichedMealPlan = await enrichMealPlanWithCache(mealPlan);
+
+      const draft = await draftService.createDraft(
+        clientId,
+        user.id,
+        searchParams,
+        enrichedMealPlan
+      );
+
       return res.status(200).json({
         success: true,
         data: {
+          draftId: draft.id,
           clientId,
           nutritionistId: user.id,
           days: mealPlan.length,
@@ -263,14 +301,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             dietaryPreferences,
             overrideClientGoals: overrideClientGoals || null,
             overrideMealProgram: overrideMealProgram || null,
-        mealProgram: mealProgram ? {
-          id: mealProgram.id,
-          meals: mealProgram.meals
-        } : null
+            mealProgram: mealProgram ? {
+              id: mealProgram.id,
+              meals: mealProgram.meals
+            } : null
           },
           mealPlan
         },
-        message: `Generated ${days}-day meal plan suggestions successfully`
+        message: `Generated ${days}-day meal plan suggestions successfully. Draft created for customization.`
       });
 
     } catch (error) {
@@ -625,9 +663,14 @@ async function generateDayMealPlan(
   console.log(`🔍 Cached suggestions keys:`, Object.keys(cachedMealSuggestions));
   
   for (const mealType of availableMealTypes) {
-    meals[mealType] = generateMealSuggestionsFromCache(mealType, cachedMealSuggestions);
+    const mealData = generateMealSuggestionsFromCache(mealType, cachedMealSuggestions);
+    meals[mealType] = {
+      recipes: mealData.displayedRecipes,
+      allRecipes: mealData.allRecipes,
+      displayOffset: mealData.displayOffset
+    };
     searchParams[mealType] = cachedMealSuggestions[mealType] ? { edamam: {}, spoonacular: {} } : {};
-    console.log(`🔍 Generated ${mealType} with ${meals[mealType].length} suggestions`);
+    console.log(`🔍 Generated ${mealType} with ${mealData.displayedRecipes.length} displayed, ${mealData.allRecipes.edamam.length + mealData.allRecipes.spoonacular.length} total recipes`);
   }
 
   return {
@@ -734,22 +777,61 @@ async function getRecipesFromProvider(
       return { recipes: [], searchParams };
     }
 
-    // Convert search results to RecipeSuggestion format (basic data only)
-    const recipeSuggestions: RecipeSuggestion[] = results.recipes.slice(0, count).map(recipe => ({
-      id: recipe.id,
-      title: recipe.title,
-      image: recipe.image,
-      sourceUrl: recipe.sourceUrl,
-      source: recipe.source,
-      servings: recipe.servings || 1,
-      readyInMinutes: recipe.readyInMinutes,
-      fromCache: false, // Search results are always from API
-      calories: recipe.calories,
-      protein: recipe.protein,
-      carbs: recipe.carbs,
-      fat: recipe.fat,
-      fiber: recipe.fiber
-    }));
+    // Convert search results to RecipeSuggestion format and enrich with cached data
+    const recipeSuggestions: RecipeSuggestion[] = await Promise.all(
+      results.recipes.slice(0, count).map(async (recipe) => {
+        // Try to get detailed recipe data from cache
+        const cachedRecipe = await cacheService.getRecipeByExternalId(
+          provider as 'edamam' | 'spoonacular', 
+          recipe.id
+        );
+        
+        if (cachedRecipe) {
+          console.log(`✅ Enriching recipe ${recipe.id} with cached data`);
+          return {
+            id: recipe.id,
+            title: recipe.title,
+            image: recipe.image,
+            sourceUrl: recipe.sourceUrl,
+            source: recipe.source,
+            servings: recipe.servings || 1,
+            readyInMinutes: recipe.readyInMinutes,
+            fromCache: true,
+            calories: recipe.calories,
+            protein: recipe.protein,
+            carbs: recipe.carbs,
+            fat: recipe.fat,
+            fiber: recipe.fiber,
+            // Add detailed information from cache
+            ingredients: cachedRecipe.ingredients || [],
+            instructions: cachedRecipe.cookingInstructions || [],
+            nutrition: cachedRecipe.nutritionDetails || {},
+            healthLabels: cachedRecipe.healthLabels || [],
+            dietLabels: cachedRecipe.dietLabels || [],
+            cuisineTypes: cachedRecipe.cuisineTypes || [],
+            dishTypes: cachedRecipe.dishTypes || [],
+            mealTypes: cachedRecipe.mealTypes || []
+          };
+        } else {
+          // Return basic data if not in cache
+          return {
+            id: recipe.id,
+            title: recipe.title,
+            image: recipe.image,
+            sourceUrl: recipe.sourceUrl,
+            source: recipe.source,
+            servings: recipe.servings || 1,
+            readyInMinutes: recipe.readyInMinutes,
+            fromCache: false,
+            calories: recipe.calories,
+            protein: recipe.protein,
+            carbs: recipe.carbs,
+            fat: recipe.fat,
+            fiber: recipe.fiber
+          };
+        }
+      })
+    );
 
     return { recipes: recipeSuggestions, searchParams };
 
@@ -762,23 +844,112 @@ async function getRecipesFromProvider(
 function generateMealSuggestionsFromCache(
   mealType: string,
   cachedMealSuggestions: { [mealType: string]: { edamam: RecipeSuggestion[], spoonacular: RecipeSuggestion[] } }
-): RecipeSuggestion[] {
+): { displayedRecipes: RecipeSuggestion[], allRecipes: { edamam: RecipeSuggestion[], spoonacular: RecipeSuggestion[] }, displayOffset: { edamam: number, spoonacular: number } } {
   const suggestions = cachedMealSuggestions[mealType];
   if (!suggestions) {
     console.warn(`No cached suggestions found for ${mealType}`);
-    return [];
+    return {
+      displayedRecipes: [],
+      allRecipes: { edamam: [], spoonacular: [] },
+      displayOffset: { edamam: 0, spoonacular: 0 }
+    };
   }
 
   // Randomly select 3 from Edamam and 3 from Spoonacular (from the 15 available)
   const edamamSelection = shuffleArray(suggestions.edamam).slice(0, 3);
   const spoonacularSelection = shuffleArray(suggestions.spoonacular).slice(0, 3);
   
-  // Combine and shuffle
+  // Combine and shuffle for display
   const combinedSuggestions = shuffleArray([...edamamSelection, ...spoonacularSelection]);
   
   console.log(`🍽️ Generated ${mealType} suggestions: ${edamamSelection.length} Edamam + ${spoonacularSelection.length} Spoonacular = ${combinedSuggestions.length} total`);
+  console.log(`💾 Storing ALL recipes: ${suggestions.edamam.length} Edamam + ${suggestions.spoonacular.length} Spoonacular for future shuffling`);
   
-  return combinedSuggestions;
+  return {
+    displayedRecipes: combinedSuggestions,
+    allRecipes: {
+      edamam: suggestions.edamam,
+      spoonacular: suggestions.spoonacular
+    },
+    displayOffset: {
+      edamam: 0,
+      spoonacular: 0
+    }
+  };
+}
+
+async function enrichMealPlanWithCache(mealPlan: DayMealPlan[]): Promise<DayMealPlan[]> {
+  console.log('🔄 Enriching meal plan with cached recipe data...');
+  
+  const enrichedMealPlan = await Promise.all(
+    mealPlan.map(async (dayPlan) => {
+      const enrichedMeals: any = {};
+      
+      for (const [mealType, mealData] of Object.entries(dayPlan.meals)) {
+        // Handle the new structure with recipes, allRecipes, and displayOffset
+        const recipes = (mealData as any).recipes || mealData;
+        const allRecipes = (mealData as any).allRecipes;
+        const displayOffset = (mealData as any).displayOffset;
+        
+        const enrichedRecipes = await Promise.all(
+          (Array.isArray(recipes) ? recipes : []).map(async (recipe) => {
+            try {
+              // Try to get detailed recipe data from cache
+              const cachedRecipe = await cacheService.getRecipeByExternalId(
+                recipe.source,
+                recipe.id
+              );
+              
+              if (cachedRecipe) {
+                console.log(`✅ Enriching recipe ${recipe.id} (${recipe.title}) with cached data`);
+                return {
+                  ...recipe,
+                  fromCache: true,
+                  cacheId: cachedRecipe.id,
+                  // Add detailed information from cache
+                  ingredients: cachedRecipe.ingredients || [],
+                  instructions: cachedRecipe.cookingInstructions || [],
+                  nutrition: cachedRecipe.nutritionDetails || {},
+                  healthLabels: cachedRecipe.healthLabels || [],
+                  dietLabels: cachedRecipe.dietLabels || [],
+                  cuisineTypes: cachedRecipe.cuisineTypes || [],
+                  dishTypes: cachedRecipe.dishTypes || [],
+                  mealTypes: cachedRecipe.mealTypes || []
+                };
+              } else {
+                console.log(`⚠️ No cached data found for recipe ${recipe.id} (${recipe.title})`);
+                return {
+                  ...recipe,
+                  fromCache: false
+                };
+              }
+            } catch (error) {
+              console.error(`Error enriching recipe ${recipe.id}:`, error);
+              return {
+                ...recipe,
+                fromCache: false
+              };
+            }
+          })
+        );
+        
+        // Preserve the structure with recipes, allRecipes, and displayOffset
+        enrichedMeals[mealType] = {
+          recipes: enrichedRecipes,
+          allRecipes,
+          displayOffset
+        };
+      }
+      
+      return {
+        ...dayPlan,
+        meals: enrichedMeals
+      };
+    })
+  );
+  
+  console.log('✅ Meal plan enrichment completed');
+  return enrichedMealPlan;
 }
 
 function getMealTypeKeywords(mealType: string): string {
