@@ -906,14 +906,188 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
     await draftService.updateRecipeCustomizations(draftId, day, mealName, recipeId, customizations);
 
-    // Get full updated draft with overall nutrition (for instant UI updates)
-    const updatedDraft = await draftService.getDraftWithNutrition(draftId);
+    console.log('🎯 Preparing customized recipe response (same format as /api/recipes/customized)...');
 
+    // Fetch the complete recipe from cache to build the response
+    const cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
+    let baseRecipe: any;
+    
+    if (cachedRecipe) {
+      const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
+      baseRecipe = standardized;
+    } else {
+      // Fallback to recipe from draft
+      baseRecipe = {
+        recipeName: recipe.title,
+        ingredients: recipe.ingredients || [],
+        nutritionDetails: recipe.nutrition || {},
+        caloriesPerServing: recipe.calories?.toString(),
+        proteinPerServingG: recipe.protein?.toString(),
+        carbsPerServingG: recipe.carbs?.toString(),
+        fatPerServingG: recipe.fat?.toString(),
+        fiberPerServingG: recipe.fiber?.toString()
+      };
+    }
+
+    // Create customized recipe by applying ingredient modifications
+    const customizedRecipe = JSON.parse(JSON.stringify(baseRecipe));
+    
+    // Apply ingredient modifications
+    if (customizations.modifications && customizations.modifications.length > 0) {
+      for (const mod of customizations.modifications) {
+        if (mod.type === 'omit' && mod.originalIngredient) {
+          const originalCount = customizedRecipe.ingredients.length;
+          customizedRecipe.ingredients = customizedRecipe.ingredients.filter((ing: any) => {
+            const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+            const targetName = mod.originalIngredient.toLowerCase();
+            return !ingName.includes(targetName) && !targetName.includes(ingName);
+          });
+          console.log(`  🚫 Omitted "${mod.originalIngredient}" (${originalCount} → ${customizedRecipe.ingredients.length})`);
+        } 
+        else if (mod.type === 'add' && mod.newIngredient) {
+          customizedRecipe.ingredients.push({
+            name: mod.newIngredient,
+            amount: (mod as any).amount || null,
+            unit: (mod as any).unit || null,
+            image: '', // No image for manually added ingredients
+            original: `${(mod as any).amount || ''} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim()
+          });
+          console.log(`  ➕ Added "${mod.newIngredient}"`);
+        }
+        else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
+          let replaced = false;
+          customizedRecipe.ingredients = customizedRecipe.ingredients.map((ing: any) => {
+            const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+            const targetName = mod.originalIngredient.toLowerCase();
+            
+            if ((ingName.includes(targetName) || targetName.includes(ingName)) && !replaced) {
+              replaced = true;
+              console.log(`  🔄 Replaced "${ing.name || ing.food}" with "${mod.newIngredient}"`);
+              return {
+                ...ing,
+                name: mod.newIngredient,
+                amount: (mod as any).amount || ing.amount,
+                unit: (mod as any).unit || ing.unit,
+                image: '', // Reset image for replaced ingredient
+                original: `${(mod as any).amount || ing.amount || ''} ${(mod as any).unit || ing.unit || ''} ${mod.newIngredient}`.trim()
+              };
+            }
+            return ing;
+          });
+        }
+      }
+    }
+    
+    // Format ingredients with proper image URLs (Spoonacular needs base URL prefix)
+    customizedRecipe.ingredients = customizedRecipe.ingredients.map((ing: any) => ({
+      id: ing.id,
+      name: ing.name || ing.food,
+      unit: ing.unit || '',
+      amount: ing.amount || 0,
+      image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
+      originalString: ing.original || ing.originalString || '',
+      aisle: ing.aisle || '',
+      meta: ing.meta || [],
+      measures: ing.measures || {
+        us: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' },
+        metric: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' }
+      }
+    }));
+
+    // Apply custom nutrition (includes micronutrients!)
+    if (customizations.customNutrition) {
+      const customNutrition = customizations.customNutrition;
+      const hasStandardizedFormat = customNutrition.micros !== undefined;
+      
+      if (hasStandardizedFormat) {
+        // Update nutrition details with micronutrients
+        if (!customizedRecipe.nutritionDetails) {
+          customizedRecipe.nutritionDetails = { macros: {}, micros: { vitamins: {}, minerals: {} }, calories: {} };
+        }
+        
+        customizedRecipe.nutritionDetails.calories = customNutrition.calories;
+        customizedRecipe.nutritionDetails.macros = customNutrition.macros;
+        customizedRecipe.nutritionDetails.micros = customNutrition.micros;
+        
+        // Update per-serving fields
+        customizedRecipe.caloriesPerServing = customNutrition.calories?.quantity?.toString();
+        customizedRecipe.proteinPerServingG = customNutrition.macros?.protein?.quantity?.toString();
+        customizedRecipe.carbsPerServingG = customNutrition.macros?.carbs?.quantity?.toString();
+        customizedRecipe.fatPerServingG = customNutrition.macros?.fat?.quantity?.toString();
+        customizedRecipe.fiberPerServingG = customNutrition.macros?.fiber?.quantity?.toString();
+      }
+    }
+
+    // Prepare nutrition comparison
+    const nutritionComparison: any = {
+      macros: {
+        original: {
+          caloriesPerServing: baseRecipe.caloriesPerServing,
+          proteinPerServingG: baseRecipe.proteinPerServingG,
+          carbsPerServingG: baseRecipe.carbsPerServingG,
+          fatPerServingG: baseRecipe.fatPerServingG,
+          fiberPerServingG: baseRecipe.fiberPerServingG
+        },
+        customized: {
+          caloriesPerServing: customizedRecipe.caloriesPerServing,
+          proteinPerServingG: customizedRecipe.proteinPerServingG,
+          carbsPerServingG: customizedRecipe.carbsPerServingG,
+          fatPerServingG: customizedRecipe.fatPerServingG,
+          fiberPerServingG: customizedRecipe.fiberPerServingG
+        }
+      }
+    };
+
+    if (baseRecipe.nutritionDetails?.micros && customizedRecipe.nutritionDetails?.micros) {
+      nutritionComparison.micros = {
+        original: {
+          vitamins: baseRecipe.nutritionDetails.micros.vitamins || {},
+          minerals: baseRecipe.nutritionDetails.micros.minerals || {}
+        },
+        customized: {
+          vitamins: customizedRecipe.nutritionDetails.micros.vitamins || {},
+          minerals: customizedRecipe.nutritionDetails.micros.minerals || {}
+        }
+      };
+    }
+
+    const customizationSummary = customizations.modifications?.map((mod: any) => ({
+      type: mod.type,
+      action: mod.type === 'omit' ? 'Removed' : mod.type === 'add' ? 'Added' : 'Replaced',
+      ingredient: mod.type === 'omit' ? mod.originalIngredient : 
+                  mod.type === 'add' ? mod.newIngredient : 
+                  `${mod.originalIngredient} → ${mod.newIngredient}`,
+      notes: mod.notes || null
+    })) || [];
+
+    // Return exact same structure as GET /api/recipes/customized
     return res.status(200).json({
       success: true,
+      data: customizedRecipe,
+      hasCustomizations: true,
+      customizations: {
+        modifications: customizations.modifications || [],
+        customizationSummary: customizationSummary,
+        appliedServings: 1,
+        micronutrientsIncluded: !!(customizations.customNutrition?.micros),
+        nutritionComparison: nutritionComparison,
+        originalNutrition: {
+          caloriesPerServing: baseRecipe.caloriesPerServing,
+          proteinPerServingG: baseRecipe.proteinPerServingG,
+          carbsPerServingG: baseRecipe.carbsPerServingG,
+          fatPerServingG: baseRecipe.fatPerServingG,
+          fiberPerServingG: baseRecipe.fiberPerServingG
+        },
+        customizedNutrition: {
+          caloriesPerServing: customizedRecipe.caloriesPerServing,
+          proteinPerServingG: customizedRecipe.proteinPerServingG,
+          carbsPerServingG: customizedRecipe.carbsPerServingG,
+          fatPerServingG: customizedRecipe.fatPerServingG,
+          fiberPerServingG: customizedRecipe.fiberPerServingG
+        }
+      },
       message: 'Customizations updated successfully',
-      autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition,
-      data: updatedDraft
+      autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition
     });
   } catch (error) {
     console.error('❌ Error updating customizations:', error);

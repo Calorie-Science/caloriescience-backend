@@ -117,22 +117,58 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               micronutrients: null
             };
 
-            // If there are custom nutrition values (from modifications), use those
+            // Check if customizations have nutrition (with or without micronutrients)
             if (customizations?.customNutrition) {
               console.log(`📊 Using custom nutrition from modifications`);
-              detailedNutrition.macros = {
-                calories: customizations.customNutrition.calories || 0,
-                protein: customizations.customNutrition.protein || 0,
-                carbs: customizations.customNutrition.carbs || 0,
-                fat: customizations.customNutrition.fat || 0,
-                fiber: customizations.customNutrition.fiber || 0,
-                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : null,
-                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : null,
-                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
-                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
-              };
+              
+              // Check if it's the new standardized format with micros
+              const hasStandardizedFormat = customizations.customNutrition.micros !== undefined;
+              
+              if (hasStandardizedFormat) {
+                console.log(`✅ Customizations include MICRONUTRIENTS!`);
+                // New format with micronutrients
+                detailedNutrition.macros = {
+                  calories: customizations.customNutrition.calories?.quantity || 0,
+                  protein: customizations.customNutrition.macros?.protein?.quantity || 0,
+                  carbs: customizations.customNutrition.macros?.carbs?.quantity || 0,
+                  fat: customizations.customNutrition.macros?.fat?.quantity || 0,
+                  fiber: customizations.customNutrition.macros?.fiber?.quantity || 0,
+                  sugar: customizations.customNutrition.macros?.sugar?.quantity || null,
+                  sodium: customizations.customNutrition.macros?.sodium?.quantity || null,
+                  saturatedFat: customizations.customNutrition.macros?.saturatedFat?.quantity || null,
+                  cholesterol: customizations.customNutrition.macros?.cholesterol?.quantity || null
+                };
+                
+                // Use customized micronutrients (includes changes from added/removed ingredients!)
+                detailedNutrition.micronutrients = {
+                  vitamins: customizations.customNutrition.micros?.vitamins || {},
+                  minerals: customizations.customNutrition.micros?.minerals || {}
+                };
+              } else {
+                // Old format (just numbers, no micros)
+                console.log(`⚠️ Using old format custom nutrition (no micronutrients)`);
+                detailedNutrition.macros = {
+                  calories: customizations.customNutrition.calories || 0,
+                  protein: customizations.customNutrition.protein || 0,
+                  carbs: customizations.customNutrition.carbs || 0,
+                  fat: customizations.customNutrition.fat || 0,
+                  fiber: customizations.customNutrition.fiber || 0,
+                  sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : null,
+                  sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : null,
+                  saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
+                  cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
+                };
+                
+                // Fallback to base recipe micros if no custom micros
+                if (standardizedRecipe?.nutritionDetails?.micros) {
+                  detailedNutrition.micronutrients = {
+                    vitamins: standardizedRecipe.nutritionDetails.micros.vitamins || {},
+                    minerals: standardizedRecipe.nutritionDetails.micros.minerals || {}
+                  };
+                }
+              }
             } else {
-              // Use base nutrition from recipe
+              // Use base nutrition from recipe (no customizations)
               console.log(`📊 Using base nutrition from recipe`);
               detailedNutrition.macros = {
                 calories: parseFloat(standardizedRecipe?.caloriesPerServing || selectedRecipe.calories || selectedRecipe.nutrition?.calories || '0'),
@@ -145,43 +181,18 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                 saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
                 cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
               };
-            }
-
-            // Extract micronutrients from cache (these don't change with ingredient modifications)
-            if (standardizedRecipe?.nutritionDetails?.micros) {
-              console.log(`📊 Extracting micronutrients from cache`);
-              const vitamins = standardizedRecipe.nutritionDetails.micros.vitamins || {};
-              const minerals = standardizedRecipe.nutritionDetails.micros.minerals || {};
-
-              detailedNutrition.micronutrients = {
-                vitamins: {
-                  vitaminA: vitamins.vitaminA ? { quantity: vitamins.vitaminA.quantity, unit: vitamins.vitaminA.unit } : null,
-                  vitaminC: vitamins.vitaminC ? { quantity: vitamins.vitaminC.quantity, unit: vitamins.vitaminC.unit } : null,
-                  vitaminD: vitamins.vitaminD ? { quantity: vitamins.vitaminD.quantity, unit: vitamins.vitaminD.unit } : null,
-                  vitaminE: vitamins.vitaminE ? { quantity: vitamins.vitaminE.quantity, unit: vitamins.vitaminE.unit } : null,
-                  vitaminK: vitamins.vitaminK ? { quantity: vitamins.vitaminK.quantity, unit: vitamins.vitaminK.unit } : null,
-                  vitaminB6: vitamins.vitaminB6 ? { quantity: vitamins.vitaminB6.quantity, unit: vitamins.vitaminB6.unit } : null,
-                  vitaminB12: vitamins.vitaminB12 ? { quantity: vitamins.vitaminB12.quantity, unit: vitamins.vitaminB12.unit } : null,
-                  folate: vitamins.folate ? { quantity: vitamins.folate.quantity, unit: vitamins.folate.unit } : null,
-                  thiamin: vitamins.thiamin ? { quantity: vitamins.thiamin.quantity, unit: vitamins.thiamin.unit } : null,
-                  riboflavin: vitamins.riboflavin ? { quantity: vitamins.riboflavin.quantity, unit: vitamins.riboflavin.unit } : null,
-                  niacin: vitamins.niacin ? { quantity: vitamins.niacin.quantity, unit: vitamins.niacin.unit } : null
-                },
-                minerals: {
-                  calcium: minerals.calcium ? { quantity: minerals.calcium.quantity, unit: minerals.calcium.unit } : null,
-                  iron: minerals.iron ? { quantity: minerals.iron.quantity, unit: minerals.iron.unit } : null,
-                  magnesium: minerals.magnesium ? { quantity: minerals.magnesium.quantity, unit: minerals.magnesium.unit } : null,
-                  phosphorus: minerals.phosphorus ? { quantity: minerals.phosphorus.quantity, unit: minerals.phosphorus.unit } : null,
-                  potassium: minerals.potassium ? { quantity: minerals.potassium.quantity, unit: minerals.potassium.unit } : null,
-                  zinc: minerals.zinc ? { quantity: minerals.zinc.quantity, unit: minerals.zinc.unit } : null,
-                  copper: minerals.copper ? { quantity: minerals.copper.quantity, unit: minerals.copper.unit } : null,
-                  manganese: minerals.manganese ? { quantity: minerals.manganese.quantity, unit: minerals.manganese.unit } : null,
-                  selenium: minerals.selenium ? { quantity: minerals.selenium.quantity, unit: minerals.selenium.unit } : null
-                }
-              };
-              console.log(`✅ Micronutrients extracted successfully`);
-            } else {
-              console.log(`⚠️ No micronutrients found in cache for ${selectedRecipe.id}`);
+              
+              // Extract micronutrients from cache
+              if (standardizedRecipe?.nutritionDetails?.micros) {
+                console.log(`📊 Extracting micronutrients from cache`);
+                detailedNutrition.micronutrients = {
+                  vitamins: standardizedRecipe.nutritionDetails.micros.vitamins || {},
+                  minerals: standardizedRecipe.nutritionDetails.micros.minerals || {}
+                };
+                console.log(`✅ Micronutrients extracted successfully`);
+              } else {
+                console.log(`⚠️ No micronutrients found in cache for ${selectedRecipe.id}`);
+              }
             }
 
             detailedMeals[mealName] = {
@@ -223,10 +234,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Sum up nutrition from all meals
         Object.values(detailedMeals).forEach((meal: any) => {
           if (meal.nutrition) {
-            // Add macros
+            // Add macros (handle both number and {quantity, unit} formats)
             Object.keys(dayTotals.macros).forEach(macro => {
-              dayTotals.macros[macro as keyof typeof dayTotals.macros] += 
-                meal.nutrition.macros[macro] || 0;
+              const value = meal.nutrition.macros[macro];
+              // Extract numeric value (handle both formats)
+              const numericValue = typeof value === 'object' && value?.quantity !== undefined 
+                ? value.quantity 
+                : (typeof value === 'number' ? value : 0);
+              
+              dayTotals.macros[macro as keyof typeof dayTotals.macros] += numericValue || 0;
             });
 
             // Add micronutrients
