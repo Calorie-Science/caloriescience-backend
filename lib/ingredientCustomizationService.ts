@@ -160,10 +160,14 @@ export class IngredientCustomizationService {
         case 'replace':
           if (modification.originalIngredient && modification.newIngredient) {
             // Construct full ingredient text with amount and unit for accurate nutrition
-            const amount = (modification as any).amount || 1;
-            const unit = (modification as any).unit || '';
-            const newIngredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
-            const oldIngredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+            // Use separate amounts for old and new (for portion size changes)
+            const newAmount = (modification as any).amount || 1;
+            const newUnit = (modification as any).unit || '';
+            const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
+            const oldUnit = (modification as any).originalUnit || newUnit;
+            
+            const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+            const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
             
             // Get nutrition data for both ingredients from Spoonacular
             console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
@@ -177,8 +181,9 @@ export class IngredientCustomizationService {
               const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
               
               console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-              console.log(`     Old: ${oldNutrition.calories.quantity} kcal, Vitamin C: ${oldNutrition.micros.vitamins.vitaminC?.quantity || 0}mg`);
-              console.log(`     New: ${newNutrition.calories.quantity} kcal, Vitamin C: ${newNutrition.micros.vitamins.vitaminC?.quantity || 0}mg`);
+              console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
+              console.log(`     New: ${newNutrition.calories.quantity} kcal`);
+              console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
               
               // Subtract old ingredient nutrition (including micros)
               adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
@@ -350,10 +355,14 @@ export class IngredientCustomizationService {
           case 'replace':
             if (modification.originalIngredient && modification.newIngredient) {
               // Construct full ingredient text with amount and unit for accurate nutrition
-              const amount = (modification as any).amount || 1;
-              const unit = (modification as any).unit || '';
-              const newIngredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
-              const oldIngredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+              // Use separate amounts for old and new (for portion size changes)
+              const newAmount = (modification as any).amount || 1;
+              const newUnit = (modification as any).unit || '';
+              const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
+              const oldUnit = (modification as any).originalUnit || newUnit;
+              
+              const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+              const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
               
               // Use Spoonacular for ingredient nutrition
               console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
@@ -366,7 +375,9 @@ export class IngredientCustomizationService {
                 const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
                 
                 console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-                console.log(`     Old: ${oldNutrition.calories.quantity} kcal, New: ${newNutrition.calories.quantity} kcal`);
+                console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
+                console.log(`     New: ${newNutrition.calories.quantity} kcal`);
+                console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
                 
                 adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
                 adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);

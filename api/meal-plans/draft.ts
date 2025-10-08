@@ -1098,6 +1098,21 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       console.log(`  Modifications:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient}`));
       // PASS 1: Process ADD and REPLACE first
       for (const mod of customizations.modifications) {
+        // For REPLACE operations, look up original amount from baseRecipe ingredients if not provided
+        if (mod.type === 'replace' && mod.originalIngredient && !(mod as any).originalAmount) {
+          const targetName = mod.originalIngredient.toLowerCase();
+          const originalIng = baseRecipe.ingredients?.find((ing: any) => {
+            const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+            return ingName.includes(targetName) || targetName.includes(ingName);
+          });
+          
+          if (originalIng) {
+            (mod as any).originalAmount = originalIng.amount || 1;
+            (mod as any).originalUnit = originalIng.unit || '';
+            console.log(`  🔍 Found original ingredient: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+          }
+        }
+        
         if (mod.type === 'add' && mod.newIngredient) {
           // Fetch ingredient image if not provided
           const ingredientImage = (mod as any).image || await getIngredientImage(mod.newIngredient);
