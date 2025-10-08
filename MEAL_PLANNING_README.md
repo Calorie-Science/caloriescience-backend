@@ -51,95 +51,237 @@ Run the new migration to create meal planning tables:
 # This will be automatically applied when you deploy
 ```
 
-## 🚀 API Endpoints
+## 🚀 API Endpoints (Updated - Drafts System)
 
-### Generate Meal Plan
+The meal planning system now uses a **draft-based workflow** where nutritionists can generate, customize, and finalize meal plans. All meal plans are stored in the `meal_plan_drafts` table with different statuses.
 
-**POST** `/api/meal-plans`
+### Generate Meal Plan Draft
 
-Generates a complete meal plan for a client based on their EER requirements.
+**POST** `/api/meal-plans/generate`
+
+Generates a new meal plan draft with recipe suggestions for customization.
 
 ```json
 {
   "clientId": "uuid-of-client",
-  "planDate": "2024-01-15",
-  "planType": "daily",
-  "dietaryRestrictions": ["vegetarian", "gluten-free"],
-  "cuisinePreferences": ["italian", "mediterranean"],
-  "mealPreferences": {
-    "breakfast": ["quick", "protein-rich"],
-    "lunch": ["light", "fiber-rich"]
+  "days": 7,
+  "startDate": "2025-01-29",
+  "mealProgramId": "uuid-of-meal-program",
+  "goalOverrides": {
+    "calories": 2000,
+    "protein": 150,
+    "carbs": 250,
+    "fat": 67
   },
-  "targetCalories": 2000
+  "dietaryOverrides": {
+    "allergies": ["dairy-free"],
+    "dietaryPreferences": ["vegetarian"],
+    "cuisineTypes": ["indian"]
+  }
 }
 ```
 
 **Response:**
 ```json
 {
-  "message": "Meal plan generated successfully",
-  "mealPlan": {
-    "id": "meal-plan-uuid",
+  "success": true,
+  "data": {
+    "draftId": "draft-uuid",
     "clientId": "client-uuid",
-    "planName": "Daily Meal Plan",
-    "planDate": "2024-01-15",
-    "targetCalories": 2000,
-    "targetProtein": 150,
-    "targetCarbs": 200,
-    "targetFat": 67,
-    "meals": [
+    "days": 7,
+    "startDate": "2025-01-29",
+    "suggestions": [
       {
-        "mealType": "breakfast",
-        "recipeName": "Protein Smoothie Bowl",
-        "caloriesPerServing": 350,
-        "proteinGrams": 25,
-        "carbsGrams": 45,
-        "fatGrams": 12,
-        "ingredients": ["banana", "protein powder", "almond milk"]
+        "day": 1,
+        "date": "2025-01-29",
+        "meals": {
+          "breakfast": {
+            "recipes": [
+              {
+                "id": "recipe-123",
+                "title": "Protein Smoothie Bowl",
+                "calories": 350,
+                "protein": 25,
+                "carbs": 45,
+                "fat": 12,
+                "image": "https://...",
+                "source": "edamam"
+              }
+            ],
+            "selectedRecipeId": null
+          }
+        }
       }
-      // ... more meals
+    ]
+  }
+}
+```
+
+### Get Meal Plan Drafts (Paginated)
+
+**GET** `/api/meal-plans/drafts`
+
+Retrieves paginated list of meal plan drafts with optional filtering.
+
+**Query Parameters:**
+- `clientId` (optional): Filter by client
+- `status` (optional): Filter by status (`draft`, `finalized`, `completed`)
+- `page` (optional): Page number (default: 1)
+- `pageSize` (optional): Results per page (default: 10, max: 100)
+- `includeNutrition` (optional): Include detailed nutrition (default: true)
+
+**Example:** `GET /api/meal-plans/drafts?status=finalized&page=1&pageSize=20`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "drafts": [
+      {
+        "id": "draft-uuid",
+        "clientId": "client-uuid",
+        "status": "finalized",
+        "totalDays": 7,
+        "totalMeals": 21,
+        "selectedMeals": 21,
+        "completionPercentage": 100,
+        "nutrition": {
+          "byDay": [...],
+          "overall": {
+            "calories": 14000,
+            "protein": 1050,
+            "carbs": 1750,
+            "fat": 469
+          },
+          "dailyAverage": {
+            "calories": 2000,
+            "protein": 150,
+            "carbs": 250,
+            "fat": 67
+          }
+        }
+      }
     ],
-    "nutritionSummary": {
-      "totalCalories": 1985,
-      "totalProtein": 148,
-      "totalCarbs": 198,
-      "totalFat": 65
+    "pagination": {
+      "page": 1,
+      "pageSize": 20,
+      "totalCount": 45,
+      "totalPages": 3,
+      "hasNextPage": true,
+      "hasPreviousPage": false
     }
   }
 }
 ```
 
-### Get Client Meal Plans
+### Get Specific Meal Plan Draft with Micronutrients
 
-**GET** `/api/meal-plans?clientId=uuid-of-client`
+**GET** `/api/meal-plans/drafts/[id]`
 
-Retrieves all meal plans for a specific client.
+Retrieves detailed meal plan draft with complete micronutrient data.
 
-### Get Specific Meal Plan
+**Response includes:**
+- Complete macro and micronutrient breakdown per meal
+- Day-wise and overall nutrition totals
+- Customization tracking
+- Ingredient modifications
+- Recipe details with images and sources
 
-**GET** `/api/meal-plans/{id}`
+### Manage Meal Plan Draft
 
-Retrieves a specific meal plan by ID.
+**POST** `/api/meal-plans/draft`
 
-### Update Meal Plan Status
+Perform various actions on meal plan drafts.
 
-**PUT** `/api/meal-plans/{id}`
-
-Updates the status of a meal plan.
-
+**Select Recipe:**
 ```json
 {
-  "status": "active"
+  "action": "select-recipe",
+  "draftId": "draft-uuid",
+  "day": 1,
+  "mealName": "breakfast",
+  "recipeId": "recipe-123"
 }
 ```
 
-Valid statuses: `draft`, `active`, `completed`, `archived`
+**Finalize Draft:**
+```json
+{
+  "action": "finalize-draft",
+  "draftId": "draft-uuid",
+  "planName": "Week 1 Meal Plan"
+}
+```
 
-### Delete Meal Plan
+**Replace Ingredient:**
+```json
+{
+  "action": "replace-ingredient",
+  "draftId": "draft-uuid",
+  "day": 1,
+  "mealName": "breakfast",
+  "recipeId": "recipe-123",
+  "originalIngredient": "100 gram milk",
+  "newIngredient": "almond milk",
+  "amount": 100,
+  "unit": "gram",
+  "source": "edamam"
+}
+```
 
-**DELETE** `/api/meal-plans/{id}`
+### Get Customized Recipe
 
-Deletes a meal plan and all associated meals.
+**GET** `/api/recipes/customized`
+
+Get recipe with all customizations applied.
+
+**Query Parameters:**
+- `recipeId`: Recipe ID
+- `draftId`: Meal plan draft ID
+- `day`: Day number
+- `mealName`: Meal name (breakfast, lunch, dinner, snacks)
+
+**Example:** `GET /api/recipes/customized?recipeId=123&draftId=456&day=1&mealName=breakfast`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "recipe": {
+      "id": "123",
+      "title": "Protein Smoothie Bowl",
+      "ingredients": [
+        { "name": "banana", "amount": 1, "unit": "medium" },
+        { "name": "protein powder", "amount": 1, "unit": "scoop" }
+      ],
+      "calories": 350,
+      "protein": 25,
+      "carbs": 45,
+      "fat": 12
+    },
+    "hasCustomizations": true,
+    "customizations": {
+      "modifications": [
+        {
+          "type": "replace",
+          "originalIngredient": "milk",
+          "newIngredient": "almond milk",
+          "notes": "Dairy-free substitution"
+        }
+      ]
+    }
+  }
+}
+```
+
+## 📊 Meal Plan Statuses
+
+- **`draft`**: Initial state with recipe suggestions, can be customized
+- **`finalized`**: Customized and finalized, ready for client use
+- **`completed`**: Client has completed the meal plan
+- **`archived`**: Historical meal plan for reference
 
 ### Search Recipes
 

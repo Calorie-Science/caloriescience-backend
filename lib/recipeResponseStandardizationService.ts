@@ -418,6 +418,47 @@ export class RecipeResponseStandardizationService {
   }
   
   /**
+   * Extract nutrition details from original API response
+   */
+  private extractNutritionFromOriginalApiResponse(originalApiResponse: any): any {
+    if (!originalApiResponse || !originalApiResponse.nutrition) {
+      return {};
+    }
+
+    const nutrition = originalApiResponse.nutrition;
+    
+    return {
+      macros: nutrition.macros || {},
+      micros: nutrition.micros || {},
+      calories: nutrition.calories || { unit: 'kcal', quantity: 0 }
+    };
+  }
+
+  /**
+   * Merge nutrition details, prioritizing existing data but filling in missing micronutrients
+   */
+  private mergeNutritionDetails(existing: any, fromOriginal: any): any {
+    const merged = { ...existing };
+    
+    // Merge macros
+    if (fromOriginal.macros) {
+      merged.macros = { ...merged.macros, ...fromOriginal.macros };
+    }
+    
+    // Always use micronutrients from original API response if available
+    if (fromOriginal.micros) {
+      merged.micros = fromOriginal.micros;
+    }
+    
+    // Merge calories
+    if (fromOriginal.calories) {
+      merged.calories = fromOriginal.calories;
+    }
+    
+    return merged;
+  }
+
+  /**
    * Get empty nutrition details structure
    */
   private getEmptyNutritionDetails(): StandardizedNutritionDetails {
@@ -478,7 +519,10 @@ export class RecipeResponseStandardizationService {
       ingredients: dbRecipe.ingredients || [],
       ingredient_lines: dbRecipe.ingredient_lines || dbRecipe.ingredientLines || [],
       cooking_instructions: dbRecipe.cooking_instructions || dbRecipe.cookingInstructions || [],
-      nutrition_details: dbRecipe.nutrition_details || dbRecipe.nutritionDetails || {},
+      nutrition_details: this.mergeNutritionDetails(
+        dbRecipe.nutrition_details || dbRecipe.nutritionDetails || {},
+        this.extractNutritionFromOriginalApiResponse(dbRecipe.original_api_response || dbRecipe.originalApiResponse)
+      ),
       original_api_response: dbRecipe.original_api_response || dbRecipe.originalApiResponse || {},
       cache_status: dbRecipe.cache_status || dbRecipe.cacheStatus || 'active',
       api_fetch_count: dbRecipe.api_fetch_count || dbRecipe.apiFetchCount || 0,

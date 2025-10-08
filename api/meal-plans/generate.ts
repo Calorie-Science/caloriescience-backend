@@ -881,6 +881,47 @@ function generateMealSuggestionsFromCache(
 async function enrichMealPlanWithCache(mealPlan: DayMealPlan[]): Promise<DayMealPlan[]> {
   console.log('🔄 Enriching meal plan with cached recipe data...');
   
+  // Helper function to enrich a single recipe with cache data
+  const enrichRecipe = async (recipe: RecipeSuggestion): Promise<RecipeSuggestion> => {
+    try {
+      // Try to get detailed recipe data from cache
+      const cachedRecipe = await cacheService.getRecipeByExternalId(
+        recipe.source,
+        recipe.id
+      );
+      
+      if (cachedRecipe) {
+        console.log(`✅ Enriching recipe ${recipe.id} (${recipe.title}) with cached data`);
+        return {
+          ...recipe,
+          fromCache: true,
+          cacheId: cachedRecipe.id,
+          // Add detailed information from cache
+          ingredients: cachedRecipe.ingredients || [],
+          instructions: cachedRecipe.cookingInstructions || [],
+          nutrition: cachedRecipe.nutritionDetails || {},
+          healthLabels: cachedRecipe.healthLabels || [],
+          dietLabels: cachedRecipe.dietLabels || [],
+          cuisineTypes: cachedRecipe.cuisineTypes || [],
+          dishTypes: cachedRecipe.dishTypes || [],
+          mealTypes: cachedRecipe.mealTypes || []
+        };
+      } else {
+        console.log(`⚠️ No cached data found for recipe ${recipe.id} (${recipe.title})`);
+        return {
+          ...recipe,
+          fromCache: false
+        };
+      }
+    } catch (error) {
+      console.error(`Error enriching recipe ${recipe.id}:`, error);
+      return {
+        ...recipe,
+        fromCache: false
+      };
+    }
+  };
+  
   const enrichedMealPlan = await Promise.all(
     mealPlan.map(async (dayPlan) => {
       const enrichedMeals: any = {};
@@ -891,52 +932,26 @@ async function enrichMealPlanWithCache(mealPlan: DayMealPlan[]): Promise<DayMeal
         const allRecipes = (mealData as any).allRecipes;
         const displayOffset = (mealData as any).displayOffset;
         
+        // Enrich displayed recipes
         const enrichedRecipes = await Promise.all(
-          (Array.isArray(recipes) ? recipes : []).map(async (recipe) => {
-            try {
-              // Try to get detailed recipe data from cache
-              const cachedRecipe = await cacheService.getRecipeByExternalId(
-                recipe.source,
-                recipe.id
-              );
-              
-              if (cachedRecipe) {
-                console.log(`✅ Enriching recipe ${recipe.id} (${recipe.title}) with cached data`);
-                return {
-                  ...recipe,
-                  fromCache: true,
-                  cacheId: cachedRecipe.id,
-                  // Add detailed information from cache
-                  ingredients: cachedRecipe.ingredients || [],
-                  instructions: cachedRecipe.cookingInstructions || [],
-                  nutrition: cachedRecipe.nutritionDetails || {},
-                  healthLabels: cachedRecipe.healthLabels || [],
-                  dietLabels: cachedRecipe.dietLabels || [],
-                  cuisineTypes: cachedRecipe.cuisineTypes || [],
-                  dishTypes: cachedRecipe.dishTypes || [],
-                  mealTypes: cachedRecipe.mealTypes || []
-                };
-              } else {
-                console.log(`⚠️ No cached data found for recipe ${recipe.id} (${recipe.title})`);
-                return {
-                  ...recipe,
-                  fromCache: false
-                };
-              }
-            } catch (error) {
-              console.error(`Error enriching recipe ${recipe.id}:`, error);
-              return {
-                ...recipe,
-                fromCache: false
-              };
-            }
-          })
+          (Array.isArray(recipes) ? recipes : []).map(enrichRecipe)
         );
+        
+        // Also enrich ALL recipes (for shuffling) if they exist
+        let enrichedAllRecipes = allRecipes;
+        if (allRecipes) {
+          console.log(`🔄 Enriching all recipes for ${mealType} (${allRecipes.edamam.length} Edamam + ${allRecipes.spoonacular.length} Spoonacular)`);
+          enrichedAllRecipes = {
+            edamam: await Promise.all(allRecipes.edamam.map(enrichRecipe)),
+            spoonacular: await Promise.all(allRecipes.spoonacular.map(enrichRecipe))
+          };
+          console.log(`✅ Enriched all ${mealType} recipes from cache`);
+        }
         
         // Preserve the structure with recipes, allRecipes, and displayOffset
         enrichedMeals[mealType] = {
           recipes: enrichedRecipes,
-          allRecipes,
+          allRecipes: enrichedAllRecipes,
           displayOffset
         };
       }

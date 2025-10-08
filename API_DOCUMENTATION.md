@@ -253,6 +253,286 @@ Authorization: Bearer <your-jwt-token>
 }
 ```
 
+### 3. Meal Plan Management (Drafts System)
+
+The meal plan system uses a draft-based workflow where nutritionists can generate, customize, and finalize meal plans.
+
+#### Generate Meal Plan Draft
+- **URL:** `POST /api/meal-plans/generate`
+- **Description:** Generate a new meal plan draft with recipe suggestions
+- **Auth:** Required
+- **Body:**
+```json
+{
+  "clientId": "uuid-of-client",
+  "days": 7,
+  "startDate": "2025-01-29",
+  "mealProgramId": "uuid-of-meal-program",
+  "goalOverrides": {
+    "calories": 2000,
+    "protein": 150,
+    "carbs": 250,
+    "fat": 67
+  },
+  "dietaryOverrides": {
+    "allergies": ["dairy-free"],
+    "dietaryPreferences": ["vegetarian"],
+    "cuisineTypes": ["indian"]
+  }
+}
+```
+- **Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "draftId": "draft-uuid",
+    "clientId": "client-uuid",
+    "days": 7,
+    "startDate": "2025-01-29",
+    "suggestions": [
+      {
+        "day": 1,
+        "date": "2025-01-29",
+        "meals": {
+          "breakfast": {
+            "recipes": [
+              {
+                "id": "recipe-123",
+                "title": "Protein Smoothie Bowl",
+                "calories": 350,
+                "protein": 25,
+                "carbs": 45,
+                "fat": 12,
+                "image": "https://...",
+                "source": "edamam"
+              }
+            ],
+            "selectedRecipeId": null
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+#### Get Meal Plan Drafts (Paginated)
+- **URL:** `GET /api/meal-plans/drafts`
+- **Description:** Get paginated list of meal plan drafts
+- **Auth:** Required
+- **Query Parameters:**
+  - `clientId` (optional): Filter by client
+  - `status` (optional): Filter by status (`draft`, `finalized`, `completed`)
+  - `page` (optional): Page number (default: 1)
+  - `pageSize` (optional): Results per page (default: 10, max: 100)
+  - `includeNutrition` (optional): Include detailed nutrition (default: true)
+- **Example:** `GET /api/meal-plans/drafts?status=finalized&page=1&pageSize=20`
+- **Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "drafts": [
+      {
+        "id": "draft-uuid",
+        "clientId": "client-uuid",
+        "status": "finalized",
+        "totalDays": 7,
+        "totalMeals": 21,
+        "selectedMeals": 21,
+        "completionPercentage": 100,
+        "nutrition": {
+          "byDay": [...],
+          "overall": {
+            "calories": 14000,
+            "protein": 1050,
+            "carbs": 1750,
+            "fat": 469
+          },
+          "dailyAverage": {
+            "calories": 2000,
+            "protein": 150,
+            "carbs": 250,
+            "fat": 67
+          }
+        }
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "pageSize": 20,
+      "totalCount": 45,
+      "totalPages": 3,
+      "hasNextPage": true,
+      "hasPreviousPage": false
+    }
+  }
+}
+```
+
+#### Get Specific Meal Plan Draft with Micronutrients
+- **URL:** `GET /api/meal-plans/drafts/[id]`
+- **Description:** Get detailed meal plan draft with complete micronutrient data
+- **Auth:** Required
+- **Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "draft-uuid",
+    "clientId": "client-uuid",
+    "status": "finalized",
+    "days": [
+      {
+        "day": 1,
+        "date": "2025-01-29",
+        "meals": {
+          "breakfast": {
+            "recipeName": "Protein Smoothie Bowl",
+            "recipeId": "recipe-123",
+            "isSelected": true,
+            "hasCustomizations": false,
+            "ingredients": [...],
+            "nutrition": {
+              "macros": {
+                "calories": 350,
+                "protein": 25,
+                "carbs": 45,
+                "fat": 12,
+                "fiber": 8,
+                "sugar": 15.2,
+                "sodium": 120,
+                "saturatedFat": 2.1,
+                "cholesterol": 5
+              },
+              "micronutrients": {
+                "vitamins": {
+                  "vitaminA": { "quantity": 450, "unit": "mcg" },
+                  "vitaminC": { "quantity": 12.5, "unit": "mg" },
+                  "vitaminD": { "quantity": 2.1, "unit": "mcg" },
+                  "vitaminE": { "quantity": 0.8, "unit": "mg" },
+                  "vitaminK": { "quantity": 15.2, "unit": "mcg" },
+                  "vitaminB6": { "quantity": 0.3, "unit": "mg" },
+                  "vitaminB12": { "quantity": 1.2, "unit": "mcg" },
+                  "folate": { "quantity": 45, "unit": "mcg" },
+                  "thiamin": { "quantity": 0.1, "unit": "mg" },
+                  "riboflavin": { "quantity": 0.2, "unit": "mg" },
+                  "niacin": { "quantity": 1.8, "unit": "mg" }
+                },
+                "minerals": {
+                  "calcium": { "quantity": 120, "unit": "mg" },
+                  "iron": { "quantity": 1.2, "unit": "mg" },
+                  "magnesium": { "quantity": 45, "unit": "mg" },
+                  "phosphorus": { "quantity": 180, "unit": "mg" },
+                  "potassium": { "quantity": 420, "unit": "mg" },
+                  "zinc": { "quantity": 1.8, "unit": "mg" },
+                  "copper": { "quantity": 0.1, "unit": "mg" },
+                  "manganese": { "quantity": 0.3, "unit": "mg" },
+                  "selenium": { "quantity": 8.5, "unit": "mcg" }
+                }
+              }
+            }
+          }
+        },
+        "dayTotals": {
+          "macros": {...},
+          "micronutrients": {...}
+        }
+      }
+    ],
+    "nutritionSummary": {
+      "overall": {...},
+      "dailyAverages": {...}
+    }
+  }
+}
+```
+
+#### Manage Meal Plan Draft
+- **URL:** `POST /api/meal-plans/draft`
+- **Description:** Perform various actions on meal plan drafts
+- **Auth:** Required
+- **Body:** Varies by action
+
+**Select Recipe:**
+```json
+{
+  "action": "select-recipe",
+  "draftId": "draft-uuid",
+  "day": 1,
+  "mealName": "breakfast",
+  "recipeId": "recipe-123"
+}
+```
+
+**Finalize Draft:**
+```json
+{
+  "action": "finalize-draft",
+  "draftId": "draft-uuid",
+  "planName": "Week 1 Meal Plan"
+}
+```
+
+**Replace Ingredient:**
+```json
+{
+  "action": "replace-ingredient",
+  "draftId": "draft-uuid",
+  "day": 1,
+  "mealName": "breakfast",
+  "recipeId": "recipe-123",
+  "originalIngredient": "100 gram milk",
+  "newIngredient": "almond milk",
+  "amount": 100,
+  "unit": "gram",
+  "source": "edamam"
+}
+```
+
+#### Get Customized Recipe
+- **URL:** `GET /api/recipes/customized`
+- **Description:** Get recipe with all customizations applied
+- **Auth:** Required
+- **Query Parameters:**
+  - `recipeId`: Recipe ID
+  - `draftId`: Meal plan draft ID
+  - `day`: Day number
+  - `mealName`: Meal name (breakfast, lunch, dinner, snacks)
+- **Example:** `GET /api/recipes/customized?recipeId=123&draftId=456&day=1&mealName=breakfast`
+- **Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "recipe": {
+      "id": "123",
+      "title": "Protein Smoothie Bowl",
+      "ingredients": [
+        { "name": "banana", "amount": 1, "unit": "medium" },
+        { "name": "protein powder", "amount": 1, "unit": "scoop" }
+      ],
+      "calories": 350,
+      "protein": 25,
+      "carbs": 45,
+      "fat": 12
+    },
+    "hasCustomizations": true,
+    "customizations": {
+      "modifications": [
+        {
+          "type": "replace",
+          "originalIngredient": "milk",
+          "newIngredient": "almond milk",
+          "notes": "Dairy-free substitution"
+        }
+      ]
+    }
+  }
+}
+```
+
 ## Error Responses
 
 All endpoints return consistent error responses:

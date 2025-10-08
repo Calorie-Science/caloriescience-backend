@@ -537,8 +537,85 @@ export class MealPlanDraftService {
       throw new Error(`Meal ${mealName} not found for day ${day}`);
     }
 
-    // Update customizations
-    dayPlan.meals[mealName].customizations[recipeId] = customizations;
+    // Find the recipe to modify
+    const recipe = dayPlan.meals[mealName].recipes.find((r: any) => r.id === recipeId);
+    if (!recipe) {
+      throw new Error(`Recipe ${recipeId} not found in meal ${mealName}`);
+    }
+
+    // Apply ingredient modifications to the recipe's ingredient list
+    if (customizations.modifications && recipe.ingredients) {
+      console.log('🔧 Applying ingredient modifications...');
+      
+      for (const mod of customizations.modifications) {
+        if (mod.type === 'omit' && mod.originalIngredient) {
+          // REMOVE the ingredient from the list
+          const originalCount = recipe.ingredients.length;
+          recipe.ingredients = recipe.ingredients.filter((ing: any) => {
+            const ingName = ing.name?.toLowerCase() || ing.food?.toLowerCase() || '';
+            const targetName = mod.originalIngredient.toLowerCase();
+            return !ingName.includes(targetName) && !targetName.includes(ingName);
+          });
+          console.log(`  🚫 Omitted "${mod.originalIngredient}" (${originalCount} → ${recipe.ingredients.length} ingredients)`);
+        } 
+        else if (mod.type === 'add' && mod.newIngredient) {
+          // ADD the new ingredient to the list
+          recipe.ingredients.push({
+            name: mod.newIngredient,
+            amount: mod.amount || null,
+            unit: mod.unit || null,
+            original: `${mod.amount || ''} ${mod.unit || ''} ${mod.newIngredient}`.trim()
+          });
+          console.log(`  ➕ Added "${mod.newIngredient}" (${recipe.ingredients.length} ingredients)`);
+        }
+        else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
+          // REPLACE: find and update the ingredient in place
+          let replaced = false;
+          recipe.ingredients = recipe.ingredients.map((ing: any) => {
+            const ingName = ing.name?.toLowerCase() || ing.food?.toLowerCase() || '';
+            const targetName = mod.originalIngredient.toLowerCase();
+            
+            if ((ingName.includes(targetName) || targetName.includes(ingName)) && !replaced) {
+              replaced = true;
+              console.log(`  🔄 Replaced "${ing.name || ing.food}" with "${mod.newIngredient}"`);
+              return {
+                ...ing,
+                name: mod.newIngredient,
+                amount: mod.amount || ing.amount,
+                unit: mod.unit || ing.unit,
+                original: `${mod.amount || ing.amount || ''} ${mod.unit || ing.unit || ''} ${mod.newIngredient}`.trim()
+              };
+            }
+            return ing;
+          });
+        }
+      }
+    }
+
+    // Merge new customizations with existing ones (don't replace entirely)
+    const existingCustomizations = dayPlan.meals[mealName].customizations[recipeId];
+    
+    if (existingCustomizations && existingCustomizations.modifications) {
+      // Merge modifications arrays
+      const mergedModifications = [
+        ...existingCustomizations.modifications,
+        ...customizations.modifications
+      ];
+      
+      // Merge customizations, preserving existing data
+      const mergedCustomizations = {
+        ...existingCustomizations,
+        ...customizations,
+        modifications: mergedModifications
+      };
+      
+      console.log(`🔄 Merged customizations: ${existingCustomizations.modifications.length} existing + ${customizations.modifications.length} new = ${mergedModifications.length} total`);
+      dayPlan.meals[mealName].customizations[recipeId] = mergedCustomizations;
+    } else {
+      // No existing customizations, use new ones
+      console.log(`🆕 Setting new customizations: ${customizations.modifications.length} modifications`);
+      dayPlan.meals[mealName].customizations[recipeId] = customizations;
+    }
 
     // Recalculate total nutrition for this meal
     dayPlan.meals[mealName].totalNutrition = 
@@ -556,6 +633,36 @@ export class MealPlanDraftService {
     if (error) {
       throw new Error(`Failed to update draft: ${error.message}`);
     }
+  }
+
+  /**
+   * Get draft with full details including overall nutrition
+   */
+  async getDraftWithNutrition(draftId: string): Promise<any> {
+    const draft = await this.getDraft(draftId);
+    if (!draft) {
+      return null;
+    }
+
+    // Calculate nutrition for each meal first
+    for (const day of draft.suggestions) {
+      for (const [mealType, meal] of Object.entries(day.meals)) {
+        if (meal.selectedRecipeId) {
+          meal.totalNutrition = await this.calculateMealTotalNutrition(meal);
+        }
+      }
+    }
+
+    // Return full draft with added nutrition calculations
+    return {
+      ...draft,
+      overallNutrition: {
+        totalNutrition: await this.calculateDraftTotalNutrition(draft),
+        dayWiseNutrition: await this.calculateDayWiseNutrition(draft)
+      },
+      mealSummary: await this.getMealSummary(draft),
+      completionStatus: await this.getCompletionStatus(draft)
+    };
   }
 
   /**
