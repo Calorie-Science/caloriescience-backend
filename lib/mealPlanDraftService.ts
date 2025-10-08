@@ -418,6 +418,22 @@ export class MealPlanDraftService {
         
         // Store in cache for future use (store normalized data)
         console.log(`💾 Storing recipe in cache with ${normalizedIngredients.length} normalized ingredients and ${normalizedInstructions.length} instructions`);
+        // Transform nutrition to standardized format with micronutrients
+        const NutritionMappingService = (await import('./nutritionMappingService')).NutritionMappingService;
+        let nutritionDetails: any = {};
+        
+        if ((recipeDetails as any).nutrition) {
+          // Use the nutrition object from the API response
+          if (source === 'edamam') {
+            nutritionDetails = NutritionMappingService.transformEdamamNutrition((recipeDetails as any).nutrition);
+          } else if (source === 'spoonacular') {
+            nutritionDetails = NutritionMappingService.transformSpoonacularNutrition((recipeDetails as any).nutrition);
+          }
+          console.log(`  💾 Caching with micronutrients: ${Object.keys(nutritionDetails.micros?.vitamins || {}).length} vitamins, ${Object.keys(nutritionDetails.micros?.minerals || {}).length} minerals`);
+        } else {
+          console.warn(`  ⚠️ No nutrition data in API response, caching with empty nutritionDetails`);
+        }
+        
         await cacheService.storeRecipe({
           provider: source,
           externalRecipeId: recipeId,
@@ -433,13 +449,14 @@ export class MealPlanDraftService {
           fiberPerServingG: recipeDetails.fiber,
           ingredients: normalizedIngredients,
           cookingInstructions: normalizedInstructions,
+          nutritionDetails: nutritionDetails,  // ✅ Now saving full nutrition with micros!
           healthLabels: recipeDetails.healthLabels,
           dietLabels: recipeDetails.dietLabels,
           cuisineTypes: recipeDetails.cuisineType,
           dishTypes: recipeDetails.dishType,
           mealTypes: recipeDetails.mealType,
           originalApiResponse: recipeDetails,
-          hasCompleteNutrition: recipeDetails.calories > 0 && recipeDetails.protein > 0,
+          hasCompleteNutrition: Object.keys(nutritionDetails.macros || {}).length > 0,
           hasDetailedIngredients: recipeDetails.ingredients && recipeDetails.ingredients.length > 0,
           hasCookingInstructions: normalizedInstructions.length > 0,
           dataQualityScore: 80
@@ -548,32 +565,32 @@ export class MealPlanDraftService {
       console.log('🔧 Applying ingredient modifications...');
       
       for (const mod of customizations.modifications) {
-        if (mod.type === 'omit' && mod.originalIngredient) {
+        if (mod.type === 'omit' && (mod as any).originalIngredient) {
           // REMOVE the ingredient from the list
           const originalCount = recipe.ingredients.length;
           recipe.ingredients = recipe.ingredients.filter((ing: any) => {
             const ingName = ing.name?.toLowerCase() || ing.food?.toLowerCase() || '';
-            const targetName = mod.originalIngredient.toLowerCase();
+            const targetName = (mod as any).originalIngredient.toLowerCase();
             return !ingName.includes(targetName) && !targetName.includes(ingName);
           });
-          console.log(`  🚫 Omitted "${mod.originalIngredient}" (${originalCount} → ${recipe.ingredients.length} ingredients)`);
+          console.log(`  🚫 Omitted "${(mod as any).originalIngredient}" (${originalCount} → ${recipe.ingredients.length} ingredients)`);
         } 
         else if (mod.type === 'add' && mod.newIngredient) {
           // ADD the new ingredient to the list
           recipe.ingredients.push({
             name: mod.newIngredient,
-            amount: mod.amount || null,
-            unit: mod.unit || null,
-            original: `${mod.amount || ''} ${mod.unit || ''} ${mod.newIngredient}`.trim()
+            amount: (mod as any).amount || null,
+            unit: (mod as any).unit || null,
+            original: `${(mod as any).amount || ''} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim()
           });
           console.log(`  ➕ Added "${mod.newIngredient}" (${recipe.ingredients.length} ingredients)`);
         }
-        else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
+        else if (mod.type === 'replace' && (mod as any).originalIngredient && mod.newIngredient) {
           // REPLACE: find and update the ingredient in place
           let replaced = false;
           recipe.ingredients = recipe.ingredients.map((ing: any) => {
             const ingName = ing.name?.toLowerCase() || ing.food?.toLowerCase() || '';
-            const targetName = mod.originalIngredient.toLowerCase();
+            const targetName = (mod as any).originalIngredient.toLowerCase();
             
             if ((ingName.includes(targetName) || targetName.includes(ingName)) && !replaced) {
               replaced = true;
@@ -581,9 +598,9 @@ export class MealPlanDraftService {
               return {
                 ...ing,
                 name: mod.newIngredient,
-                amount: mod.amount || ing.amount,
-                unit: mod.unit || ing.unit,
-                original: `${mod.amount || ing.amount || ''} ${mod.unit || ing.unit || ''} ${mod.newIngredient}`.trim()
+                amount: (mod as any).amount || ing.amount,
+                unit: (mod as any).unit || ing.unit,
+                original: `${(mod as any).amount || ing.amount || ''} ${(mod as any).unit || ing.unit || ''} ${mod.newIngredient}`.trim()
               };
             }
             return ing;

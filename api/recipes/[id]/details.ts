@@ -43,6 +43,44 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Standardize the cached recipe response
         const standardizedRecipe = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
         
+        // Check if nutritionDetails is empty and extract from originalApiResponse
+        const hasNutritionData = standardizedRecipe.nutritionDetails && 
+                                  (standardizedRecipe.nutritionDetails.calories?.quantity > 0 || 
+                                   Object.keys(standardizedRecipe.nutritionDetails.macros || {}).length > 0);
+        
+        if (!hasNutritionData && standardizedRecipe.originalApiResponse) {
+          console.log('⚠️ nutritionDetails empty, extracting from originalApiResponse');
+          const NutritionMappingService = (await import('../../../lib/nutritionMappingService')).NutritionMappingService;
+          const originalResponse = standardizedRecipe.originalApiResponse;
+          
+          // Try different formats
+          if (originalResponse.nutrition) {
+            // Spoonacular or already standardized format
+            if (originalResponse.nutrition.macros) {
+              standardizedRecipe.nutritionDetails = originalResponse.nutrition;
+              console.log('  ✅ Used nutrition from originalApiResponse (already standardized)');
+            } else {
+              // Spoonacular raw format
+              standardizedRecipe.nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(originalResponse.nutrition);
+              console.log('  ✅ Transformed Spoonacular nutrition');
+            }
+          } else if (originalResponse.totalNutrients) {
+            // Edamam format
+            standardizedRecipe.nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse);
+            console.log('  ✅ Transformed Edamam nutrition');
+          }
+          
+          // Update cache with extracted nutrition
+          if (standardizedRecipe.nutritionDetails && Object.keys(standardizedRecipe.nutritionDetails.macros || {}).length > 0) {
+            try {
+              await cacheService.updateRecipeNutrition(cachedRecipe.id, standardizedRecipe.nutritionDetails);
+              console.log('  💾 Updated cache with nutrition');
+            } catch (error) {
+              console.error('  ❌ Failed to update cache:', error);
+            }
+          }
+        }
+        
         return res.status(200).json({
           success: true,
           data: standardizedRecipe,

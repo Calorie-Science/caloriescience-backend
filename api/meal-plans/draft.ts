@@ -878,6 +878,20 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       });
     }
 
+    // MERGE with existing modifications (frontend sends one at a time)
+    if (meal && meal.customizations) {
+      const existingCustomizations = meal.customizations[recipeId];
+      if (existingCustomizations?.modifications && customizations.modifications) {
+        const existingMods = existingCustomizations.modifications;
+        const newMods = customizations.modifications;
+        
+        console.log(`🔗 Merging modifications: ${existingMods.length} existing + ${newMods.length} new`);
+        customizations.modifications = [...existingMods, ...newMods];
+        console.log(`  📝 Total modifications: ${customizations.modifications.length}`);
+        console.log(`  📋 Full list:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient} (${m.amount || '?'} ${m.unit || ''})`));
+      }
+    }
+
     // If auto-calculation is enabled and customNutrition is not provided, calculate it
     if (autoCalculateNutrition && !customizations.customNutrition) {
       console.log('🤖 Auto-calculating nutrition WITH MICRONUTRIENTS...');
@@ -1345,8 +1359,10 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         },
         cachedRecipeFound: !!cachedRecipe,
         modificationsApplied: customizations.modifications,
+        modificationsCount: customizations.modifications?.length || 0,
         source: customizations.source,
-        expectedResult: `${recipe.calories} + ~2756 = ${(recipe.calories || 0) + 2756}`
+        expectedResult: `${recipe.calories} + ~2756 = ${(recipe.calories || 0) + 2756}`,
+        allModificationTypes: customizations.modifications?.map((m: any) => m.type) || []
       }
     });
   } catch (error) {

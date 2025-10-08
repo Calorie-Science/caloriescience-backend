@@ -112,10 +112,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Extract nutrition details from cache or originalApiResponse
       let nutritionDetails = cached.nutrition_details || cached.nutritionDetails;
       
-      // If nutritionDetails is empty/null, try to extract from originalApiResponse
-      if (!nutritionDetails || Object.keys(nutritionDetails).length === 0) {
+      // If nutritionDetails is empty/null or has no actual data, try to extract from originalApiResponse
+      const hasActualNutritionData = nutritionDetails && (
+        (nutritionDetails.calories && nutritionDetails.calories.quantity > 0) ||
+        (nutritionDetails.macros && Object.keys(nutritionDetails.macros).length > 0)
+      );
+      
+      if (!hasActualNutritionData) {
         const originalResponse = cached.original_api_response || cached.originalApiResponse;
-        console.log('⚠️ nutritionDetails empty in cache, attempting to extract from originalApiResponse');
+        console.log('⚠️ nutritionDetails empty or has no data in cache, attempting to extract from originalApiResponse');
         
         if (originalResponse) {
           // Try Edamam format
@@ -124,16 +129,41 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
             nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse);
           }
-          // Try Spoonacular format
+          // Try Spoonacular format or already standardized
           else if (originalResponse.nutrition) {
-            console.log('  📊 Found Spoonacular nutrition in originalApiResponse');
-            const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
-            nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(originalResponse.nutrition);
+            // Check if already in standardized format
+            if (originalResponse.nutrition.macros || originalResponse.nutrition.calories) {
+              console.log('  📊 Found standardized nutrition in originalApiResponse');
+              nutritionDetails = originalResponse.nutrition;
+            } 
+            // Raw Spoonacular format with nutrients array
+            else if (originalResponse.nutrition.nutrients) {
+              console.log('  📊 Found raw Spoonacular nutrition in originalApiResponse');
+              const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
+              nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(originalResponse.nutrition);
+            }
+          }
+        }
+        
+        // Check again if we have actual nutrition data now
+        const hasActualDataAfterExtraction = nutritionDetails && (
+          (nutritionDetails.calories && nutritionDetails.calories.quantity > 0) ||
+          (nutritionDetails.macros && Object.keys(nutritionDetails.macros).length > 0)
+        );
+        
+        // If we successfully extracted nutrition from originalApiResponse, update the cache
+        if (hasActualDataAfterExtraction && cached.id) {
+          try {
+            console.log('  💾 Updating cache with extracted nutrition from originalApiResponse...');
+            await cacheService.updateRecipeNutrition(cached.id, nutritionDetails);
+            console.log('  ✅ Cache updated successfully');
+          } catch (error) {
+            console.error('  ❌ Failed to update cache:', error);
           }
         }
         
         // If still no nutritionDetails, fetch from API
-        if (!nutritionDetails || Object.keys(nutritionDetails).length === 0) {
+        if (!hasActualDataAfterExtraction) {
           console.log('  🔄 Fetching full nutrition from API...');
           const freshRecipeDetails = await multiProviderService.getRecipeDetails(validatedRecipeId);
           if (freshRecipeDetails && freshRecipeDetails.nutrition) {
