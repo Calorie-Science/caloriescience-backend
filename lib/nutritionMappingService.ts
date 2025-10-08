@@ -255,6 +255,43 @@ export class NutritionMappingService {
   }
 
   /**
+   * Transform Spoonacular INGREDIENT nutrition data to standardized format
+   * Handles the response from /recipes/parseIngredients endpoint
+   */
+  static transformSpoonacularIngredientNutrition(ingredientData: any): StandardizedNutrition {
+    // The ingredient data from parseIngredients has this structure:
+    // { calories, protein, carbs, fat, fiber, rawData: { nutrition: { nutrients: [...] } } }
+    
+    if (!ingredientData) {
+      return {
+        calories: { quantity: 0, unit: 'kcal' },
+        macros: {},
+        micros: { vitamins: {}, minerals: {} }
+      };
+    }
+    
+    // If rawData.nutrition exists, use the full nutrient data
+    if (ingredientData.rawData?.nutrition) {
+      return this.transformSpoonacularNutrition(ingredientData.rawData.nutrition);
+    }
+    
+    // Otherwise, fallback to the simplified format
+    return {
+      calories: { quantity: ingredientData.calories || 0, unit: 'kcal' },
+      macros: {
+        protein: { quantity: ingredientData.protein || 0, unit: 'g' },
+        carbs: { quantity: ingredientData.carbs || 0, unit: 'g' },
+        fat: { quantity: ingredientData.fat || 0, unit: 'g' },
+        fiber: { quantity: ingredientData.fiber || 0, unit: 'g' }
+      },
+      micros: {
+        vitamins: {},
+        minerals: {}
+      }
+    };
+  }
+
+  /**
    * Add two nutrition objects together
    */
   static addNutrition(base: StandardizedNutrition, toAdd: StandardizedNutrition): StandardizedNutrition {

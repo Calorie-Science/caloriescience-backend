@@ -479,6 +479,33 @@ export class RecipeCacheService {
   }
   
   /**
+   * Update nutrition details for a cached recipe
+   */
+  async updateRecipeNutrition(recipeId: string, nutritionDetails: any): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('cached_recipes')
+        .update({
+          nutrition_details: nutritionDetails,
+          has_complete_nutrition: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', recipeId);
+
+      if (error) {
+        console.error('Update recipe nutrition error:', error);
+        return false;
+      }
+
+      console.log(`✅ Updated nutrition for recipe ${recipeId}`);
+      return true;
+    } catch (error) {
+      console.error('Update recipe nutrition error:', error);
+      return false;
+    }
+  }
+  
+  /**
    * Get cache statistics
    */
   async getCacheStats(): Promise<any> {

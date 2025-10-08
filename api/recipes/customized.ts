@@ -109,6 +109,58 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Supabase returns snake_case from DB, need to access correctly
       const cached = cachedRecipe as any;
       // Use the exact same structure as recipe details API
+      // Extract nutrition details from cache or originalApiResponse
+      let nutritionDetails = cached.nutrition_details || cached.nutritionDetails;
+      
+      // If nutritionDetails is empty/null, try to extract from originalApiResponse
+      if (!nutritionDetails || Object.keys(nutritionDetails).length === 0) {
+        const originalResponse = cached.original_api_response || cached.originalApiResponse;
+        console.log('⚠️ nutritionDetails empty in cache, attempting to extract from originalApiResponse');
+        
+        if (originalResponse) {
+          // Try Edamam format
+          if (originalResponse.totalNutrients) {
+            console.log('  📊 Found Edamam totalNutrients in originalApiResponse');
+            const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
+            nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse);
+          }
+          // Try Spoonacular format
+          else if (originalResponse.nutrition) {
+            console.log('  📊 Found Spoonacular nutrition in originalApiResponse');
+            const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
+            nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(originalResponse.nutrition);
+          }
+        }
+        
+        // If still no nutritionDetails, fetch from API
+        if (!nutritionDetails || Object.keys(nutritionDetails).length === 0) {
+          console.log('  🔄 Fetching full nutrition from API...');
+          const freshRecipeDetails = await multiProviderService.getRecipeDetails(validatedRecipeId);
+          if (freshRecipeDetails && freshRecipeDetails.nutrition) {
+            console.log('  ✅ Got fresh nutrition from API');
+            const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
+            
+            // Transform based on source
+            if (source === 'edamam' && freshRecipeDetails.nutrition.totalNutrients) {
+              nutritionDetails = NutritionMappingService.transformEdamamNutrition(freshRecipeDetails.nutrition);
+            } else if (source === 'spoonacular') {
+              nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(freshRecipeDetails.nutrition);
+            }
+            
+            // Update cache with new nutrition details
+            if (nutritionDetails && cached.id) {
+              try {
+                console.log('  💾 Updating cache with nutrition details...');
+                await cacheService.updateRecipeNutrition(cached.id, nutritionDetails);
+                console.log('  ✅ Cache updated successfully');
+              } catch (error) {
+                console.error('  ❌ Failed to update cache:', error);
+              }
+            }
+          }
+        }
+      }
+      
       baseRecipe = {
         id: cached.id,
         provider: cached.provider,
@@ -145,7 +197,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         ingredients: cached.ingredients || [],
         ingredientLines: cached.ingredient_lines || cached.ingredientLines || [],
         cookingInstructions: cached.cooking_instructions || cached.cookingInstructions || [],
-        nutritionDetails: cached.nutrition_details || cached.nutritionDetails || {},
+        nutritionDetails: nutritionDetails || {},
         originalApiResponse: cached.original_api_response || cached.originalApiResponse || {},
         cacheStatus: cached.cache_status || cached.cacheStatus,
         apiFetchCount: cached.api_fetch_count || cached.apiFetchCount,
@@ -223,12 +275,67 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       };
     }
 
+    // Helper function to get ingredient image URL from Spoonacular
+    const getIngredientImage = async (ingredientName: string): Promise<string> => {
+      try {
+        const multiProviderService = new (await import('../../lib/multiProviderRecipeSearchService')).MultiProviderRecipeSearchService();
+        const ingredientData = await multiProviderService.getIngredientNutrition(`1 ${ingredientName}`);
+        if (ingredientData?.rawData?.image) {
+          const image = ingredientData.rawData.image;
+          // Spoonacular returns just the filename, need to add CDN URL
+          if (image && !image.startsWith('http')) {
+            return `https://spoonacular.com/cdn/ingredients_100x100/${image}`;
+          }
+          return image;
+        }
+      } catch (error) {
+        console.log(`  ⚠️ Could not fetch image for ${ingredientName}`);
+      }
+      // Return empty string - frontend can show a placeholder
+      return '';
+    };
+    
     // Step 4: Check if there are customizations for this recipe
     const customizations = meal.customizations?.[validatedRecipeId];
     
     if (!customizations || !customizations.customizationsApplied) {
       // No customizations, return base recipe with same structure
       console.log('ℹ️ No customizations found, returning base recipe');
+      
+      // Format ingredients with proper image URLs even for non-customized recipes
+      baseRecipe.ingredients = baseRecipe.ingredients?.map((ing: any) => ({
+        id: ing.id,
+        name: ing.name || ing.food,
+        unit: ing.unit || '',
+        amount: ing.amount || 0,
+        image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
+        originalString: ing.original || ing.originalString || '',
+        aisle: ing.aisle || '',
+        meta: ing.meta || [],
+        measures: ing.measures || {
+          us: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' },
+          metric: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' }
+        }
+      })) || [];
+      
+      // Normalize cookingInstructions to array of objects with number and step
+      if (baseRecipe.cookingInstructions && Array.isArray(baseRecipe.cookingInstructions)) {
+        baseRecipe.cookingInstructions = baseRecipe.cookingInstructions.map((instruction: any, index: number) => {
+          // If it's already an object with step, return as is
+          if (typeof instruction === 'object' && instruction.step) {
+            return instruction;
+          }
+          // If it's a string, convert to object format
+          if (typeof instruction === 'string') {
+            return {
+              number: index + 1,
+              step: instruction
+            };
+          }
+          return instruction;
+        });
+      }
+      
       return res.status(200).json({
         success: true,
         data: baseRecipe,
@@ -237,7 +344,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         message: fromCache ? 'Recipe retrieved from cache (no customizations)' : 'Recipe fetched from API (no customizations)'
       });
     }
-
+    
     // Step 5: Apply customizations to create a new customized recipe
     console.log('🔧 Applying customizations...');
     const customizedRecipe = JSON.parse(JSON.stringify(baseRecipe)); // Deep clone
@@ -258,37 +365,63 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           console.log(`  🚫 Omitted "${mod.originalIngredient}" (${originalCount} → ${customizedRecipe.ingredients.length} ingredients)`);
         } 
         else if (mod.type === 'add' && mod.newIngredient) {
+          // Fetch ingredient image if not provided
+          const ingredientImage = (mod as any).image || await getIngredientImage(mod.newIngredient);
+          
           // Add new ingredient
           customizedRecipe.ingredients.push({
             name: mod.newIngredient,
             amount: (mod as any).amount || null,
             unit: (mod as any).unit || null,
+            image: ingredientImage,
             original: `${(mod as any).amount || ''} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim()
           });
-          console.log(`  ➕ Added "${mod.newIngredient}" (${customizedRecipe.ingredients.length} ingredients)`);
+          console.log(`  ➕ Added "${mod.newIngredient}" with image: ${ingredientImage ? '✅' : '❌'} (${customizedRecipe.ingredients.length} ingredients)`);
         }
         else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
           // Replace ingredient
           let replaced = false;
-          customizedRecipe.ingredients = customizedRecipe.ingredients.map((ing: any) => {
+          customizedRecipe.ingredients = await Promise.all(customizedRecipe.ingredients.map(async (ing: any) => {
             const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
             const targetName = mod.originalIngredient.toLowerCase();
             
             if ((ingName.includes(targetName) || targetName.includes(ingName)) && !replaced) {
               replaced = true;
-              console.log(`  🔄 Replaced "${ing.name || ing.food}" with "${mod.newIngredient}"`);
+              // Fetch new ingredient image if not provided
+              const newImage = (mod as any).image || ing.image || await getIngredientImage(mod.newIngredient);
+              
+              console.log(`  🔄 Replaced "${ing.name || ing.food}" with "${mod.newIngredient}" (image: ${newImage ? '✅' : '❌'})`);
               return {
                 ...ing,
                 name: mod.newIngredient,
                 amount: (mod as any).amount || ing.amount,
                 unit: (mod as any).unit || ing.unit,
+                image: newImage,
                 original: `${(mod as any).amount || ing.amount || ''} ${(mod as any).unit || ing.unit || ''} ${mod.newIngredient}`.trim()
               };
             }
             return ing;
-          });
+          }));
         }
       }
+    }
+    
+    // Normalize cookingInstructions to array of objects with number and step
+    if (customizedRecipe.cookingInstructions && Array.isArray(customizedRecipe.cookingInstructions)) {
+      customizedRecipe.cookingInstructions = customizedRecipe.cookingInstructions.map((instruction: any, index: number) => {
+        // If it's already an object with step, return as is
+        if (typeof instruction === 'object' && instruction.step) {
+          return instruction;
+        }
+        // If it's a string, convert to object format
+        if (typeof instruction === 'string') {
+          return {
+            number: index + 1,
+            step: instruction
+          };
+        }
+        return instruction;
+      });
     }
 
     // Step 6: Apply custom nutrition if provided
@@ -539,4 +672,5 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 }
 
 export default requireAuth(handler);
+
 

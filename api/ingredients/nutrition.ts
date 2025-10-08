@@ -41,7 +41,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     const validSources = ['edamam', 'spoonacular'];
     const finalSource = source && typeof source === 'string' && validSources.includes(source)
       ? source as 'edamam' | 'spoonacular'
-      : 'edamam';
+      : 'spoonacular'; // Default to Spoonacular for more accurate portion sizes
 
     // Build ingredient text with amount and unit if provided
     let ingredientText = ingredient.trim();
