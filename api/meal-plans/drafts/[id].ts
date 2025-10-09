@@ -65,9 +65,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Process each meal
         await Promise.all(
           Object.entries(day.meals || {}).map(async ([mealName, meal]: [string, any]) => {
-            const selectedRecipe = meal.selectedRecipeId 
-              ? meal.recipes.find((r: any) => r.id === meal.selectedRecipeId)
-              : null;
+            // Find selected recipe in all available recipes (not just current page)
+            let selectedRecipe = null;
+            if (meal.selectedRecipeId) {
+              // First try current page recipes
+              selectedRecipe = meal.recipes.find((r: any) => r.id === meal.selectedRecipeId);
+              
+              // If not found in current page, search in allRecipes (pagination storage)
+              if (!selectedRecipe && meal.allRecipes) {
+                const allRecipesCombined = [
+                  ...(meal.allRecipes.edamam || []),
+                  ...(meal.allRecipes.spoonacular || [])
+                ];
+                selectedRecipe = allRecipesCombined.find((r: any) => r.id === meal.selectedRecipeId);
+              }
+            }
 
             if (!selectedRecipe) {
               detailedMeals[mealName] = {
@@ -170,16 +182,96 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             } else {
               // Use base nutrition from recipe (no customizations)
               console.log(`📊 Using base nutrition from recipe`);
+              
+              // Check if cached recipe has 0 values and needs updating
+              const cachedHasZeroValues = standardizedRecipe && (
+                parseFloat(standardizedRecipe.caloriesPerServing || '0') === 0 ||
+                parseFloat(standardizedRecipe.proteinPerServingG || '0') === 0
+              );
+              
+              const draftHasValidNutrition = 
+                (selectedRecipe.calories && selectedRecipe.calories > 0) ||
+                (selectedRecipe.nutrition?.calories?.quantity && selectedRecipe.nutrition.calories.quantity > 0) ||
+                (selectedRecipe.nutrition?.macros?.protein?.quantity && selectedRecipe.nutrition.macros.protein.quantity > 0);
+              
+              if (cachedHasZeroValues && draftHasValidNutrition && standardizedRecipe.id) {
+                console.log(`⚠️ Cached recipe ${standardizedRecipe.id} has 0 values but draft has valid nutrition. Updating cache...`);
+                
+                // Extract nutrition from draft recipe
+                const calories = selectedRecipe.calories || selectedRecipe.nutrition?.calories?.quantity || 0;
+                const protein = selectedRecipe.protein || selectedRecipe.nutrition?.macros?.protein?.quantity || 0;
+                const carbs = selectedRecipe.carbs || selectedRecipe.nutrition?.macros?.carbs?.quantity || 0;
+                const fat = selectedRecipe.fat || selectedRecipe.nutrition?.macros?.fat?.quantity || 0;
+                const fiber = selectedRecipe.fiber || selectedRecipe.nutrition?.macros?.fiber?.quantity || 0;
+                
+                // Update cache with correct values
+                try {
+                  await cacheService.updateRecipe(standardizedRecipe.id, {
+                    caloriesPerServing: calories,
+                    proteinPerServingG: protein,
+                    carbsPerServingG: carbs,
+                    fatPerServingG: fat,
+                    fiberPerServingG: fiber
+                  } as any);
+                  console.log(`✅ Cache updated successfully for recipe ${standardizedRecipe.id}`);
+                  
+                  // Update standardizedRecipe in memory so we use correct values
+                  standardizedRecipe.caloriesPerServing = calories.toString();
+                  standardizedRecipe.proteinPerServingG = protein.toString();
+                  standardizedRecipe.carbsPerServingG = carbs.toString();
+                  standardizedRecipe.fatPerServingG = fat.toString();
+                  standardizedRecipe.fiberPerServingG = fiber.toString();
+                } catch (error) {
+                  console.error(`❌ Failed to update cache for recipe ${standardizedRecipe.id}:`, error);
+                }
+              }
+              
+              // Helper function to safely get numeric value
+              const getNumericValue = (...values: any[]): number => {
+                for (const val of values) {
+                  if (val !== null && val !== undefined && val !== '') {
+                    const num = typeof val === 'number' ? val : parseFloat(val);
+                    // Skip if it's 0 and we have more values to check (cached bad data)
+                    if (!isNaN(num) && num > 0) {
+                      return num;
+                    }
+                  }
+                }
+                // If all values are 0 or invalid, return 0 as last resort
+                return 0;
+              };
+              
               detailedNutrition.macros = {
-                calories: parseFloat(standardizedRecipe?.caloriesPerServing || selectedRecipe.calories || selectedRecipe.nutrition?.calories || '0'),
-                protein: parseFloat(standardizedRecipe?.proteinPerServingG || selectedRecipe.protein || selectedRecipe.nutrition?.protein || '0'),
-                carbs: parseFloat(standardizedRecipe?.carbsPerServingG || selectedRecipe.carbs || selectedRecipe.nutrition?.carbs || '0'),
-                fat: parseFloat(standardizedRecipe?.fatPerServingG || selectedRecipe.fat || selectedRecipe.nutrition?.fat || '0'),
-                fiber: parseFloat(standardizedRecipe?.fiberPerServingG || selectedRecipe.fiber || selectedRecipe.nutrition?.fiber || '0'),
-                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : null,
-                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : null,
-                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
-                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
+                calories: getNumericValue(
+                  standardizedRecipe?.caloriesPerServing,
+                  selectedRecipe.calories,
+                  selectedRecipe.nutrition?.calories?.quantity,
+                  selectedRecipe.nutrition?.macros?.calories?.quantity
+                ),
+                protein: getNumericValue(
+                  standardizedRecipe?.proteinPerServingG,
+                  selectedRecipe.protein,
+                  selectedRecipe.nutrition?.macros?.protein?.quantity
+                ),
+                carbs: getNumericValue(
+                  standardizedRecipe?.carbsPerServingG,
+                  selectedRecipe.carbs,
+                  selectedRecipe.nutrition?.macros?.carbs?.quantity
+                ),
+                fat: getNumericValue(
+                  standardizedRecipe?.fatPerServingG,
+                  selectedRecipe.fat,
+                  selectedRecipe.nutrition?.macros?.fat?.quantity
+                ),
+                fiber: getNumericValue(
+                  standardizedRecipe?.fiberPerServingG,
+                  selectedRecipe.fiber,
+                  selectedRecipe.nutrition?.macros?.fiber?.quantity
+                ),
+                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : (selectedRecipe.nutrition?.macros?.sugar?.quantity || null),
+                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : (selectedRecipe.nutrition?.macros?.sodium?.quantity || null),
+                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || selectedRecipe.nutrition?.macros?.saturatedFat?.quantity || null,
+                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || selectedRecipe.nutrition?.macros?.cholesterol?.quantity || null
               };
               
               // Extract micronutrients from cache

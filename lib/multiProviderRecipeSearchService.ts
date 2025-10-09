@@ -383,7 +383,8 @@ export class MultiProviderRecipeSearchService {
       calories: params.calories,
       time: params.time,
       excluded: params.excluded,
-      random: true
+      random: true,
+      type: ['public'] // Only get public recipes, exclude user-generated content
     };
   }
 

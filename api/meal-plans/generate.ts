@@ -59,7 +59,7 @@ const mealPlanGenerationSchema = Joi.object({
         mealOrder: Joi.number().integer().min(1).required(),
         mealName: Joi.string().required(),
         mealTime: Joi.string().pattern(/^\d{2}:\d{2}$/).required(),
-        targetCalories: Joi.number().min(0).max(2000).required(),
+        targetCalories: Joi.number().min(0).max(5000).required(),
         mealType: Joi.string().required()
       })
     ).required()
@@ -574,7 +574,8 @@ async function fetchAllMealSuggestions(
   console.log(`🔄 Fetching suggestions for meal types: ${mealTypesToFetch.join(', ')}`);
   
   // Calculate how many recipes we need per meal type
-  const recipesPerMealType = Math.max(3, days * 3); // At least 3, or 3 per day
+  // Fetch 18 recipes per provider (36 total per meal) to enable pagination
+  const recipesPerMealType = Math.max(18, days * 3); // At least 18, or 3 per day
   console.log(`🔍 Fetching ${recipesPerMealType} recipes per meal type for ${days} day(s)`);
   
   for (const mealType of mealTypesToFetch) {
@@ -752,9 +753,13 @@ async function getRecipesFromProvider(
       );
     
     // Build search parameters - use different intolerance lists for each provider
+    // Add dishType to filter out random/user-generated recipes
+    const dishTypes = getDishTypesForMeal(mealType);
+    
     const searchParams = {
       query: getMealTypeKeywords(mealType),
       mealType: [mealType],
+      dishType: dishTypes, // Filter to get proper main courses, not random user recipes
       calories: `${Math.round(targets.calories * 0.8)}-${Math.round(targets.calories * 1.2)}`,
       health: provider === 'edamam' ? healthLabels : spoonacularIntolerances,
       diet: validDiets,
@@ -777,9 +782,25 @@ async function getRecipesFromProvider(
       return { recipes: [], searchParams };
     }
 
+    // Filter out low-quality/user-generated recipes based on title patterns
+    const filteredRecipes = results.recipes.filter(recipe => {
+      const title = recipe.title.toLowerCase();
+      // Filter out recipes with common user-generated patterns
+      const badPatterns = [
+        'my ', 'my wife', 'my husband', 'my mom', 'my dad', 'my grandmother',
+        'my recipe', 'my favorite', 'mom\'s', 'dad\'s', 'grandma\'s',
+        'leftover', 'leftovers', 'scrap', 'scraps', 'whatever',
+        'recipes', // Usually "My X recipes" collections
+        'untitled', 'unnamed'
+      ];
+      return !badPatterns.some(pattern => title.includes(pattern));
+    });
+    
+    console.log(`🔍 Filtered ${results.recipes.length - filteredRecipes.length} low-quality recipes, ${filteredRecipes.length} remaining`);
+    
     // Convert search results to RecipeSuggestion format and enrich with cached data
     const recipeSuggestions: RecipeSuggestion[] = await Promise.all(
-      results.recipes.slice(0, count).map(async (recipe) => {
+      filteredRecipes.slice(0, count).map(async (recipe) => {
         // Try to get detailed recipe data from cache
         const cachedRecipe = await cacheService.getRecipeByExternalId(
           provider as 'edamam' | 'spoonacular', 
@@ -855,7 +876,7 @@ function generateMealSuggestionsFromCache(
     };
   }
 
-  // Randomly select 3 from Edamam and 3 from Spoonacular (from the 15 available)
+  // Randomly select 3 from Edamam and 3 from Spoonacular (from the 18 available)
   const edamamSelection = shuffleArray(suggestions.edamam).slice(0, 3);
   const spoonacularSelection = shuffleArray(suggestions.spoonacular).slice(0, 3);
   
@@ -976,6 +997,20 @@ function getMealTypeKeywords(mealType: string): string {
     snack: 'snack'
   };
   return keywords[mealType as keyof typeof keywords] || mealType;
+}
+
+function getDishTypesForMeal(mealType: string): string[] {
+  // Map meal types to appropriate dish types to filter out random/user recipes
+  // Edamam dishType enum values: Biscuits and cookies, Bread, Cereals, Condiments and sauces, 
+  // Desserts, Drinks, Main course, Pancake, Preps, Preserve, Salad, Sandwiches, 
+  // Side dish, Soup, Starter, Sweets
+  const dishTypeMap: { [key: string]: string[] } = {
+    breakfast: ['Cereals', 'Pancake', 'Bread', 'Main course'],
+    lunch: ['Main course', 'Salad', 'Soup', 'Sandwiches'],
+    dinner: ['Main course', 'Soup', 'Salad'],
+    snack: ['Starter', 'Salad', 'Biscuits and cookies']
+  };
+  return dishTypeMap[mealType] || ['Main course'];
 }
 
 function shuffleArray<T>(array: T[]): T[] {

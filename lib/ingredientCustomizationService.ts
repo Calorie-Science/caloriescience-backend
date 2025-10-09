@@ -166,32 +166,76 @@ export class IngredientCustomizationService {
             const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
             const oldUnit = (modification as any).originalUnit || newUnit;
             
-            const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
-            const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
+            // OPTIMIZATION: If it's the same ingredient, just quantity changed, use linear scaling
+            const sameIngredient = modification.originalIngredient.toLowerCase().trim() === modification.newIngredient.toLowerCase().trim();
+            const sameUnit = oldUnit.toLowerCase() === newUnit.toLowerCase();
             
-            // Get nutrition data for both ingredients from Spoonacular
-            console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
-            const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
-            console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
-            const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+            let quantityChangeApplied = false;
             
-            if (oldNutritionData && newNutritionData) {
-              // Transform to standardized format with full micronutrient data
-              const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
-              const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+            if (sameIngredient && sameUnit && oldUnit) {
+              // Quantity-only change - use linear scaling for accuracy
+              console.log(`  📊 Same ingredient quantity change detected: ${oldAmount} → ${newAmount} ${newUnit} ${modification.originalIngredient}`);
               
-              console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-              console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
-              console.log(`     New: ${newNutrition.calories.quantity} kcal`);
-              console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+              // Fetch nutrition for 1 unit
+              const baseIngredientText = `1 ${newUnit} ${modification.newIngredient}`;
+              console.log(`  📝 Fetching nutrition for base unit: "${baseIngredientText}" (Spoonacular)`);
+              const baseNutritionData = await this.spoonacularService.getIngredientNutrition(baseIngredientText);
               
-              // Subtract old ingredient nutrition (including micros)
-              adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
-              // Add new ingredient nutrition (including micros)
-              adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
+              if (baseNutritionData) {
+                const baseNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData);
+                
+                // Calculate delta: (newAmount - oldAmount) * baseNutrition
+                const amountDelta = newAmount - oldAmount;
+                console.log(`  📐 Amount delta: ${oldAmount} → ${newAmount} = ${amountDelta} ${newUnit}`);
+                console.log(`  📊 Base nutrition (per ${newUnit}): ${baseNutrition.calories.quantity} kcal`);
+                
+                // Scale the base nutrition by the delta
+                const deltaNutrition = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
+                console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}): ${deltaNutrition.calories.quantity} kcal`);
+                
+                // Add the delta to original nutrition
+                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, deltaNutrition);
+                
+                console.log(`  ✅ Applied quantity change using linear scaling`);
+                console.log(`     Result: ${adjustedNutrition.calories.quantity} kcal`);
+                
+                appliedModifications.push(modification);
+                micronutrientsTracked = true;
+                quantityChangeApplied = true;
+              } else {
+                console.warn(`  ⚠️ Could not fetch base nutrition, falling back to full ingredient fetch`);
+              }
+            }
+            
+            // Fallback or different ingredient replacement
+            if (!quantityChangeApplied) {
+              const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+              const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
               
-              appliedModifications.push(modification);
-              micronutrientsTracked = true;
+              // Get nutrition data for both ingredients from Spoonacular
+              console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
+              const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
+              console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
+              const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+              
+              if (oldNutritionData && newNutritionData) {
+                // Transform to standardized format with full micronutrient data
+                const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
+                const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+                
+                console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
+                console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
+                console.log(`     New: ${newNutrition.calories.quantity} kcal`);
+                console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+                
+                // Subtract old ingredient nutrition (including micros)
+                adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
+                // Add new ingredient nutrition (including micros)
+                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
+                
+                appliedModifications.push(modification);
+                micronutrientsTracked = true;
+              }
             }
           }
           break;
@@ -361,29 +405,73 @@ export class IngredientCustomizationService {
               const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
               const oldUnit = (modification as any).originalUnit || newUnit;
               
-              const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
-              const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
+              // OPTIMIZATION: If it's the same ingredient, just quantity changed, use linear scaling
+              const sameIngredient = modification.originalIngredient.toLowerCase().trim() === modification.newIngredient.toLowerCase().trim();
+              const sameUnit = oldUnit.toLowerCase() === newUnit.toLowerCase();
               
-              // Use Spoonacular for ingredient nutrition
-              console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
-              const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
-              console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
-              const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+              let quantityChangeApplied = false;
               
-              if (oldNutritionData && newNutritionData) {
-                const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
-                const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+              if (sameIngredient && sameUnit && oldUnit) {
+                // Quantity-only change - use linear scaling for accuracy
+                console.log(`  📊 Same ingredient quantity change detected: ${oldAmount} → ${newAmount} ${newUnit} ${modification.originalIngredient}`);
                 
-                console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-                console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
-                console.log(`     New: ${newNutrition.calories.quantity} kcal`);
-                console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+                // Fetch nutrition for 1 unit
+                const baseIngredientText = `1 ${newUnit} ${modification.newIngredient}`;
+                console.log(`  📝 Fetching nutrition for base unit: "${baseIngredientText}" (Spoonacular)`);
+                const baseNutritionData = await this.spoonacularService.getIngredientNutrition(baseIngredientText);
                 
-                adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
-                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
+                if (baseNutritionData) {
+                  const baseNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData);
+                  
+                  // Calculate delta: (newAmount - oldAmount) * baseNutrition
+                  const amountDelta = newAmount - oldAmount;
+                  console.log(`  📐 Amount delta: ${oldAmount} → ${newAmount} = ${amountDelta} ${newUnit}`);
+                  console.log(`  📊 Base nutrition (per ${newUnit}): ${baseNutrition.calories.quantity} kcal`);
+                  
+                  // Scale the base nutrition by the delta
+                  const deltaNutrition = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
+                  console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}): ${deltaNutrition.calories.quantity} kcal`);
+                  
+                  // Add the delta to original nutrition
+                  adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, deltaNutrition);
+                  
+                  console.log(`  ✅ Applied quantity change using linear scaling`);
+                  console.log(`     Result: ${adjustedNutrition.calories.quantity} kcal`);
+                  
+                  appliedModifications.push(modification);
+                  micronutrientsTracked = true;
+                  quantityChangeApplied = true;
+                } else {
+                  console.warn(`  ⚠️ Could not fetch base nutrition, falling back to full ingredient fetch`);
+                }
+              }
+              
+              // Fallback or different ingredient replacement
+              if (!quantityChangeApplied) {
+                const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+                const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
                 
-                appliedModifications.push(modification);
-                micronutrientsTracked = true;
+                // Use Spoonacular for ingredient nutrition
+                console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
+                const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
+                console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
+                const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+                
+                if (oldNutritionData && newNutritionData) {
+                  const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
+                  const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+                  
+                  console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
+                  console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
+                  console.log(`     New: ${newNutrition.calories.quantity} kcal`);
+                  console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+                  
+                  adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
+                  adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
+                  
+                  appliedModifications.push(modification);
+                  micronutrientsTracked = true;
+                }
               }
             }
             break;

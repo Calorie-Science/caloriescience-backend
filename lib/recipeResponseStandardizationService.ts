@@ -311,8 +311,8 @@ export class RecipeResponseStandardizationService {
     return parsedIngredients.map(ing => {
       // Construct full image URL based on provider
       let imageUrl = ing.image;
-      if (imageUrl && provider === 'spoonacular') {
-        // Spoonacular ingredient images need base URL prefix
+      if (imageUrl && provider === 'spoonacular' && !imageUrl.startsWith('http')) {
+        // Spoonacular ingredient images need base URL prefix (only if not already a full URL)
         imageUrl = `https://spoonacular.com/cdn/ingredients_100x100/${imageUrl}`;
       }
       

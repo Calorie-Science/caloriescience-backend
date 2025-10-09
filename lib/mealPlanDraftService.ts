@@ -97,14 +97,19 @@ export interface MealPlanDraft {
     date: string;
     meals: {
       [mealType: string]: {
-        recipes: RecipeSuggestion[]; // Currently displayed recipes (3 from each provider)
-        allRecipes?: { // ALL fetched recipes for shuffling
+        recipes: RecipeSuggestion[]; // Currently displayed recipes (6 per page by default)
+        allRecipes?: { // ALL fetched recipes for pagination
           edamam: RecipeSuggestion[];
           spoonacular: RecipeSuggestion[];
         };
-        displayOffset?: { // Track which batch is currently shown
+        displayOffset?: { // Track which batch is currently shown (legacy for shuffle)
           edamam: number; // Index offset for edamam recipes (0, 3, 6, 9, 12)
           spoonacular: number; // Index offset for spoonacular recipes (0, 3, 6, 9, 12)
+        };
+        pagination?: { // Pagination info
+          currentPage: number; // Current page number (1-based)
+          totalPages: number; // Total number of pages available
+          recipesPerPage: number; // Number of recipes to show per page (default 6)
         };
         customizations: { [recipeId: string]: MealCustomization };
         selectedRecipeId?: string;
@@ -154,7 +159,7 @@ export class MealPlanDraftService {
       name: ing.name || ing.nameClean || ing.originalName,
       amount: ing.amount || 0,
       unit: ing.unit || '',
-      image: ing.image ? `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}` : undefined,
+      image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : undefined,
       original: ing.original || ing.originalString || '',
       aisle: ing.aisle,
       measures: ing.measures
@@ -1304,6 +1309,124 @@ export class MealPlanDraftService {
         edamam: stillHasMoreEdamam,
         spoonacular: stillHasMoreSpoonacular
       }
+    };
+  }
+
+  /**
+   * Change page for recipe suggestions (pagination)
+   */
+  async changePage(
+    planId: string,
+    day: number,
+    mealName: string,
+    direction: 'next' | 'prev' | 'specific',
+    pageNumber?: number
+  ): Promise<{ 
+    displayedRecipes: RecipeSuggestion[];
+    currentPage: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  }> {
+    const plan = await this.getDraft(planId);
+    if (!plan) {
+      throw new Error('Meal plan not found');
+    }
+
+    // Find the day and meal
+    const dayPlan = plan.suggestions.find((d: any) => d.day === day);
+    if (!dayPlan) {
+      throw new Error(`Day ${day} not found in meal plan`);
+    }
+
+    const meal = dayPlan.meals[mealName];
+    if (!meal) {
+      throw new Error(`Meal ${mealName} not found for day ${day}`);
+    }
+
+    if (!meal.allRecipes) {
+      throw new Error(`No recipes available for pagination. This meal plan may have been created before the pagination feature was added.`);
+    }
+
+    // Combine all recipes from both providers
+    const allRecipesCombined = [
+      ...(meal.allRecipes.edamam || []),
+      ...(meal.allRecipes.spoonacular || [])
+    ];
+
+    const recipesPerPage = 6; // Show 6 recipes per page
+    const totalRecipes = allRecipesCombined.length;
+    const totalPages = Math.ceil(totalRecipes / recipesPerPage);
+
+    // Initialize pagination if not exists
+    if (!meal.pagination) {
+      meal.pagination = {
+        currentPage: 1,
+        totalPages: totalPages,
+        recipesPerPage: recipesPerPage
+      };
+    }
+
+    // Determine the target page
+    let targetPage = meal.pagination.currentPage;
+    
+    if (direction === 'next') {
+      targetPage = Math.min(meal.pagination.currentPage + 1, totalPages);
+    } else if (direction === 'prev') {
+      targetPage = Math.max(meal.pagination.currentPage - 1, 1);
+    } else if (direction === 'specific' && pageNumber) {
+      if (pageNumber < 1 || pageNumber > totalPages) {
+        throw new Error(`Invalid page number ${pageNumber}. Valid range is 1 to ${totalPages}.`);
+      }
+      targetPage = pageNumber;
+    }
+
+    // Check if we're already on the target page
+    if (targetPage === meal.pagination.currentPage && direction !== 'specific') {
+      if (direction === 'next') {
+        throw new Error(`No more pages available. You're already on the last page (${totalPages}).`);
+      } else if (direction === 'prev') {
+        throw new Error(`No previous pages available. You're already on the first page.`);
+      }
+    }
+
+    // Calculate start and end indices for the target page
+    const startIndex = (targetPage - 1) * recipesPerPage;
+    const endIndex = Math.min(startIndex + recipesPerPage, totalRecipes);
+
+    // Get recipes for the target page
+    const displayedRecipes = allRecipesCombined.slice(startIndex, endIndex);
+
+    console.log(`📄 Changing page for ${mealName}: page ${meal.pagination.currentPage} -> ${targetPage}`);
+    console.log(`   Total recipes: ${totalRecipes}, Showing: ${startIndex + 1}-${endIndex} (${displayedRecipes.length} recipes)`);
+
+    // Update the meal with new displayed recipes and pagination info
+    meal.recipes = displayedRecipes;
+    meal.pagination = {
+      currentPage: targetPage,
+      totalPages: totalPages,
+      recipesPerPage: recipesPerPage
+    };
+
+    // Update database
+    const { error } = await supabase
+      .from('meal_plan_drafts')
+      .update({
+        suggestions: plan.suggestions,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', planId);
+
+    if (error) {
+      throw new Error(`Failed to update meal plan: ${error.message}`);
+    }
+
+    return {
+      displayedRecipes,
+      currentPage: targetPage,
+      totalPages: totalPages,
+      hasNextPage: targetPage < totalPages,
+      hasPrevPage: targetPage > 1
     };
   }
 

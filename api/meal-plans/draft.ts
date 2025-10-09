@@ -129,6 +129,15 @@ const shuffleRecipesSchema = Joi.object({
   mealName: Joi.string().required()
 });
 
+const changePageSchema = Joi.object({
+  action: Joi.string().valid('change-page').required(),
+  planId: Joi.string().required(),
+  day: Joi.number().integer().min(1).required(),
+  mealName: Joi.string().required(),
+  direction: Joi.string().valid('next', 'prev', 'specific').required(),
+  pageNumber: Joi.number().integer().min(1).optional() // Required only when direction is 'specific'
+});
+
 const updateNotesSchema = Joi.object({
   action: Joi.string().valid('update-notes').required(),
   planId: Joi.string().required(),
@@ -175,6 +184,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       
       case 'shuffle-recipes':
         return await handleShuffleRecipes(req, res, user);
+      
+      case 'change-page':
+        return await handleChangePage(req, res, user);
       
       case 'update-notes':
         return await handleUpdateNotes(req, res, user);
@@ -284,7 +296,27 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                   let customizedIngredients = [...(recipe.ingredients || [])];
                   const modifications = recipeCustomizations.modifications || [];
                   
-                  for (const mod of modifications) {
+                  // DE-DUPLICATE modifications for ingredient display (keep only FIRST = most recent)
+                  let modificationsForIngredients = modifications;
+                  if (modifications.length > 1) {
+                    const dedupedMods: any[] = [];
+                    const processedIngs = new Map<string, boolean>();
+                    
+                    for (const mod of modifications) {
+                      const ingKey = (mod.originalIngredient || mod.newIngredient)?.toLowerCase().trim();
+                      if (ingKey && !processedIngs.has(ingKey)) {
+                        dedupedMods.push(mod);
+                        processedIngs.set(ingKey, true);
+                      }
+                    }
+                    
+                    if (dedupedMods.length < modifications.length) {
+                      console.log(`  ⚠️ Deduped ingredient mods: ${modifications.length} → ${dedupedMods.length}`);
+                      modificationsForIngredients = dedupedMods;
+                    }
+                  }
+                  
+                  for (const mod of modificationsForIngredients) {
                     if (mod.type === 'omit' && mod.originalIngredient) {
                       // Remove ingredient
                       const targetName = mod.originalIngredient.toLowerCase();
@@ -326,74 +358,190 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                     }
                   }
                   
-                  // RECALCULATE nutrition to ensure accuracy (don't trust saved customNutrition)
+                  // NUTRITION CALCULATION STRATEGY:
+                  // 1. If customNutrition exists with proper structure (has micros), TRUST IT - don't recalculate
+                  // 2. Only recalculate if customNutrition is missing or incomplete
                   let finalNutrition = recipe.nutrition;
                   let finalMicronutrients = recipe.micronutrients;
                   
-                  // Always recalculate if there are modifications to ensure math is correct
-                  if (modifications.length > 0) {
-                    console.log(`  🔄 RECALCULATING nutrition for ${modifications.length} modifications`);
+                  // Use the same deduplicated modifications for nutrition calculation
+                  let modificationsToUse = modificationsForIngredients;
+                  
+                  // Check if we have valid stored customNutrition
+                  const hasValidCustomNutrition = recipeCustomizations.customNutrition && 
+                                                   recipeCustomizations.customNutrition.calories &&
+                                                   recipeCustomizations.customNutrition.calories.quantity > 0;
+                  
+                  if (hasValidCustomNutrition && recipeCustomizations.customNutrition.micros) {
+                    // Use stored customNutrition (already calculated correctly)
+                    console.log(`  ✅ Using STORED customNutrition WITH micronutrients: ${recipeCustomizations.customNutrition.calories.quantity} kcal`);
+                    finalNutrition = recipeCustomizations.customNutrition;
+                    finalMicronutrients = recipeCustomizations.customNutrition.micros;
+                  } else if (modificationsToUse.length > 0) {
+                    // Only recalculate if customNutrition is missing or incomplete
+                    console.log(`  🔄 Stored customNutrition missing/incomplete, RECALCULATING for ${modificationsToUse.length} modifications`);
                     
-                    // Get original nutrition
-                    let originalNutrition = {
-                      calories: { quantity: recipe.calories || 0, unit: 'kcal' },
-                      macros: {
-                        protein: { quantity: recipe.protein || 0, unit: 'g' },
-                        carbs: { quantity: recipe.carbs || 0, unit: 'g' },
-                        fat: { quantity: recipe.fat || 0, unit: 'g' },
-                        fiber: { quantity: recipe.fiber || 0, unit: 'g' }
-                      },
-                      micros: { vitamins: {}, minerals: {} }
-                    };
+                    // FETCH ORIGINAL BASE RECIPE from cache/API (same as update-customizations)
+                    let originalRecipe: any = null;
+                    let originalNutritionWithMicros: any = null;
                     
-                    // If recipe.nutrition has micros, use that instead
-                    if (recipe.nutrition?.micros) {
-                      originalNutrition = recipe.nutrition;
+                    // Try cache first to get full nutrition
+                    const cachedRecipe = await cacheService.getRecipeByExternalId(recipe.source || 'edamam', recipe.id);
+                    if (cachedRecipe) {
+                      console.log('  ✅ Found original recipe in cache with micronutrients');
+                      const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
+                      originalRecipe = {
+                        id: recipe.id,
+                        ingredients: standardized.ingredients || []
+                      };
+                      
+                      // Look up original amounts from cached recipe ingredients
+                      for (const mod of modificationsToUse) {
+                        if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+                          console.log(`  🔍 Looking up original amount for: ${mod.originalIngredient} (${mod.type})`);
+                          
+                          const targetName = mod.originalIngredient.toLowerCase();
+                          const originalIng = originalRecipe.ingredients.find((ing: any) => {
+                            const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+                            return ingName.includes(targetName) || targetName.includes(ingName);
+                          });
+                          
+                          if (originalIng) {
+                            (mod as any).originalAmount = originalIng.amount || 1;
+                            (mod as any).originalUnit = originalIng.unit || '';
+                            console.log(`    ✅ Found original: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+                          } else {
+                            console.warn(`    ⚠️ Could not find "${mod.originalIngredient}" in cached recipe ingredients`);
+                            if (mod.type === 'replace') {
+                              (mod as any).originalAmount = (mod as any).amount || 1;
+                              (mod as any).originalUnit = (mod as any).unit || '';
+                            } else {
+                              (mod as any).originalAmount = 1;
+                              (mod as any).originalUnit = '';
+                            }
+                          }
+                        }
+                      }
+                      
+                      // Use the FULL nutrition details with micronutrients
+                      const hasNutritionData = standardized.nutritionDetails && 
+                                                (standardized.nutritionDetails.calories?.quantity > 0 || 
+                                                 Object.keys(standardized.nutritionDetails.macros || {}).length > 0);
+                      
+                      if (hasNutritionData) {
+                        originalNutritionWithMicros = standardized.nutritionDetails;
+                      } else {
+                        // Fallback to basic nutrition
+                        originalNutritionWithMicros = {
+                          calories: { quantity: parseFloat(cachedRecipe.calories_per_serving || cachedRecipe.caloriesPerServing || 0), unit: 'kcal' },
+                          macros: {
+                            protein: { quantity: parseFloat(cachedRecipe.protein_per_serving_g || cachedRecipe.proteinPerServingG || 0), unit: 'g' },
+                            carbs: { quantity: parseFloat(cachedRecipe.carbs_per_serving_g || cachedRecipe.carbsPerServingG || 0), unit: 'g' },
+                            fat: { quantity: parseFloat(cachedRecipe.fat_per_serving_g || cachedRecipe.fatPerServingG || 0), unit: 'g' },
+                            fiber: { quantity: parseFloat(cachedRecipe.fiber_per_serving_g || cachedRecipe.fiberPerServingG || 0), unit: 'g' }
+                          },
+                          micros: { vitamins: {}, minerals: {} }
+                        };
+                      }
+                      console.log('  📊 Original recipe nutrition from cache:', {
+                        calories: originalNutritionWithMicros.calories?.quantity,
+                        protein: originalNutritionWithMicros.macros?.protein?.quantity,
+                        vitamins: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
+                        minerals: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
+                      });
+                    } else {
+                      // If not in cache, use recipe data (might be less accurate)
+                      console.warn('  ⚠️ Could not fetch original recipe from cache, using recipe data from draft');
+                      originalRecipe = recipe;
+                      
+                      // Look up original amounts from draft recipe ingredients
+                      for (const mod of modificationsToUse) {
+                        if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+                          console.log(`  🔍 Looking up original amount from draft for: ${mod.originalIngredient}`);
+                          
+                          const targetName = mod.originalIngredient.toLowerCase();
+                          const recipeIngredients = recipe.ingredients || [];
+                          const originalIng = recipeIngredients.find((ing: any) => {
+                            const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+                            return ingName.includes(targetName) || targetName.includes(ingName);
+                          });
+                          
+                          if (originalIng) {
+                            (mod as any).originalAmount = originalIng.amount || 1;
+                            (mod as any).originalUnit = originalIng.unit || '';
+                            console.log(`    ✅ Found: ${originalIng.amount} ${originalIng.unit}`);
+                          }
+                        }
+                      }
+                      
+                      originalNutritionWithMicros = {
+                        calories: { quantity: recipe.calories || 0, unit: 'kcal' },
+                        macros: {
+                          protein: { quantity: recipe.protein || 0, unit: 'g' },
+                          carbs: { quantity: recipe.carbs || 0, unit: 'g' },
+                          fat: { quantity: recipe.fat || 0, unit: 'g' },
+                          fiber: { quantity: recipe.fiber || 0, unit: 'g' }
+                        },
+                        micros: { vitamins: {}, minerals: {} }
+                      };
                     }
                     
-                    // Recalculate with IngredientCustomizationService
+                    // Verify original nutrition has values
+                    const originalHasValues = originalNutritionWithMicros.calories?.quantity > 0 || 
+                                               originalNutritionWithMicros.macros?.protein?.quantity > 0;
+                    
+                    if (!originalHasValues) {
+                      console.warn('  ⚠️ Original nutrition is empty! This will cause incorrect calculations');
+                    }
+                    
+                    console.log('  📋 Final modifications to apply:');
+                    for (const mod of modificationsToUse) {
+                      if (mod.type === 'replace') {
+                        console.log(`    🔄 Replace: ${(mod as any).originalAmount || '?'} ${(mod as any).originalUnit || ''} ${mod.originalIngredient} → ${(mod as any).amount || '?'} ${(mod as any).unit || ''} ${mod.newIngredient}`);
+                      } else if (mod.type === 'omit') {
+                        console.log(`    🚫 Omit: ${(mod as any).originalAmount || '?'} ${(mod as any).originalUnit || ''} ${mod.originalIngredient}`);
+                      } else if (mod.type === 'add') {
+                        console.log(`    ➕ Add: ${(mod as any).amount || '?'} ${(mod as any).unit || ''} ${mod.newIngredient}`);
+                      }
+                    }
+                    
+                    // Recalculate with IngredientCustomizationService using ORIGINAL BASE NUTRITION
                     try {
                       const recalculated = await ingredientCustomizationService.applyModifications(
                         recipe.id,
                         recipe.source || 'edamam',
-                        originalNutrition,
-                        modifications,
+                        originalNutritionWithMicros,  // Use ORIGINAL BASE nutrition!
+                        modificationsToUse,  // Use deduplicated mods!
                         1
                       );
                       
                       finalNutrition = recalculated.modifiedNutrition;
                       finalMicronutrients = recalculated.modifiedNutrition.micros;
-                      console.log(`  ✅ Recalculated: ${originalNutrition.calories.quantity} → ${finalNutrition.calories.quantity} cal`);
+                      console.log(`  ✅ Recalculated: ${originalNutritionWithMicros.calories.quantity} → ${finalNutrition.calories.quantity} cal`);
                     } catch (error) {
-                      console.error(`  ❌ Recalculation failed, using saved customNutrition:`, error);
+                      console.error(`  ❌ Recalculation failed:`, error);
                       // Fallback to saved customNutrition if recalculation fails
                       if (recipeCustomizations.customNutrition) {
                         if (recipeCustomizations.customNutrition.micros) {
                           finalNutrition = recipeCustomizations.customNutrition;
                           finalMicronutrients = recipeCustomizations.customNutrition.micros;
+                          console.log(`  ⚠️ Using saved customNutrition as fallback`);
                         }
                       }
                     }
-                  } else if (recipeCustomizations.customNutrition) {
-                    // No modifications, use saved customNutrition
-                    if (recipeCustomizations.customNutrition.micros) {
-                      console.log(`  ✅ Using customized nutrition WITH micronutrients`);
-                      finalNutrition = recipeCustomizations.customNutrition;
-                      finalMicronutrients = recipeCustomizations.customNutrition.micros;
-                    } else {
-                      // Old format - just macros
-                      console.log(`  ⚠️ Using customized nutrition (macros only)`);
-                      finalNutrition = {
-                        ...recipe.nutrition,
-                        macros: {
-                          protein: { quantity: recipeCustomizations.customNutrition.protein, unit: 'g' },
-                          carbs: { quantity: recipeCustomizations.customNutrition.carbs, unit: 'g' },
-                          fat: { quantity: recipeCustomizations.customNutrition.fat, unit: 'g' },
-                          fiber: { quantity: recipeCustomizations.customNutrition.fiber, unit: 'g' }
-                        },
-                        calories: { quantity: recipeCustomizations.customNutrition.calories, unit: 'kcal' }
-                      };
-                    }
+                  } else if (hasValidCustomNutrition) {
+                    // Has customNutrition but no micros (old format)
+                    console.log(`  ⚠️ Using stored customNutrition (old format, macros only)`);
+                    finalNutrition = {
+                      ...recipe.nutrition,
+                      macros: {
+                        protein: { quantity: recipeCustomizations.customNutrition.macros?.protein?.quantity || recipeCustomizations.customNutrition.protein || 0, unit: 'g' },
+                        carbs: { quantity: recipeCustomizations.customNutrition.macros?.carbs?.quantity || recipeCustomizations.customNutrition.carbs || 0, unit: 'g' },
+                        fat: { quantity: recipeCustomizations.customNutrition.macros?.fat?.quantity || recipeCustomizations.customNutrition.fat || 0, unit: 'g' },
+                        fiber: { quantity: recipeCustomizations.customNutrition.macros?.fiber?.quantity || recipeCustomizations.customNutrition.fiber || 0, unit: 'g' }
+                      },
+                      calories: { quantity: recipeCustomizations.customNutrition.calories?.quantity || recipeCustomizations.customNutrition.calories || 0, unit: 'kcal' }
+                    };
                   }
                   
                   // Extract top-level nutrition fields from finalNutrition for UI display
@@ -419,8 +567,8 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                     micronutrients: finalMicronutrients,
                     hasCustomizations: true,
                     customizationsSummary: {
-                      modificationsCount: modifications.length,
-                      modifications: modifications.map((m: any) => ({
+                      modificationsCount: modificationsToUse.length,  // Use deduplicated count
+                      modifications: modificationsToUse.map((m: any) => ({  // Use deduplicated mods
                         type: m.type,
                         ingredient: m.type === 'omit' ? m.originalIngredient :
                                    m.type === 'add' ? m.newIngredient :
@@ -432,10 +580,29 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                 return recipe;
               }));
             
+            // Initialize pagination if not exists and allRecipes are available
+            let pagination = meal.pagination;
+            if (!pagination && meal.allRecipes) {
+              const allRecipesCombined = [
+                ...(meal.allRecipes.edamam || []),
+                ...(meal.allRecipes.spoonacular || [])
+              ];
+              const recipesPerPage = 6;
+              const totalRecipes = allRecipesCombined.length;
+              const totalPages = Math.ceil(totalRecipes / recipesPerPage);
+              
+              pagination = {
+                currentPage: 1,
+                totalPages: totalPages,
+                recipesPerPage: recipesPerPage
+              };
+            }
+
             enrichedMeals[mealName] = {
               ...meal,
               recipes: finalRecipes,
-              hasCustomizations: Object.values(mealCustomizations).some((c: any) => c?.customizationsApplied)
+              hasCustomizations: Object.values(mealCustomizations).some((c: any) => c?.customizationsApplied),
+              pagination: pagination || undefined
             };
           })
         );
@@ -879,15 +1046,120 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     }
 
     // MERGE with existing modifications (frontend sends one at a time)
+    // SMART MERGE: If modifying the same ingredient, replace the old modification instead of appending
     if (meal && meal.customizations) {
       const existingCustomizations = meal.customizations[recipeId];
       if (existingCustomizations?.modifications && customizations.modifications) {
         const existingMods = existingCustomizations.modifications;
         const newMods = customizations.modifications;
         
-        console.log(`🔗 Merging modifications: ${existingMods.length} existing + ${newMods.length} new`);
-        customizations.modifications = [...existingMods, ...newMods];
-        console.log(`  📝 Total modifications: ${customizations.modifications.length}`);
+        console.log(`🔗 SMART MERGE - Merging modifications: ${existingMods.length} existing + ${newMods.length} new`);
+        console.log(`   Existing:`, JSON.stringify(existingMods, null, 2));
+        console.log(`   New:`, JSON.stringify(newMods, null, 2));
+        
+        // For each new modification, check if we're modifying the same ingredient
+        const mergedMods = [...existingMods];
+        
+        for (const newMod of newMods) {
+          // Find if there's an existing modification for the same ingredient
+          const targetIngredient = (newMod.originalIngredient || newMod.newIngredient)?.toLowerCase()?.trim();
+          
+          const existingModIndex = mergedMods.findIndex((existing: any, idx: number) => {
+            const existingTarget = (existing.originalIngredient || existing.newIngredient)?.toLowerCase()?.trim();
+            const existingNew = existing.newIngredient?.toLowerCase()?.trim();
+            
+            console.log(`   🔍 [${idx}] Checking match: "${targetIngredient}" vs existing "${existingTarget}"`);
+            console.log(`      newMod.type: "${newMod.type}", existing.type: "${existing.type}"`);
+            
+            // For REPLACE modifications, check if modifying the same ingredient
+            if (newMod.type === 'replace' && existing.type === 'replace') {
+              const newOriginal = (newMod.originalIngredient || '').toLowerCase().trim();
+              const newResult = (newMod.newIngredient || '').toLowerCase().trim();
+              const existingOriginal = (existing.originalIngredient || '').toLowerCase().trim();
+              const existingResult = (existing.newIngredient || '').toLowerCase().trim();
+              
+              console.log(`      Raw values - New: "${newMod.originalIngredient}" → "${newMod.newIngredient}"`);
+              console.log(`      Raw values - Existing: "${existing.originalIngredient}" → "${existing.newIngredient}"`);
+              console.log(`      Normalized - New: "${newOriginal}" → "${newResult}"`);
+              console.log(`      Normalized - Existing: "${existingOriginal}" → "${existingResult}"`);
+              
+              // IMPROVED LOGIC: Check if both modifications target the SAME INGREDIENT
+              // This works for both quantity changes (jam→jam) and replacements (butter→oil)
+              const isSameIngredientChange = newOriginal === newResult && existingOriginal === existingResult && newOriginal === existingOriginal;
+              console.log(`      isSameIngredientChange: ${isSameIngredientChange}`);
+              
+              if (isSameIngredientChange) {
+                // Both are quantity changes on the same ingredient - definitely match!
+                console.log(`      ✅ QUANTITY CHANGE MATCH: ${newOriginal}`);
+                return true;
+              }
+              
+              // Check if modifying the RESULT of a previous replacement (chaining)
+              // Example: butter→oil (existing), then oil→coconut oil (new)
+              if (newOriginal === existingResult) {
+                console.log(`      ✅ CHAINED REPLACEMENT MATCH: ${existingOriginal} → ${existingResult} → ${newResult}`);
+                return true;
+              }
+              
+              // Check if both are modifying the same base ingredient
+              // Example: butter→oil (existing), then butter→margarine (new)
+              if (newOriginal === existingOriginal) {
+                console.log(`      ✅ SAME BASE INGREDIENT MATCH: ${newOriginal}`);
+                return true;
+              }
+            }
+            
+            // For OMIT modifications, match if targeting the same ingredient
+            if (newMod.type === 'omit' && existing.type === 'omit' && newMod.originalIngredient && existing.originalIngredient) {
+              const match = targetIngredient === existingTarget;
+              console.log(`      OMIT match: ${match}`);
+              return match;
+            }
+            
+            // For ADD modifications, match if adding the same ingredient
+            if (newMod.type === 'add' && existing.type === 'add' && newMod.newIngredient && existing.newIngredient) {
+              const newIngredientName = newMod.newIngredient.toLowerCase().trim();
+              const existingIngredientName = existing.newIngredient.toLowerCase().trim();
+              const match = newIngredientName === existingIngredientName;
+              console.log(`      ADD match: ${match}`);
+              return match;
+            }
+            
+            // Mixed types: New REPLACE/OMIT on previous ADD's result
+            if ((newMod.type === 'replace' || newMod.type === 'omit') && existing.type === 'add' && newMod.originalIngredient && existing.newIngredient) {
+              const match = existingNew === targetIngredient;
+              console.log(`      Mixed (new REPLACE/OMIT on prev ADD) match: ${match}`);
+              return match;
+            }
+            
+            return false;
+          });
+          
+          if (existingModIndex >= 0) {
+            console.log(`  🔄 Replacing existing modification for "${targetIngredient}"`);
+            const oldMod = mergedMods[existingModIndex] as any;
+            
+            // Update the modification to reflect cumulative change from BASE recipe
+            const updatedMod = {
+              ...newMod,
+              // Keep the ORIGINAL ingredient from the first modification (base recipe)
+              originalIngredient: oldMod.originalIngredient || oldMod.newIngredient,
+              originalAmount: oldMod.originalAmount,
+              originalUnit: oldMod.originalUnit
+            } as any;
+            
+            console.log(`    Old: ${oldMod.originalIngredient} → ${oldMod.newIngredient} (${oldMod.amount} ${oldMod.unit})`);
+            console.log(`    New: ${updatedMod.originalIngredient} → ${updatedMod.newIngredient} (${updatedMod.amount} ${updatedMod.unit})`);
+            
+            mergedMods[existingModIndex] = updatedMod;
+          } else {
+            console.log(`  ➕ Adding new modification for "${targetIngredient}"`);
+            mergedMods.push(newMod);
+          }
+        }
+        
+        customizations.modifications = mergedMods;
+        console.log(`  📝 Total modifications after merge: ${customizations.modifications.length}`);
         console.log(`  📋 Full list:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient} (${m.amount || '?'} ${m.unit || ''})`));
       }
     }
@@ -914,6 +1186,35 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           id: recipeId,
           ingredients: standardized.ingredients || []
         };
+        
+        // NOW look up original amounts from cached recipe ingredients BEFORE calculating nutrition
+        for (const mod of customizations.modifications) {
+          if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+            console.log(`🔍 Looking up original amount for: ${mod.originalIngredient} (${mod.type})`);
+            
+            const targetName = mod.originalIngredient.toLowerCase();
+            const originalIng = originalRecipe.ingredients.find((ing: any) => {
+              const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+              return ingName.includes(targetName) || targetName.includes(ingName);
+            });
+            
+            if (originalIng) {
+              (mod as any).originalAmount = originalIng.amount || 1;
+              (mod as any).originalUnit = originalIng.unit || '';
+              console.log(`  ✅ Found original: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+            } else {
+              console.warn(`  ⚠️ Could not find "${mod.originalIngredient}" in cached recipe ingredients`);
+              // For REPLACE, use new amount as fallback; for OMIT, default to 1
+              if (mod.type === 'replace') {
+                (mod as any).originalAmount = (mod as any).amount || 1;
+                (mod as any).originalUnit = (mod as any).unit || '';
+              } else {
+                (mod as any).originalAmount = 1;
+                (mod as any).originalUnit = '';
+              }
+            }
+          }
+        }
         // Use the FULL nutrition details with micronutrients
         // Check if nutritionDetails has actual data (not just empty object)
         const hasNutritionData = standardized.nutritionDetails && 
@@ -950,6 +1251,26 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             id: recipeId,
             ingredients: recipeDetails.ingredients || []
           };
+          
+          // Look up original amounts from API recipe ingredients
+          for (const mod of customizations.modifications) {
+            if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+              console.log(`🔍 Looking up original amount for: ${mod.originalIngredient} (${mod.type})`);
+              
+              const targetName = mod.originalIngredient.toLowerCase();
+              const originalIng = originalRecipe.ingredients.find((ing: any) => {
+                const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+                return ingName.includes(targetName) || targetName.includes(ingName);
+              });
+              
+              if (originalIng) {
+                (mod as any).originalAmount = originalIng.amount || 1;
+                (mod as any).originalUnit = originalIng.unit || '';
+                console.log(`  ✅ Found original: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+              }
+            }
+          }
+          
           // For API responses, create simple nutrition
           originalNutritionWithMicros = {
             calories: { quantity: recipeDetails.calories || 0, unit: 'kcal' },
@@ -967,6 +1288,27 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       if (!originalRecipe || !originalNutritionWithMicros) {
         console.warn('⚠️ Could not get original recipe, using simplified nutrition from draft');
         originalRecipe = recipe;
+        
+        // Look up original amounts from draft recipe ingredients as last resort
+        for (const mod of customizations.modifications) {
+          if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+            console.log(`🔍 Looking up original amount from draft recipe for: ${mod.originalIngredient} (${mod.type})`);
+            
+            const targetName = mod.originalIngredient.toLowerCase();
+            const recipeIngredients = recipe.ingredients || [];
+            const originalIng = recipeIngredients.find((ing: any) => {
+              const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+              return ingName.includes(targetName) || targetName.includes(ingName);
+            });
+            
+            if (originalIng) {
+              (mod as any).originalAmount = originalIng.amount || 1;
+              (mod as any).originalUnit = originalIng.unit || '';
+              console.log(`  ✅ Found original: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+            }
+          }
+        }
+        
         originalNutritionWithMicros = {
           calories: { quantity: recipe.calories || 0, unit: 'kcal' },
           macros: {
@@ -980,6 +1322,39 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       }
 
       console.log('🔍 Original recipe ingredients:', originalRecipe?.ingredients?.slice(0, 3).map((ing: any) => ing.name));
+      
+      // DE-DUPLICATE modifications for nutrition calculation (keep only FIRST = most recent)
+      const dedupedForNutrition: any[] = [];
+      const processedForNutrition = new Map<string, boolean>();
+      
+      for (let i = 0; i < customizations.modifications.length; i++) {
+        const mod = customizations.modifications[i];
+        const ingredientKey = (mod.originalIngredient || mod.newIngredient)?.toLowerCase().trim();
+        
+        if (ingredientKey && !processedForNutrition.has(ingredientKey)) {
+          dedupedForNutrition.push(mod);
+          processedForNutrition.set(ingredientKey, true);
+        }
+      }
+      
+      if (dedupedForNutrition.length < customizations.modifications.length) {
+        console.log(`⚠️ Found duplicate modifications! Deduplicating for nutrition calculation:`);
+        console.log(`   Original count: ${customizations.modifications.length}`);
+        console.log(`   After dedup: ${dedupedForNutrition.length}`);
+        customizations.modifications = dedupedForNutrition;
+      }
+      
+      // Log final modification details after all lookups
+      console.log('📋 Final modifications with amounts:');
+      for (const mod of customizations.modifications) {
+        if (mod.type === 'replace') {
+          console.log(`  🔄 Replace: ${(mod as any).originalAmount || '?'} ${(mod as any).originalUnit || ''} ${mod.originalIngredient} → ${(mod as any).amount || '?'} ${(mod as any).unit || ''} ${mod.newIngredient}`);
+        } else if (mod.type === 'omit') {
+          console.log(`  🚫 Omit: ${(mod as any).originalAmount || '?'} ${(mod as any).originalUnit || ''} ${mod.originalIngredient}`);
+        } else if (mod.type === 'add') {
+          console.log(`  ➕ Add: ${(mod as any).amount || '?'} ${(mod as any).unit || ''} ${mod.newIngredient}`);
+        }
+      }
       
       // Store for debug
       var debugOriginalNutritionBeforeCheck = JSON.parse(JSON.stringify(originalNutritionWithMicros));
@@ -1109,9 +1484,34 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     // Pass 2: OMIT using the full list with amounts
     if (customizations.modifications && customizations.modifications.length > 0) {
       console.log(`📝 Processing ${customizations.modifications.length} modifications`);
-      console.log(`  Modifications:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient}`));
+      console.log(`  Modifications:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient} (${(m as any).amount} ${(m as any).unit})`));
+      
+      // DE-DUPLICATE: If multiple mods for same ingredient, keep only the FIRST one (most recent is at index 0)
+      const dedupedModifications: any[] = [];
+      const processedIngredients = new Map<string, boolean>();
+      
+      for (let i = 0; i < customizations.modifications.length; i++) {
+        const mod = customizations.modifications[i];
+        const ingredientKey = (mod.originalIngredient || mod.newIngredient)?.toLowerCase().trim();
+        
+        if (ingredientKey && !processedIngredients.has(ingredientKey)) {
+          dedupedModifications.push(mod);
+          processedIngredients.set(ingredientKey, true);
+          console.log(`  ✅ [${i}] Keeping modification: ${mod.type} ${ingredientKey} (amount: ${(mod as any).amount})`);
+        } else if (ingredientKey) {
+          console.log(`  ⚠️ [${i}] Skipping duplicate modification: ${mod.type} ${ingredientKey} (amount: ${(mod as any).amount})`);
+        } else {
+          dedupedModifications.push(mod);
+        }
+      }
+      
+      console.log(`  📝 After deduplication: ${dedupedModifications.length} modifications (was ${customizations.modifications.length})`);
+      
+      // Use deduplicated modifications for ingredient display
+      const modsToApply = dedupedModifications;
+      
       // PASS 1: Process ADD and REPLACE first
-      for (const mod of customizations.modifications) {
+      for (const mod of modsToApply) {
         // For REPLACE operations, look up original amount from baseRecipe ingredients if not provided
         if (mod.type === 'replace' && mod.originalIngredient && !(mod as any).originalAmount) {
           const targetName = mod.originalIngredient.toLowerCase();
@@ -1167,7 +1567,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       }
       
       // PASS 2: Process OMIT with full ingredient list including added items
-      for (const mod of customizations.modifications) {
+      for (const mod of modsToApply) {
         if (mod.type === 'omit' && mod.originalIngredient) {
           // Find the ingredient to get its amount
           const targetName = mod.originalIngredient.toLowerCase();
@@ -1645,6 +2045,85 @@ async function handleShuffleRecipes(req: VercelRequest, res: VercelResponse, use
 
     return res.status(500).json({
       error: 'Failed to shuffle recipes',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}
+
+/**
+ * Change recipe page (pagination instead of shuffle)
+ */
+async function handleChangePage(req: VercelRequest, res: VercelResponse, user: any): Promise<VercelResponse> {
+  const { error, value } = changePageSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      error: 'Validation error',
+      details: error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message
+      }))
+    });
+  }
+
+  const { planId, day, mealName, direction, pageNumber } = value;
+
+  // Validate that pageNumber is provided when direction is 'specific'
+  if (direction === 'specific' && !pageNumber) {
+    return res.status(400).json({
+      error: 'Validation error',
+      message: 'pageNumber is required when direction is "specific"'
+    });
+  }
+
+  try {
+    // Verify user has access to this plan
+    const plan = await draftService.getDraft(planId);
+    if (!plan) {
+      return res.status(404).json({
+        error: 'Meal plan not found',
+        message: 'The specified meal plan does not exist'
+      });
+    }
+
+    if (plan.nutritionistId !== user.id) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'You do not have access to this meal plan'
+      });
+    }
+
+    // Change the page
+    const result = await draftService.changePage(planId, day, mealName, direction, pageNumber);
+
+    return res.status(200).json({
+      success: true,
+      message: `Changed to ${direction === 'next' ? 'next' : direction === 'prev' ? 'previous' : 'page ' + pageNumber} for ${mealName} on day ${day}`,
+      data: {
+        day,
+        mealName,
+        displayedRecipes: result.displayedRecipes,
+        recipesCount: result.displayedRecipes.length,
+        currentPage: result.currentPage,
+        totalPages: result.totalPages,
+        hasNextPage: result.hasNextPage,
+        hasPrevPage: result.hasPrevPage
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error changing page:', error);
+    
+    // Check if it's a "no more pages" error
+    if (error instanceof Error && (error.message.includes('No more pages') || error.message.includes('Invalid page'))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid page',
+        message: error.message
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Failed to change page',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }

@@ -70,6 +70,7 @@ export interface RecipeSearchParams {
   random?: boolean;
   beta?: boolean;
   co2EmissionsClass?: string;
+  type?: string[]; // 'public', 'user', 'edamam-generic' - filters recipe source
 }
 
 export interface MealPlanRequest {
@@ -392,7 +393,6 @@ export class EdamamService {
     const recipeKeys = await this.getApiKeyWithRotation('recipe');
     searchParams.append('app_id', recipeKeys.appId);
     searchParams.append('app_key', recipeKeys.appKey);
-    searchParams.append('type', 'public');
     
     // Add debugging for input parameters
     console.log('🔍 Edamam searchRecipes - Input params:', JSON.stringify(params, null, 2));
@@ -411,6 +411,9 @@ export class EdamamService {
     if (params.random) searchParams.append('random', 'true');
     if (params.beta) searchParams.append('beta', 'true');
     if (params.co2EmissionsClass) searchParams.append('co2EmissionsClass', params.co2EmissionsClass);
+    // Add type filter - default to ['public'] to exclude user-generated recipes
+    const recipeTypes = params.type || ['public'];
+    recipeTypes.forEach(type => searchParams.append('type', type));
     
     // Add debugging for final URL parameters
     console.log('🔍 Edamam searchRecipes - Final URL params:', searchParams.toString());

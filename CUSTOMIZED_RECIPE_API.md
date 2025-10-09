@@ -49,46 +49,52 @@ Show clients exactly what they'll be cooking with all customizations applied.
 {
   "success": true,
   "data": {
-    "recipe": {
-      "id": "622598",
-      "title": "Pittata - Pizza Frittata",
-      "image": "https://...",
-      "sourceUrl": "https://...",
-      "source": "spoonacular",
-      "servings": 2,
-      "readyInMinutes": 30,
-      "calories": 669,
-      "protein": 49,
-      "carbs": 13,
-      "fat": 49,
-      "fiber": 1,
-      "ingredients": [
-        {
-          "name": "eggs",
-          "amount": 6,
-          "unit": "large",
-          "original": "6 large eggs"
-        },
-        {
-          "name": "basil",
-          "amount": 2,
-          "unit": "tablespoons",
-          "original": "2 tablespoons fresh basil"
-        }
-        // ... more ingredients
-      ],
-      "instructions": [
-        "Preheat oven to 375°F",
-        "Beat eggs in a bowl",
-        // ... more steps
-      ],
-      "healthLabels": ["gluten-free"],
-      "dietLabels": ["low-carb"],
-      "cuisineTypes": ["italian"]
-    },
-    "hasCustomizations": false,
-    "customizations": null
-  }
+    "id": "622598",
+    "recipeName": "Pittata - Pizza Frittata",
+    "recipeImageUrl": "https://...",
+    "recipeUrl": "https://...",
+    "provider": "spoonacular",
+    "servings": 2,
+    "totalTimeMinutes": 30,
+    "caloriesPerServing": "669",
+    "proteinPerServingG": "49",
+    "carbsPerServingG": "13",
+    "fatPerServingG": "49",
+    "fiberPerServingG": "1",
+    "customNotes": null,
+    "ingredients": [
+      {
+        "name": "eggs",
+        "amount": 6,
+        "unit": "large",
+        "original": "6 large eggs"
+      },
+      {
+        "name": "basil",
+        "amount": 2,
+        "unit": "tablespoons",
+        "original": "2 tablespoons fresh basil"
+      }
+      // ... more ingredients
+    ],
+    "cookingInstructions": [
+      {
+        "number": 1,
+        "step": "Preheat oven to 375°F"
+      },
+      {
+        "number": 2,
+        "step": "Beat eggs in a bowl"
+      }
+      // ... more steps
+    ],
+    "healthLabels": ["gluten-free"],
+    "dietLabels": ["low-carb"],
+    "cuisineTypes": ["italian"]
+  },
+  "hasCustomizations": false,
+  "customizations": null,
+  "message": "Recipe retrieved from cache (no customizations)"
 }
 ```
 
@@ -97,88 +103,123 @@ Show clients exactly what they'll be cooking with all customizations applied.
 {
   "success": true,
   "data": {
-    "recipe": {
-      "id": "622598",
-      "title": "Pittata - Pizza Frittata",
-      "image": "https://...",
-      "sourceUrl": "https://...",
-      "source": "spoonacular",
-      "servings": 2,
-      "readyInMinutes": 30,
-      "calories": 535,
-      "protein": 36.5,
-      "carbs": 8.7,
-      "fat": 38.8,
-      "fiber": 0,
-      "ingredients": [
-        {
-          "name": "basil",
-          "amount": 2,
-          "unit": "tablespoons",
-          "original": "2 tablespoons fresh basil"
-        },
-        {
-          "name": "milk",
-          "amount": 0.25,
-          "unit": "cup",
-          "original": "0.25 cup milk"
-        },
-        {
-          "name": "parmesan cheese",
-          "amount": 0.25,
-          "unit": "cup",
-          "original": "0.25 cup grated parmesan cheese"
-        },
-        {
-          "name": "pepperoni",
-          "amount": 0.5,
-          "unit": "cup",
-          "original": "0.5 cup sliced pepperoni"
-        },
-        {
-          "name": "mozzarella cheese",
-          "amount": 0.5,
-          "unit": "cup",
-          "original": "0.5 cup shredded mozzarella cheese"
-        }
-        // Note: "eggs" ingredient has been removed
-      ],
-      "instructions": [
-        "Preheat oven to 375°F",
-        "Mix ingredients in a bowl",
-        // ... more steps
-      ],
-      "adjustedServings": 1,
-      "healthLabels": ["gluten-free"],
-      "dietLabels": ["low-carb"],
-      "cuisineTypes": ["italian"]
-    },
-    "hasCustomizations": true,
-    "customizations": {
-      "modifications": [
-        {
-          "type": "omit",
-          "originalIngredient": "eggs",
-          "notes": "Removed manually"
-        }
-      ],
-      "appliedServings": 1,
-      "originalNutrition": {
-        "calories": 669,
-        "protein": 49,
-        "carbs": 13,
-        "fat": 49,
-        "fiber": 1
+    "id": "622598",
+    "recipeName": "Pittata - Pizza Frittata",
+    "recipeImageUrl": "https://...",
+    "recipeUrl": "https://...",
+    "provider": "spoonacular",
+    "servings": 2,
+    "totalTimeMinutes": 30,
+    "caloriesPerServing": "535",
+    "proteinPerServingG": "36.5",
+    "carbsPerServingG": "8.7",
+    "fatPerServingG": "38.8",
+    "fiberPerServingG": "0",
+    "customNotes": "This recipe has been customized for a client with egg allergy. Make sure to use dairy alternatives if needed.",
+    "adjustedServings": 1,
+    "ingredients": [
+      {
+        "name": "basil",
+        "amount": 2,
+        "unit": "tablespoons",
+        "original": "2 tablespoons fresh basil"
       },
-      "customizedNutrition": {
-        "calories": 535,
-        "protein": 36.5,
-        "carbs": 8.7,
-        "fat": 38.8,
-        "fiber": 0
+      {
+        "name": "milk",
+        "amount": 0.25,
+        "unit": "cup",
+        "original": "0.25 cup milk"
+      },
+      {
+        "name": "parmesan cheese",
+        "amount": 0.25,
+        "unit": "cup",
+        "original": "0.25 cup grated parmesan cheese"
+      },
+      {
+        "name": "pepperoni",
+        "amount": 0.5,
+        "unit": "cup",
+        "original": "0.5 cup sliced pepperoni"
+      },
+      {
+        "name": "mozzarella cheese",
+        "amount": 0.5,
+        "unit": "cup",
+        "original": "0.5 cup shredded mozzarella cheese"
       }
+      // Note: "eggs" ingredient has been removed
+    ],
+    "cookingInstructions": [
+      {
+        "number": 1,
+        "step": "Preheat oven to 375°F"
+      },
+      {
+        "number": 2,
+        "step": "Mix ingredients in a bowl"
+      }
+      // ... more steps
+    ],
+    "healthLabels": ["gluten-free"],
+    "dietLabels": ["low-carb"],
+    "cuisineTypes": ["italian"]
+  },
+  "hasCustomizations": true,
+  "customizations": {
+    "modifications": [
+      {
+        "type": "omit",
+        "originalIngredient": "eggs",
+        "notes": "Removed manually"
+      }
+    ],
+    "customizationSummary": [
+      {
+        "type": "omit",
+        "action": "Removed",
+        "ingredient": "eggs",
+        "amount": null,
+        "notes": "Removed manually",
+        "hasNotes": true
+      }
+    ],
+    "appliedServings": 1,
+    "micronutrientsIncluded": false,
+    "nutritionComparison": {
+      "macros": {
+        "original": {
+          "caloriesPerServing": "669",
+          "proteinPerServingG": "49",
+          "carbsPerServingG": "13",
+          "fatPerServingG": "49",
+          "fiberPerServingG": "1"
+        },
+        "customized": {
+          "caloriesPerServing": "535",
+          "proteinPerServingG": "36.5",
+          "carbsPerServingG": "8.7",
+          "fatPerServingG": "38.8",
+          "fiberPerServingG": "0"
+        }
+      }
+    },
+    "originalNutrition": {
+      "caloriesPerServing": "669",
+      "proteinPerServingG": "49",
+      "carbsPerServingG": "13",
+      "fatPerServingG": "49",
+      "fiberPerServingG": "1"
+    },
+    "customizedNutrition": {
+      "caloriesPerServing": "535",
+      "proteinPerServingG": "36.5",
+      "carbsPerServingG": "8.7",
+      "fatPerServingG": "38.8",
+      "fiberPerServingG": "0"
     }
-  }
+  },
+  "message": "Recipe retrieved from cache with customizations applied"
 }
 ```
 
@@ -334,12 +375,10 @@ const CustomizedRecipeView = ({ recipeId, draftId, day, mealName }) => {
   if (error) return <div>Error: {error}</div>;
   if (!data) return null;
 
-  const { recipe, hasCustomizations, customizations } = data;
-
   return (
     <div>
-      <h1>{recipe.title}</h1>
-      <img src={recipe.image} alt={recipe.title} />
+      <h1>{data.recipeName}</h1>
+      <img src={data.recipeImageUrl} alt={data.recipeName} />
       
       {hasCustomizations && (
         <div className="customization-badge">
@@ -347,14 +386,21 @@ const CustomizedRecipeView = ({ recipeId, draftId, day, mealName }) => {
         </div>
       )}
 
+      {data.customNotes && (
+        <div className="custom-notes">
+          <h3>📝 Recipe Notes</h3>
+          <p>{data.customNotes}</p>
+        </div>
+      )}
+
       <div className="nutrition">
         <h3>Nutrition (per serving)</h3>
         <ul>
-          <li>Calories: {recipe.calories}</li>
-          <li>Protein: {recipe.protein}g</li>
-          <li>Carbs: {recipe.carbs}g</li>
-          <li>Fat: {recipe.fat}g</li>
-          <li>Fiber: {recipe.fiber}g</li>
+          <li>Calories: {data.caloriesPerServing}</li>
+          <li>Protein: {data.proteinPerServingG}g</li>
+          <li>Carbs: {data.carbsPerServingG}g</li>
+          <li>Fat: {data.fatPerServingG}g</li>
+          <li>Fiber: {data.fiberPerServingG}g</li>
         </ul>
 
         {hasCustomizations && customizations && (
@@ -373,7 +419,7 @@ const CustomizedRecipeView = ({ recipeId, draftId, day, mealName }) => {
       <div className="ingredients">
         <h3>Ingredients</h3>
         <ul>
-          {recipe.ingredients.map((ing, idx) => (
+          {data.ingredients.map((ing, idx) => (
             <li key={idx}>
               {ing.amount} {ing.unit} {ing.name}
             </li>
@@ -400,8 +446,8 @@ const CustomizedRecipeView = ({ recipeId, draftId, day, mealName }) => {
       <div className="instructions">
         <h3>Instructions</h3>
         <ol>
-          {recipe.instructions.map((step, idx) => (
-            <li key={idx}>{step}</li>
+          {data.cookingInstructions.map((instruction, idx) => (
+            <li key={idx}>{instruction.step}</li>
           ))}
         </ol>
       </div>
@@ -429,12 +475,55 @@ const CustomizedRecipeView = ({ recipeId, draftId, day, mealName }) => {
 - ✅ **Modification History**: Returns list of all applied modifications
 - ✅ **Before/After Comparison**: Shows original vs customized nutrition
 - ✅ **Serving Adjustments**: Accounts for serving size changes
+- ✅ **Custom Notes**: Includes custom notes added to the recipe (see below)
 - ✅ **Access Control**: Ensures users can only access their own drafts
+
+## Custom Notes
+
+Custom notes are additional text annotations that nutritionists can add to recipes. These notes are stored in the draft and returned in the customized recipe response.
+
+### Saving Custom Notes
+
+To save custom notes for a recipe, use the `update-notes` action on the draft API:
+
+```bash
+curl -X POST 'https://caloriescience-api.vercel.app/api/meal-plans/draft' \
+  -H 'Authorization: Bearer YOUR_JWT_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "action": "update-notes",
+    "planId": "draft_1759771713995_ksn6dvy0q",
+    "day": 1,
+    "mealName": "lunch",
+    "recipeId": "622598",
+    "notes": "This recipe has been customized for a client with egg allergy. Make sure to use dairy alternatives if needed."
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Notes updated successfully",
+  "data": {
+    "day": 1,
+    "mealName": "lunch",
+    "recipeId": "622598",
+    "recipeTitle": "Pittata - Pizza Frittata",
+    "customNotes": "This recipe has been customized for a client with egg allergy. Make sure to use dairy alternatives if needed.",
+    "notesLength": 111
+  }
+}
+```
+
+### Retrieving Custom Notes
+
+Custom notes are automatically included in the customized recipe response as `customNotes` field in the recipe object. See the response examples above.
 
 ## Related Endpoints
 
 - `POST /api/meal-plans/generate` - Generate meal plan drafts
-- `POST /api/meal-plans/draft` - Manage draft customizations
+- `POST /api/meal-plans/draft` - Manage draft customizations (including custom notes)
 - `GET /api/recipes/[id]/details` - Get base recipe details without customizations
 
 ## Notes
