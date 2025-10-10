@@ -53,6 +53,60 @@ export interface StandardizedNutrition {
 
 export class NutritionMappingService {
   /**
+   * Get a complete nutrition object with all vitamins and minerals initialized to 0
+   * This ensures consistent API responses with exhaustive nutrient lists
+   */
+  private static getCompleteNutritionTemplate(): StandardizedNutrition {
+    return {
+      calories: { quantity: 0, unit: 'kcal' },
+      macros: {
+        protein: { quantity: 0, unit: 'g' },
+        carbs: { quantity: 0, unit: 'g' },
+        fat: { quantity: 0, unit: 'g' },
+        fiber: { quantity: 0, unit: 'g' },
+        sugar: { quantity: 0, unit: 'g' },
+        sodium: { quantity: 0, unit: 'mg' },
+        cholesterol: { quantity: 0, unit: 'mg' },
+        saturatedFat: { quantity: 0, unit: 'g' },
+        transFat: { quantity: 0, unit: 'g' },
+        monounsaturatedFat: { quantity: 0, unit: 'g' },
+        polyunsaturatedFat: { quantity: 0, unit: 'g' }
+      },
+      micros: {
+        vitamins: {
+          vitaminA: { quantity: 0, unit: 'IU' },
+          vitaminC: { quantity: 0, unit: 'mg' },
+          vitaminD: { quantity: 0, unit: 'µg' },
+          vitaminE: { quantity: 0, unit: 'mg' },
+          vitaminK: { quantity: 0, unit: 'µg' },
+          thiamin: { quantity: 0, unit: 'mg' },
+          riboflavin: { quantity: 0, unit: 'mg' },
+          niacin: { quantity: 0, unit: 'mg' },
+          vitaminB6: { quantity: 0, unit: 'mg' },
+          folate: { quantity: 0, unit: 'µg' },
+          vitaminB12: { quantity: 0, unit: 'µg' },
+          biotin: { quantity: 0, unit: 'µg' },
+          pantothenicAcid: { quantity: 0, unit: 'mg' }
+        },
+        minerals: {
+          calcium: { quantity: 0, unit: 'mg' },
+          iron: { quantity: 0, unit: 'mg' },
+          magnesium: { quantity: 0, unit: 'mg' },
+          phosphorus: { quantity: 0, unit: 'mg' },
+          potassium: { quantity: 0, unit: 'mg' },
+          zinc: { quantity: 0, unit: 'mg' },
+          copper: { quantity: 0, unit: 'mg' },
+          manganese: { quantity: 0, unit: 'mg' },
+          selenium: { quantity: 0, unit: 'µg' },
+          iodine: { quantity: 0, unit: 'µg' },
+          chromium: { quantity: 0, unit: 'µg' },
+          molybdenum: { quantity: 0, unit: 'µg' }
+        }
+      }
+    };
+  }
+
+  /**
    * Edamam nutrient code to standard format mapping
    */
   private static readonly EDAMAM_NUTRIENT_MAP: { 
@@ -161,14 +215,8 @@ export class NutritionMappingService {
    * Handles BOTH recipe format (totalNutrients) and ingredient format (ingredients[0].parsed[0].nutrients)
    */
   static transformEdamamNutrition(edamamData: any, servings?: number): StandardizedNutrition {
-    const nutrition: StandardizedNutrition = {
-      calories: { quantity: 0, unit: 'kcal' },
-      macros: {},
-      micros: {
-        vitamins: {},
-        minerals: {}
-      }
-    };
+    // Start with complete template with all nutrients initialized to 0
+    const nutrition: StandardizedNutrition = this.getCompleteNutritionTemplate();
 
     if (!edamamData) {
       return nutrition;
@@ -230,14 +278,8 @@ export class NutritionMappingService {
    * Transform Spoonacular nutrition data to standardized format
    */
   static transformSpoonacularNutrition(spoonacularData: any): StandardizedNutrition {
-    const nutrition: StandardizedNutrition = {
-      calories: { quantity: 0, unit: 'kcal' },
-      macros: {},
-      micros: {
-        vitamins: {},
-        minerals: {}
-      }
-    };
+    // Start with complete template with all nutrients initialized to 0
+    const nutrition: StandardizedNutrition = this.getCompleteNutritionTemplate();
 
     if (!spoonacularData || !spoonacularData.nutrients) {
       return nutrition;
@@ -273,11 +315,8 @@ export class NutritionMappingService {
     // { calories, protein, carbs, fat, fiber, rawData: { nutrition: { nutrients: [...] } } }
     
     if (!ingredientData) {
-      return {
-        calories: { quantity: 0, unit: 'kcal' },
-        macros: {},
-        micros: { vitamins: {}, minerals: {} }
-      };
+      // Return complete template with all nutrients at 0
+      return this.getCompleteNutritionTemplate();
     }
     
     // If rawData.nutrition exists, use the full nutrient data
@@ -285,20 +324,17 @@ export class NutritionMappingService {
       return this.transformSpoonacularNutrition(ingredientData.rawData.nutrition);
     }
     
-    // Otherwise, fallback to the simplified format
-    return {
-      calories: { quantity: ingredientData.calories || 0, unit: 'kcal' },
-      macros: {
-        protein: { quantity: ingredientData.protein || 0, unit: 'g' },
-        carbs: { quantity: ingredientData.carbs || 0, unit: 'g' },
-        fat: { quantity: ingredientData.fat || 0, unit: 'g' },
-        fiber: { quantity: ingredientData.fiber || 0, unit: 'g' }
-      },
-      micros: {
-        vitamins: {},
-        minerals: {}
-      }
-    };
+    // Otherwise, fallback to the simplified format with complete template
+    const nutrition = this.getCompleteNutritionTemplate();
+    
+    // Populate the basic macros we have
+    nutrition.calories.quantity = ingredientData.calories || 0;
+    if (nutrition.macros.protein) nutrition.macros.protein.quantity = ingredientData.protein || 0;
+    if (nutrition.macros.carbs) nutrition.macros.carbs.quantity = ingredientData.carbs || 0;
+    if (nutrition.macros.fat) nutrition.macros.fat.quantity = ingredientData.fat || 0;
+    if (nutrition.macros.fiber) nutrition.macros.fiber.quantity = ingredientData.fiber || 0;
+    
+    return nutrition;
   }
 
   /**
@@ -484,7 +520,17 @@ export class NutritionMappingService {
    * @param divisor - The number to divide by (e.g., number of servings)
    */
   static divideNutrition(nutrition: StandardizedNutrition, divisor: number): StandardizedNutrition {
-    if (divisor === 0 || divisor === 1) return nutrition;
+    console.log(`🔢 divideNutrition called: ${nutrition.calories?.quantity || 0} kcal ÷ ${divisor} servings`);
+    
+    if (divisor === 0) {
+      console.warn('⚠️ Cannot divide by zero, returning original nutrition');
+      return nutrition;
+    }
+    
+    if (divisor === 1) {
+      console.log('ℹ️ Divisor is 1, returning nutrition unchanged');
+      return nutrition;
+    }
     
     const result: StandardizedNutrition = {
       calories: {

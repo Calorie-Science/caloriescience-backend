@@ -136,16 +136,19 @@ export class MealPlanDraftService {
   private static normalizeEdamamIngredients(ingredients: any[]): UnifiedIngredient[] {
     if (!ingredients || !Array.isArray(ingredients)) return [];
     
-    return ingredients.map(ing => ({
-      id: ing.foodId || ing.id,
-      name: ing.food || ing.name || ing.text,
-      amount: ing.quantity || ing.amount || 0,
-      unit: ing.measure || ing.unit || '',
-      image: ing.image,
-      original: ing.text || ing.original || ing.originalString || '',
-      weight: ing.weight,
-      foodCategory: ing.foodCategory
-    }));
+    return ingredients.map(ing => {
+      const unit = ing.measure || ing.unit || '';
+      return {
+        id: ing.foodId || ing.id,
+        name: ing.food || ing.name || ing.text,
+        amount: ing.quantity || ing.amount || 0,
+        unit: unit === '<unit>' ? '' : unit,
+        image: ing.image,
+        original: ing.text || ing.original || ing.originalString || '',
+        weight: ing.weight,
+        foodCategory: ing.foodCategory
+      };
+    });
   }
 
   /**
@@ -219,7 +222,19 @@ export class MealPlanDraftService {
         // Handle instruction objects (Spoonacular format: {number, step})
         if (typeof inst === 'object' && inst !== null) {
           if (inst.step) {
-            return inst.step;
+            let stepText = inst.step;
+            // Check if step is double-encoded JSON
+            if (typeof stepText === 'string' && stepText.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(stepText);
+                if (parsed && typeof parsed === 'object' && parsed.step) {
+                  stepText = parsed.step;
+                }
+              } catch (e) {
+                // Keep original if parsing fails
+              }
+            }
+            return stepText;
           }
           // If it has a text property (some other format)
           if (inst.text) {

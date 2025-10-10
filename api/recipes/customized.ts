@@ -307,6 +307,48 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         updatedAt: null,
         customNotes: recipe.customNotes || null
       };
+      
+      // CACHE THE RECIPE for future use!
+      try {
+        console.log('💾 Caching recipe for future use...');
+        const recipeToCache: any = {
+          provider: source,
+          externalRecipeId: recipeDetails.id,
+          externalRecipeUri: recipeDetails.uri || recipeDetails.sourceUrl,
+          recipeName: recipeDetails.title,
+          recipeSource: source,
+          recipeUrl: recipeDetails.sourceUrl,
+          recipeImageUrl: recipeDetails.image,
+          cuisineTypes: recipeDetails.cuisineTypes || recipeDetails.cuisineType || [],
+          mealTypes: recipeDetails.mealTypes || recipeDetails.mealType || [],
+          dishTypes: recipeDetails.dishTypes || recipeDetails.dishType || [],
+          healthLabels: recipeDetails.healthLabels || [],
+          dietLabels: recipeDetails.dietLabels || recipeDetails.diets || [],
+          servings: recipeDetails.servings,
+          prepTimeMinutes: recipeDetails.prepTimeMinutes || null,
+          cookTimeMinutes: recipeDetails.cookTimeMinutes || null,
+          totalTimeMinutes: recipeDetails.readyInMinutes || recipeDetails.totalTimeMinutes,
+          caloriesPerServing: recipeDetails.calories?.toString(),
+          proteinPerServingG: recipeDetails.protein?.toString(),
+          carbsPerServingG: recipeDetails.carbs?.toString(),
+          fatPerServingG: recipeDetails.fat?.toString(),
+          fiberPerServingG: recipeDetails.fiber?.toString(),
+          ingredients: recipeDetails.ingredients,
+          ingredientLines: recipeDetails.ingredientLines || [],
+          cookingInstructions: recipeDetails.instructions || [],
+          nutritionDetails: recipeDetails.nutrition || {},
+          originalApiResponse: recipeDetails,
+          hasCompleteNutrition: !!(recipeDetails.nutrition?.calories),
+          hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
+          hasCookingInstructions: !!(recipeDetails.instructions && recipeDetails.instructions.length > 0),
+          dataQualityScore: 85
+        };
+        await cacheService.storeRecipe(recipeToCache);
+        console.log('✅ Recipe cached successfully');
+      } catch (cacheError) {
+        console.error('⚠️ Failed to cache recipe:', cacheError);
+        // Don't fail the request if caching fails
+      }
     }
 
     // Helper function to get ingredient image URL from Spoonacular
@@ -355,9 +397,27 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Normalize cookingInstructions to array of objects with number and step
       if (baseRecipe.cookingInstructions && Array.isArray(baseRecipe.cookingInstructions)) {
         baseRecipe.cookingInstructions = baseRecipe.cookingInstructions.map((instruction: any, index: number) => {
-          // If it's already an object with step, return as is
+          // If it's already an object with step, check if step is double-encoded JSON
           if (typeof instruction === 'object' && instruction.step) {
-            return instruction;
+            let stepText = instruction.step;
+            
+            // Check if step is a stringified JSON object (double-encoded)
+            if (typeof stepText === 'string' && stepText.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(stepText);
+                // If it parsed successfully and has a step property, use that
+                if (parsed && typeof parsed === 'object' && parsed.step) {
+                  stepText = parsed.step;
+                }
+              } catch (e) {
+                // If parsing fails, keep the original string
+              }
+            }
+            
+            return {
+              number: instruction.number || index + 1,
+              step: stepText
+            };
           }
           // If it's a string, convert to object format
           if (typeof instruction === 'string') {
@@ -443,9 +503,27 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     // Normalize cookingInstructions to array of objects with number and step
     if (customizedRecipe.cookingInstructions && Array.isArray(customizedRecipe.cookingInstructions)) {
       customizedRecipe.cookingInstructions = customizedRecipe.cookingInstructions.map((instruction: any, index: number) => {
-        // If it's already an object with step, return as is
+        // If it's already an object with step, check if step is double-encoded JSON
         if (typeof instruction === 'object' && instruction.step) {
-          return instruction;
+          let stepText = instruction.step;
+          
+          // Check if step is a stringified JSON object (double-encoded)
+          if (typeof stepText === 'string' && stepText.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(stepText);
+              // If it parsed successfully and has a step property, use that
+              if (parsed && typeof parsed === 'object' && parsed.step) {
+                stepText = parsed.step;
+              }
+            } catch (e) {
+              // If parsing fails, keep the original string
+            }
+          }
+          
+          return {
+            number: instruction.number || index + 1,
+            step: stepText
+          };
         }
         // If it's a string, convert to object format
         if (typeof instruction === 'string') {

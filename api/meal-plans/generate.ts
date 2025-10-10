@@ -10,6 +10,44 @@ const multiProviderService = new MultiProviderRecipeSearchService();
 const draftService = new MealPlanDraftService();
 const cacheService = new RecipeCacheService();
 
+// Utility function to normalize cooking instructions (handles double-encoded JSON)
+function normalizeCookingInstructions(instructions: any): any[] {
+  if (!instructions || !Array.isArray(instructions)) return [];
+  
+  return instructions.map((instruction: any, index: number) => {
+    // If it's already an object with step, check if step is double-encoded JSON
+    if (typeof instruction === 'object' && instruction.step) {
+      let stepText = instruction.step;
+      
+      // Check if step is a stringified JSON object (double-encoded)
+      if (typeof stepText === 'string' && stepText.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(stepText);
+          // If it parsed successfully and has a step property, use that
+          if (parsed && typeof parsed === 'object' && parsed.step) {
+            stepText = parsed.step;
+          }
+        } catch (e) {
+          // If parsing fails, keep the original string
+        }
+      }
+      
+      return {
+        number: instruction.number || index + 1,
+        step: stepText
+      };
+    }
+    // If it's a string, convert to object format
+    if (typeof instruction === 'string') {
+      return {
+        number: index + 1,
+        step: instruction
+      };
+    }
+    return instruction;
+  });
+}
+
 // Utility function to parse YYYY-MM-DD format
 function parseStartDate(dateString: string): Date {
   const date = new Date(dateString);
@@ -825,7 +863,7 @@ async function getRecipesFromProvider(
             fiber: recipe.fiber,
             // Add detailed information from cache
             ingredients: cachedRecipe.ingredients || [],
-            instructions: cachedRecipe.cookingInstructions || [],
+            instructions: normalizeCookingInstructions(cachedRecipe.cookingInstructions || []),
             nutrition: cachedRecipe.nutritionDetails || {},
             healthLabels: cachedRecipe.healthLabels || [],
             dietLabels: cachedRecipe.dietLabels || [],
@@ -919,7 +957,7 @@ async function enrichMealPlanWithCache(mealPlan: DayMealPlan[]): Promise<DayMeal
           cacheId: cachedRecipe.id,
           // Add detailed information from cache
           ingredients: cachedRecipe.ingredients || [],
-          instructions: cachedRecipe.cookingInstructions || [],
+          instructions: normalizeCookingInstructions(cachedRecipe.cookingInstructions || []),
           nutrition: cachedRecipe.nutritionDetails || {},
           healthLabels: cachedRecipe.healthLabels || [],
           dietLabels: cachedRecipe.dietLabels || [],

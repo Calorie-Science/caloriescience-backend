@@ -163,15 +163,14 @@ export class MealGenerationService {
       
       // Build search parameters
       const searchParams: RecipeSearchParams = {
-        q: mealInfo.mealType || 'healthy meal',
+        query: mealInfo.mealType || 'healthy meal',
         calories: `${Math.max(50, mealInfo.targetCalories - 100)}-${mealInfo.targetCalories + 100}`,
         mealType: [this.dataTransformService.getMealTypeForEdamam(mealInfo.mealType || 'lunch')],
         dishType: this.dataTransformService.getDishTypesForMeal(mealInfo.mealType || 'lunch'),
         health: this.dataTransformService.convertDietaryRestrictionsToEdamam(preferences.dietaryRestrictions || []),
         cuisineType: this.dataTransformService.convertCuisinePreferencesToEdamam(preferences.cuisinePreferences || []),
         random: true,
-        from: 0,
-        to: 20
+        type: ['public'] // Only get public recipes, exclude user-generated content
       };
 
       console.log('🔍 Recipe search params:', searchParams);

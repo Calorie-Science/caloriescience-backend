@@ -579,7 +579,7 @@ export class MultiProviderRecipeSearchService {
       ingredients: recipe.ingredients?.map(ing => ({
         name: ing.food,
         amount: ing.quantity,
-        unit: ing.measure,
+        unit: ing.measure === '<unit>' ? '' : (ing.measure || ''),
         image: ing.image,
         original: ing.text
       })) || [],
@@ -773,7 +773,7 @@ export class MultiProviderRecipeSearchService {
         id: ing.foodId,
         name: ing.food,
         amount: ing.quantity,
-        unit: ing.measure,
+        unit: ing.measure === '<unit>' ? '' : (ing.measure || ''),
         image: ing.image
       })),
       instructions: recipe.ingredientLines.join('\n'), // Fallback to ingredient lines
@@ -863,7 +863,7 @@ export class MultiProviderRecipeSearchService {
         ingredients: recipe.ingredients.map((ing: any) => ({
           name: ing.food,
           amount: ing.quantity,
-          unit: ing.measure,
+          unit: ing.measure === '<unit>' ? '' : (ing.measure || ''),
           originalString: ing.text,
           image: ing.image
         })),

@@ -316,10 +316,14 @@ export class RecipeResponseStandardizationService {
         imageUrl = `https://spoonacular.com/cdn/ingredients_100x100/${imageUrl}`;
       }
       
+      // Handle Edamam's <unit> placeholder
+      const unit = ing.unit || '';
+      const normalizedUnit = unit === '<unit>' ? '' : unit;
+      
       return {
         id: ing.id?.toString(),
         name: ing.name || '',
-        unit: ing.unit || '',
+        unit: normalizedUnit,
         amount: ing.amount || 0,
         image: imageUrl,
         originalString: ing.originalString || ing.original || '',

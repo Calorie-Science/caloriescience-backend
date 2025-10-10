@@ -32,6 +32,35 @@ export class IngredientCustomizationService {
   }
 
   /**
+   * Get ingredient nutrition with automatic fallback: Spoonacular → Edamam
+   * @param ingredientText - Full ingredient text (e.g., "2 cups flour")
+   * @returns Nutrition data and the source that was used
+   */
+  private async getIngredientNutritionWithFallback(ingredientText: string): Promise<{ data: any; source: 'spoonacular' | 'edamam' } | null> {
+    console.log(`🔍 Fetching nutrition for: "${ingredientText}" (Spoonacular → Edamam fallback)`);
+    
+    // Try Spoonacular first
+    const spoonacularData = await this.spoonacularService.getIngredientNutrition(ingredientText);
+    
+    if (spoonacularData) {
+      console.log(`✅ Found in Spoonacular: ${spoonacularData.nutrition?.calories || 'N/A'} kcal`);
+      return { data: spoonacularData, source: 'spoonacular' };
+    }
+    
+    // Fallback to Edamam
+    console.log(`⚠️ Not found in Spoonacular, trying Edamam...`);
+    const edamamData = await this.edamamService.getIngredientNutrition(ingredientText);
+    
+    if (edamamData) {
+      console.log(`✅ Found in Edamam`);
+      return { data: edamamData, source: 'edamam' };
+    }
+    
+    console.log(`❌ Not found in either source`);
+    return null;
+  }
+
+  /**
    * Get available customization options for a recipe
    */
   async getAvailableCustomizations(recipeId: string, source: 'edamam' | 'spoonacular'): Promise<any> {
@@ -123,6 +152,9 @@ export class IngredientCustomizationService {
     console.log(`   ⚠️ IMPORTANT: Original nutrition is PER SERVING, ingredients are for ${servings} servings TOTAL`);
     console.log(`   📐 Will DIVIDE ingredient nutrition by ${servings} to get per-serving contribution`);
     
+    // Debug array to track all operations
+    const debugSteps: any[] = [];
+    
     // Convert original nutrition to standardized format
     let adjustedNutrition: StandardizedNutrition;
     
@@ -171,6 +203,9 @@ export class IngredientCustomizationService {
             const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
             const oldUnit = (modification as any).originalUnit || newUnit;
             
+            // Use exact ingredient name from recipe if provided (for Spoonacular/Edamam compatibility)
+            const oldIngredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+            
             // OPTIMIZATION: If it's the same ingredient, just quantity changed, use linear scaling
             const sameIngredient = modification.originalIngredient.toLowerCase().trim() === modification.newIngredient.toLowerCase().trim();
             const sameUnit = oldUnit.toLowerCase() === newUnit.toLowerCase();
@@ -181,13 +216,16 @@ export class IngredientCustomizationService {
               // Quantity-only change - use linear scaling for accuracy
               console.log(`  📊 Same ingredient quantity change detected: ${oldAmount} → ${newAmount} ${newUnit} ${modification.originalIngredient}`);
               
-              // Fetch nutrition for 1 unit
-              const baseIngredientText = `1 ${newUnit} ${modification.newIngredient}`;
-              console.log(`  📝 Fetching nutrition for base unit: "${baseIngredientText}" (Spoonacular)`);
-              const baseNutritionData = await this.spoonacularService.getIngredientNutrition(baseIngredientText);
+              // Fetch nutrition for 1 unit (use exact ingredient name if provided)
+              const baseIngredientText = `1 ${newUnit} ${oldIngredientName}`;
+              const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText);
+              const baseNutritionData = baseNutritionResult?.data;
               
-              if (baseNutritionData) {
-                const baseNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData);
+              if (baseNutritionData && baseNutritionResult) {
+                // Transform based on which source returned the data
+                const baseNutrition = baseNutritionResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData)
+                  : NutritionMappingService.transformEdamamNutrition(baseNutritionData, 1);
                 
                 // Calculate delta: (newAmount - oldAmount) * baseNutrition
                 const amountDelta = newAmount - oldAmount;
@@ -197,6 +235,8 @@ export class IngredientCustomizationService {
                 // Scale the base nutrition by the delta
                 const deltaNutrition = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
                 console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}, TOTAL): ${deltaNutrition.calories.quantity} kcal`);
+                
+                const beforeDivision = adjustedNutrition.calories.quantity;
                 
                 // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
                 const deltaPerServing = NutritionMappingService.divideNutrition(deltaNutrition, servings);
@@ -208,6 +248,22 @@ export class IngredientCustomizationService {
                 console.log(`  ✅ Applied quantity change using linear scaling`);
                 console.log(`     Result: ${adjustedNutrition.calories.quantity} kcal`);
                 
+                debugSteps.push({
+                  step: 'LINEAR_SCALING',
+                  ingredient: modification.originalIngredient,
+                  oldAmount: oldAmount,
+                  oldUnit: oldUnit,
+                  newAmount: newAmount,
+                  newUnit: newUnit,
+                  amountDelta: amountDelta,
+                  baseNutritionPerUnit: baseNutrition.calories.quantity,
+                  deltaNutritionTotal: deltaNutrition.calories.quantity,
+                  servings: servings,
+                  deltaNutritionPerServing: deltaPerServing.calories.quantity,
+                  nutritionBefore: beforeDivision,
+                  nutritionAfter: adjustedNutrition.calories.quantity
+                });
+                
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
                 quantityChangeApplied = true;
@@ -218,24 +274,77 @@ export class IngredientCustomizationService {
             
             // Fallback or different ingredient replacement
             if (!quantityChangeApplied) {
-              const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
-              const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
+              // Normalize units to singular (Spoonacular prefers singular)
+              const normalizeUnit = (unit: string): string => {
+                if (!unit) return '';
+                const u = unit.toLowerCase();
+                // Remove trailing 's' for common units
+                if (u.endsWith('slices')) return u.slice(0, -1); // slices → slice
+                if (u.endsWith('cups')) return 'cup';
+                if (u.endsWith('tbsps') || u.endsWith('tablespoons')) return 'tablespoon';
+                if (u.endsWith('tsps') || u.endsWith('teaspoons')) return 'teaspoon';
+                if (u.endsWith('ounces')) return 'ounce';
+                if (u.endsWith('pieces')) return 'piece';
+                if (u.endsWith('grams')) return 'gram';
+                if (u.endsWith('pounds')) return 'pound';
+                return unit;
+              };
               
-              // Get nutrition data for both ingredients from Spoonacular
-              console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
-              const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
-              console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
-              const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+              const normalizedOldUnit = normalizeUnit(oldUnit);
+              const normalizedNewUnit = normalizeUnit(newUnit);
               
-              if (oldNutritionData && newNutritionData) {
-                // Transform to standardized format with full micronutrient data
-                const oldNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
-                const newNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+              // If oldUnit is empty but newUnit exists, use newUnit for both (user is clarifying the unit)
+              const effectiveOldUnit = normalizedOldUnit || normalizedNewUnit;
+              const effectiveNewUnit = normalizedNewUnit;
+              
+              const newIngredientText = effectiveNewUnit ? `${newAmount} ${effectiveNewUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+              const oldIngredientText = effectiveOldUnit ? `${oldAmount} ${effectiveOldUnit} ${oldIngredientName}` : `${oldAmount} ${oldIngredientName}`;
+              
+              debugSteps.push({
+                step: 'FALLBACK_FETCH_START',
+                oldText: oldIngredientText,
+                newText: newIngredientText,
+                oldAmount: oldAmount,
+                oldUnit: oldUnit,
+                oldUnitNormalized: normalizedOldUnit,
+                newAmount: newAmount,
+                newUnit: newUnit,
+                newUnitNormalized: normalizedNewUnit,
+                servings: servings
+              });
+              
+              // Get nutrition data for both ingredients with fallback
+              const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText);
+              const oldNutritionData = oldNutritionResult?.data;
+              console.log(`  📝 OLD nutrition fetched:`, oldNutritionData ? `SUCCESS (${oldNutritionResult?.source})` : 'NULL');
+              
+              const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText);
+              const newNutritionData = newNutritionResult?.data;
+              console.log(`  📝 NEW nutrition fetched:`, newNutritionData ? `SUCCESS (${newNutritionResult?.source})` : 'NULL');
+              
+              debugSteps.push({
+                step: 'FALLBACK_FETCH_RESULT',
+                oldNutritionFetched: !!oldNutritionData,
+                newNutritionFetched: !!newNutritionData,
+                oldCalories: oldNutritionData?.nutrition?.calories || 'NULL',
+                newCalories: newNutritionData?.nutrition?.calories || 'NULL'
+              });
+              
+              if (oldNutritionData && newNutritionData && oldNutritionResult && newNutritionResult) {
+                // Transform to standardized format with full micronutrient data (based on source)
+                const oldNutritionTotal = oldNutritionResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData)
+                  : NutritionMappingService.transformEdamamNutrition(oldNutritionData, 1);
+                const newNutritionTotal = newNutritionResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData)
+                  : NutritionMappingService.transformEdamamNutrition(newNutritionData, 1);
                 
                 console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
                 console.log(`     Old (TOTAL for ${servings} servings): ${oldNutritionTotal.calories.quantity} kcal`);
                 console.log(`     New (TOTAL for ${servings} servings): ${newNutritionTotal.calories.quantity} kcal`);
                 console.log(`     Net change (TOTAL): ${newNutritionTotal.calories.quantity - oldNutritionTotal.calories.quantity} kcal`);
+                
+                const beforeDivision = adjustedNutrition.calories.quantity;
                 
                 // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
                 const oldNutritionPerServing = NutritionMappingService.divideNutrition(oldNutritionTotal, servings);
@@ -245,13 +354,46 @@ export class IngredientCustomizationService {
                 console.log(`     New (per serving): ${newNutritionPerServing.calories.quantity} kcal`);
                 console.log(`     Net change (per serving): ${newNutritionPerServing.calories.quantity - oldNutritionPerServing.calories.quantity} kcal`);
                 
+                const beforeSubtract = adjustedNutrition.calories.quantity;
+                
                 // Subtract old ingredient nutrition (including micros)
                 adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutritionPerServing);
+                
+                const afterSubtract = adjustedNutrition.calories.quantity;
+                
                 // Add new ingredient nutrition (including micros)
                 adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutritionPerServing);
                 
+                const afterAdd = adjustedNutrition.calories.quantity;
+                
+                debugSteps.push({
+                  step: 'FALLBACK_REPLACE',
+                  ingredient: modification.originalIngredient,
+                  oldText: oldIngredientText,
+                  newText: newIngredientText,
+                  oldNutritionTotal: oldNutritionTotal.calories.quantity,
+                  newNutritionTotal: newNutritionTotal.calories.quantity,
+                  servings: servings,
+                  oldNutritionPerServing: oldNutritionPerServing.calories.quantity,
+                  newNutritionPerServing: newNutritionPerServing.calories.quantity,
+                  beforeSubtract: beforeSubtract,
+                  afterSubtract: afterSubtract,
+                  afterAdd: afterAdd,
+                  finalCalories: adjustedNutrition.calories.quantity
+                });
+                
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
+              } else {
+                // Nutrition fetch failed!
+                debugSteps.push({
+                  step: 'FALLBACK_FETCH_FAILED',
+                  reason: !oldNutritionData ? 'OLD_NUTRITION_NULL' : 'NEW_NUTRITION_NULL',
+                  oldText: oldIngredientText,
+                  newText: newIngredientText,
+                  message: 'Ingredient nutrition fetch failed - modification skipped!',
+                  nutritionUnchanged: adjustedNutrition.calories.quantity
+                });
               }
             }
           }
@@ -262,12 +404,15 @@ export class IngredientCustomizationService {
             // Construct full ingredient text with amount and unit
             const amount = (modification as any).amount || 1;
             const unit = (modification as any).unit || '';
-            const ingredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+            const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+            const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
             
-            console.log(`  📝 Fetching nutrition for omit: "${ingredientText}" (Spoonacular)`);
-            const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-            if (ingredientData) {
-              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientData = ingredientResult?.data;
+            if (ingredientData && ingredientResult) {
+              const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
               
               console.log(`  🚫 Omit: ${ingredientText}`);
               console.log(`     Removing (TOTAL for ${servings} servings): ${ingredientNutritionTotal.calories.quantity} kcal, Iron: ${ingredientNutritionTotal.micros.minerals.iron?.quantity || 0}mg`);
@@ -290,10 +435,12 @@ export class IngredientCustomizationService {
             const unit = (modification as any).unit || '';
             const ingredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
             
-            console.log(`  📝 Fetching nutrition for: "${ingredientText}" (Spoonacular)`);
-            const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-            if (ingredientData) {
-              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientData = ingredientResult?.data;
+            if (ingredientData && ingredientResult) {
+              const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
               
               console.log(`  ➕ Add: ${ingredientText}`);
               console.log(`     Adding (TOTAL for ${servings} servings): ${ingredientNutritionTotal.calories.quantity} kcal, Calcium: ${ingredientNutritionTotal.micros.minerals.calcium?.quantity || 0}mg`);
@@ -314,12 +461,15 @@ export class IngredientCustomizationService {
             // Construct full ingredient text with amount and unit
             const amount = (modification as any).amount || 1;
             const unit = (modification as any).unit || '';
-            const ingredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+            const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+            const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
             
-            console.log(`  📝 Fetching nutrition for reduce: "${ingredientText}" (Spoonacular)`);
-            const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-            if (ingredientData) {
-              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientData = ingredientResult?.data;
+            if (ingredientData && ingredientResult) {
+              const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
               const reductionFactor = modification.reductionPercent / 100;
               
               console.log(`  📉 Reduce: ${ingredientText} by ${modification.reductionPercent}%`);
@@ -347,7 +497,7 @@ export class IngredientCustomizationService {
     // - Original nutrition is already PER SERVING
     // - We divided each ingredient modification by servings to get per-serving changes
     // - Result is PER SERVING nutrition (which is what we want!)
-    
+
     console.log('✅ Edamam modifications complete');
     console.log(`   Final (PER SERVING): ${adjustedNutrition.calories.quantity} kcal`);
     console.log(`   Micros tracked: ${micronutrientsTracked}`);
@@ -364,8 +514,9 @@ export class IngredientCustomizationService {
       calculationMethod: 'spoonacular_api',
       accuracy: 'precise',
       source: 'edamam',
-      micronutrientsIncluded: micronutrientsTracked
-    };
+      micronutrientsIncluded: micronutrientsTracked,
+      debugSteps: debugSteps // Include detailed calculation steps
+    } as any;
   }
 
   /**
@@ -436,6 +587,9 @@ export class IngredientCustomizationService {
               const oldAmount = (modification as any).originalAmount || newAmount;  // Fallback to new amount if not specified
               const oldUnit = (modification as any).originalUnit || newUnit;
               
+              // Use exact ingredient name from recipe if provided (for Spoonacular/Edamam compatibility)
+              const oldIngredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+              
               // OPTIMIZATION: If it's the same ingredient, just quantity changed, use linear scaling
               const sameIngredient = modification.originalIngredient.toLowerCase().trim() === modification.newIngredient.toLowerCase().trim();
               const sameUnit = oldUnit.toLowerCase() === newUnit.toLowerCase();
@@ -446,13 +600,15 @@ export class IngredientCustomizationService {
                 // Quantity-only change - use linear scaling for accuracy
                 console.log(`  📊 Same ingredient quantity change detected: ${oldAmount} → ${newAmount} ${newUnit} ${modification.originalIngredient}`);
                 
-                // Fetch nutrition for 1 unit
-                const baseIngredientText = `1 ${newUnit} ${modification.newIngredient}`;
-                console.log(`  📝 Fetching nutrition for base unit: "${baseIngredientText}" (Spoonacular)`);
-                const baseNutritionData = await this.spoonacularService.getIngredientNutrition(baseIngredientText);
+                // Fetch nutrition for 1 unit (use exact ingredient name if provided)
+                const baseIngredientText = `1 ${newUnit} ${oldIngredientName}`;
+                const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText);
+                const baseNutritionData = baseNutritionResult?.data;
                 
-                if (baseNutritionData) {
-                  const baseNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData);
+                if (baseNutritionData && baseNutritionResult) {
+                  const baseNutrition = baseNutritionResult.source === 'spoonacular'
+                    ? NutritionMappingService.transformSpoonacularIngredientNutrition(baseNutritionData)
+                    : NutritionMappingService.transformEdamamNutrition(baseNutritionData, 1);
                   
                   // Calculate delta: (newAmount - oldAmount) * baseNutrition
                   const amountDelta = newAmount - oldAmount;
@@ -460,10 +616,14 @@ export class IngredientCustomizationService {
                   console.log(`  📊 Base nutrition (per ${newUnit}): ${baseNutrition.calories.quantity} kcal`);
                   
                   // Scale the base nutrition by the delta
-                  const deltaNutrition = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
-                  console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}): ${deltaNutrition.calories.quantity} kcal`);
+                  const deltaNutritionTotal = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
+                  console.log(`  📊 Delta nutrition TOTAL (${amountDelta} ${newUnit}): ${deltaNutritionTotal.calories.quantity} kcal`);
                   
-                  // Add the delta to original nutrition
+                  // DIVIDE by servings to get per-serving delta (ingredients are for ALL servings, recipe nutrition is PER SERVING)
+                  const deltaNutrition = NutritionMappingService.divideNutrition(deltaNutritionTotal, servings);
+                  console.log(`  📊 Delta nutrition PER SERVING (÷${servings}): ${deltaNutrition.calories.quantity} kcal`);
+                  
+                  // Add the per-serving delta to original per-serving nutrition
                   adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, deltaNutrition);
                   
                   console.log(`  ✅ Applied quantity change using linear scaling`);
@@ -479,23 +639,40 @@ export class IngredientCustomizationService {
               
               // Fallback or different ingredient replacement
               if (!quantityChangeApplied) {
-                const newIngredientText = newUnit ? `${newAmount} ${newUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
-                const oldIngredientText = oldUnit ? `${oldAmount} ${oldUnit} ${modification.originalIngredient}` : `${oldAmount} ${modification.originalIngredient}`;
+                // If oldUnit is empty but newUnit exists, use newUnit for both (user is clarifying the unit)
+                const effectiveOldUnit = oldUnit || newUnit;
+                const effectiveNewUnit = newUnit;
                 
-                // Use Spoonacular for ingredient nutrition
-                console.log(`  📝 Fetching nutrition for old: "${oldIngredientText}" (Spoonacular)`);
-                const oldNutritionData = await this.spoonacularService.getIngredientNutrition(oldIngredientText);
-                console.log(`  📝 Fetching nutrition for new: "${newIngredientText}" (Spoonacular)`);
-                const newNutritionData = await this.spoonacularService.getIngredientNutrition(newIngredientText);
+                const newIngredientText = effectiveNewUnit ? `${newAmount} ${effectiveNewUnit} ${modification.newIngredient}` : `${newAmount} ${modification.newIngredient}`;
+                const oldIngredientText = effectiveOldUnit ? `${oldAmount} ${effectiveOldUnit} ${oldIngredientName}` : `${oldAmount} ${oldIngredientName}`;
                 
-                if (oldNutritionData && newNutritionData) {
-                  const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
-                  const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+                // Get ingredient nutrition with fallback
+                const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText);
+                const oldNutritionData = oldNutritionResult?.data;
+                console.log(`  📝 OLD nutrition fetched:`, oldNutritionData ? `SUCCESS (${oldNutritionResult?.source})` : 'NULL');
+                
+                const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText);
+                const newNutritionData = newNutritionResult?.data;
+                console.log(`  📝 NEW nutrition fetched:`, newNutritionData ? `SUCCESS (${newNutritionResult?.source})` : 'NULL');
+                
+                if (oldNutritionData && newNutritionData && oldNutritionResult && newNutritionResult) {
+                  const oldNutritionTotal = oldNutritionResult.source === 'spoonacular'
+                    ? NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData)
+                    : NutritionMappingService.transformEdamamNutrition(oldNutritionData, 1);
+                  const newNutritionTotal = newNutritionResult.source === 'spoonacular'
+                    ? NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData)
+                    : NutritionMappingService.transformEdamamNutrition(newNutritionData, 1);
                   
                   console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-                  console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
-                  console.log(`     New: ${newNutrition.calories.quantity} kcal`);
-                  console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+                  console.log(`     Old TOTAL: ${oldNutritionTotal.calories.quantity} kcal`);
+                  console.log(`     New TOTAL: ${newNutritionTotal.calories.quantity} kcal`);
+                  console.log(`     Net change TOTAL: ${newNutritionTotal.calories.quantity - oldNutritionTotal.calories.quantity} kcal`);
+                  
+                  // DIVIDE by servings to get per-serving nutrition (ingredients are for ALL servings)
+                  const oldNutrition = NutritionMappingService.divideNutrition(oldNutritionTotal, servings);
+                  const newNutrition = NutritionMappingService.divideNutrition(newNutritionTotal, servings);
+                  console.log(`     Old PER SERVING (÷${servings}): ${oldNutrition.calories.quantity} kcal`);
+                  console.log(`     New PER SERVING (÷${servings}): ${newNutrition.calories.quantity} kcal`);
                   
                   adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
                   adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
@@ -512,13 +689,21 @@ export class IngredientCustomizationService {
               // Construct full ingredient text with amount and unit
               const amount = (modification as any).amount || 1;
               const unit = (modification as any).unit || '';
-              const ingredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+              const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+              const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
               
-              console.log(`  📝 Fetching nutrition for omit: "${ingredientText}" (Spoonacular)`);
-              const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-              if (ingredientData) {
-                const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
-                console.log(`  🚫 Omit: ${ingredientText} (${ingredientNutrition.calories.quantity} kcal)`);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientData = ingredientResult?.data;
+              if (ingredientData && ingredientResult) {
+                const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                  : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
+                console.log(`  🚫 Omit TOTAL: ${ingredientText} (${ingredientNutritionTotal.calories.quantity} kcal)`);
+                
+                // DIVIDE by servings to get per-serving nutrition
+                const ingredientNutrition = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
+                console.log(`  🚫 Omit PER SERVING (÷${servings}): ${ingredientNutrition.calories.quantity} kcal`);
+                
                 adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, ingredientNutrition);
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
@@ -533,11 +718,18 @@ export class IngredientCustomizationService {
               const unit = (modification as any).unit || '';
               const ingredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
               
-              console.log(`  📝 Fetching nutrition for: "${ingredientText}" (Spoonacular)`);
-              const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-              if (ingredientData) {
-                const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
-                console.log(`  ➕ Add: ${ingredientText} (${ingredientNutrition.calories.quantity} kcal)`);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientData = ingredientResult?.data;
+              if (ingredientData && ingredientResult) {
+                const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                  : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
+                console.log(`  ➕ Add TOTAL: ${ingredientText} (${ingredientNutritionTotal.calories.quantity} kcal)`);
+                
+                // DIVIDE by servings to get per-serving nutrition
+                const ingredientNutrition = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
+                console.log(`  ➕ Add PER SERVING (÷${servings}): ${ingredientNutrition.calories.quantity} kcal`);
+                
                 adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, ingredientNutrition);
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
@@ -550,15 +742,23 @@ export class IngredientCustomizationService {
               // Construct full ingredient text with amount and unit
               const amount = (modification as any).amount || 1;
               const unit = (modification as any).unit || '';
-              const ingredientText = unit ? `${amount} ${unit} ${modification.originalIngredient}` : `${amount} ${modification.originalIngredient}`;
+              const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
+              const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
               
-              console.log(`  📝 Fetching nutrition for reduce: "${ingredientText}" (Spoonacular)`);
-              const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-              if (ingredientData) {
-                const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientData = ingredientResult?.data;
+              if (ingredientData && ingredientResult) {
+                const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
+                  ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
+                  : NutritionMappingService.transformEdamamNutrition(ingredientData, 1);
                 const reductionFactor = modification.reductionPercent / 100;
-                console.log(`  📉 Reduce: ${ingredientText} by ${modification.reductionPercent}%`);
+                console.log(`  📉 Reduce TOTAL: ${ingredientText} by ${modification.reductionPercent}% (${ingredientNutritionTotal.calories.quantity} kcal)`);
+                
+                // DIVIDE by servings to get per-serving nutrition
+                const ingredientNutrition = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
                 const amountToRemove = NutritionMappingService.multiplyNutrition(ingredientNutrition, reductionFactor);
+                console.log(`  📉 Reduce PER SERVING (÷${servings}, ×${reductionFactor}): ${amountToRemove.calories.quantity} kcal`);
+                
                 adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, amountToRemove);
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
@@ -568,13 +768,12 @@ export class IngredientCustomizationService {
         }
       }
 
-      // Apply serving adjustment
-      if (servings !== 1) {
-        console.log(`📊 Adjusting for ${servings} servings`);
-        adjustedNutrition = NutritionMappingService.multiplyNutrition(adjustedNutrition, servings);
-      }
+      // NOTE: NO serving adjustment needed here!
+      // Recipe nutrition is already per-serving, and we've been dividing all ingredient changes by servings.
+      // So the final result is correctly in per-serving format.
 
       console.log('✅ Spoonacular modifications complete');
+      console.log(`   Final nutrition PER SERVING: ${adjustedNutrition.calories.quantity} kcal`);
       console.log(`   Micros tracked: ${micronutrientsTracked}`);
 
       const standardizedOriginal = originalNutrition.micros 

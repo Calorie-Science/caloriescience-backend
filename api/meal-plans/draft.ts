@@ -72,13 +72,38 @@ const updateCustomizationsSchema = Joi.object({
           then: Joi.required(),
           otherwise: Joi.forbidden()
         }),
+        // Original ingredient data from recipe - REQUIRED for replace/omit to ensure correct nutrition calculation
+        originalIngredientName: Joi.string().when('type', {
+          is: Joi.string().valid('replace', 'omit'),
+          then: Joi.optional(), // Optional but highly recommended
+          otherwise: Joi.forbidden()
+        }),
+        originalAmount: Joi.number().min(0).when('type', {
+          is: Joi.string().valid('replace', 'omit'),
+          then: Joi.required(), // Required for accurate nutrition subtraction
+          otherwise: Joi.forbidden()
+        }),
+        originalUnit: Joi.string().allow('').when('type', {
+          is: Joi.string().valid('replace', 'omit'),
+          then: Joi.required(), // Required (can be empty string if no unit in recipe)
+          otherwise: Joi.forbidden()
+        }),
+        // New ingredient data - only for add/replace
         newIngredient: Joi.string().when('type', {
           is: Joi.string().valid('replace', 'add'),
           then: Joi.required(),
           otherwise: Joi.forbidden()
         }),
-        amount: Joi.number().min(0).optional(), // Quantity for newIngredient
-        unit: Joi.string().optional(), // Unit for newIngredient
+        amount: Joi.number().min(0).when('type', {
+          is: Joi.string().valid('replace', 'add'),
+          then: Joi.required(), // Required for add/replace
+          otherwise: Joi.forbidden()
+        }),
+        unit: Joi.string().allow('').when('type', {
+          is: Joi.string().valid('replace', 'add'),
+          then: Joi.required(), // Required (can be empty string)
+          otherwise: Joi.forbidden()
+        }),
         notes: Joi.string().optional()
       })
     ).required(),
@@ -475,15 +500,15 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                       }
                       
                       originalNutritionWithMicros = {
-                        calories: { quantity: recipe.calories || 0, unit: 'kcal' },
-                        macros: {
-                          protein: { quantity: recipe.protein || 0, unit: 'g' },
-                          carbs: { quantity: recipe.carbs || 0, unit: 'g' },
-                          fat: { quantity: recipe.fat || 0, unit: 'g' },
-                          fiber: { quantity: recipe.fiber || 0, unit: 'g' }
-                        },
-                        micros: { vitamins: {}, minerals: {} }
-                      };
+                      calories: { quantity: recipe.calories || 0, unit: 'kcal' },
+                      macros: {
+                        protein: { quantity: recipe.protein || 0, unit: 'g' },
+                        carbs: { quantity: recipe.carbs || 0, unit: 'g' },
+                        fat: { quantity: recipe.fat || 0, unit: 'g' },
+                        fiber: { quantity: recipe.fiber || 0, unit: 'g' }
+                      },
+                      micros: { vitamins: {}, minerals: {} }
+                    };
                     }
                     
                     // Verify original nutrition has values
@@ -532,9 +557,9 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                   } else if (hasValidCustomNutrition) {
                     // Has customNutrition but no micros (old format)
                     console.log(`  ⚠️ Using stored customNutrition (old format, macros only)`);
-                    finalNutrition = {
-                      ...recipe.nutrition,
-                      macros: {
+                      finalNutrition = {
+                        ...recipe.nutrition,
+                        macros: {
                         protein: { quantity: recipeCustomizations.customNutrition.macros?.protein?.quantity || recipeCustomizations.customNutrition.protein || 0, unit: 'g' },
                         carbs: { quantity: recipeCustomizations.customNutrition.macros?.carbs?.quantity || recipeCustomizations.customNutrition.carbs || 0, unit: 'g' },
                         fat: { quantity: recipeCustomizations.customNutrition.macros?.fat?.quantity || recipeCustomizations.customNutrition.fat || 0, unit: 'g' },
@@ -830,8 +855,11 @@ async function calculateNutritionForModifications(
       minerals: Object.keys(result.modifiedNutrition.micros.minerals || {}).length
     });
 
-    // Return the full standardized nutrition object (includes micros!)
-    return result.modifiedNutrition;
+    // Return the full standardized nutrition object (includes micros!) AND debug steps
+    return {
+      ...result.modifiedNutrition,
+      _calculationDebug: result.debugSteps || []
+    };
     
   } catch (error) {
     console.error('❌ Error calculating nutrition with micros:', error);
@@ -1048,6 +1076,14 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         message: `Recipe ${recipeId} not found in ${mealName} for day ${day}`
       });
     }
+    
+    // Initialize recipeServings early so it's available throughout the function
+    let recipeServings: number = recipe.servings || 1;
+    
+    // Initialize debug object at function level so it's always available
+    const debugCacheLookup: any = {
+      lookupKey: { source: customizations.source, recipeId: recipeId }
+    };
 
     // MERGE with existing modifications (frontend sends one at a time)
     // SMART MERGE: If modifying the same ingredient, replace the old modification instead of appending
@@ -1117,9 +1153,9 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             if (newMod.type === 'omit' && existing.type === 'omit' && newMod.originalIngredient && existing.originalIngredient) {
               const match = targetIngredient === existingTarget;
               console.log(`      OMIT vs OMIT match: ${match}`);
-              return match;
-            }
-            
+                return match;
+              }
+              
             // NEW: OMIT on existing REPLACE (user wants to delete an ingredient they previously modified)
             if (newMod.type === 'omit' && existing.type === 'replace' && newMod.originalIngredient && existing.originalIngredient) {
               const newOmitTarget = newMod.originalIngredient.toLowerCase().trim();
@@ -1185,6 +1221,8 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     }
 
     // If auto-calculation is enabled and customNutrition is not provided, calculate it
+    const hadStoredCustomNutrition = !!customizations.customNutrition;
+    
     if (autoCalculateNutrition && !customizations.customNutrition) {
       console.log('🤖 Auto-calculating nutrition WITH MICRONUTRIENTS...');
 
@@ -1199,13 +1237,22 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       
       // Try cache first to get full nutrition
       const cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
+      debugCacheLookup.found = !!cachedRecipe;
+      debugCacheLookup.cachedRecipeServings = cachedRecipe?.servings;
+      debugCacheLookup.cachedRecipeServingsType = typeof cachedRecipe?.servings;
+      
       if (cachedRecipe) {
-        console.log('✅ Found original recipe in cache with micronutrients');
         const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
         originalRecipe = {
           id: recipeId,
           ingredients: standardized.ingredients || []
         };
+        
+        // Update servings from cached recipe
+        const cachedServings = cachedRecipe.servings;
+        recipeServings = cachedServings || 4;
+        debugCacheLookup.recipeServingsUsed = recipeServings;
+        debugCacheLookup.defaultedTo4 = !cachedServings;
         
         // NOW look up original amounts from cached recipe ingredients BEFORE calculating nutrition
         for (const mod of customizations.modifications) {
@@ -1237,14 +1284,24 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         }
         // Use the FULL nutrition details with micronutrients
         // Check if nutritionDetails has actual data (not just empty object)
+        debugCacheLookup.nutritionDetails = {
+          exists: !!standardized.nutritionDetails,
+          calories: standardized.nutritionDetails?.calories,
+          macrosKeys: Object.keys(standardized.nutritionDetails?.macros || {})
+        };
+        
         const hasNutritionData = standardized.nutritionDetails && 
                                   (standardized.nutritionDetails.calories?.quantity > 0 || 
                                    Object.keys(standardized.nutritionDetails.macros || {}).length > 0);
         
+        debugCacheLookup.hasNutritionData = hasNutritionData;
+        
         if (hasNutritionData) {
           originalNutritionWithMicros = standardized.nutritionDetails;
+          debugCacheLookup.nutritionSource = 'standardized.nutritionDetails';
         } else {
           // Fallback to recipe data from draft
+          debugCacheLookup.nutritionSource = 'draft recipe fallback';
           originalNutritionWithMicros = {
             calories: { quantity: recipe.calories || 0, unit: 'kcal' },
             macros: {
@@ -1256,21 +1313,69 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             micros: { vitamins: {}, minerals: {} }
           };
         }
-        console.log('📊 Original recipe nutrition:', {
+        debugCacheLookup.finalNutrition = {
           calories: originalNutritionWithMicros.calories?.quantity,
           protein: originalNutritionWithMicros.macros?.protein?.quantity,
-          vitamins: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
-          minerals: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
-        });
+          vitaminsCount: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
+          mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
+        };
       } else {
         // Fetch from API if not in cache
-        console.log('🔄 Fetching original recipe from API');
+        debugCacheLookup.fetchedFromAPI = true;
         const recipeDetails = await multiProviderService.getRecipeDetails(recipeId);
         if (recipeDetails) {
+          debugCacheLookup.apiRecipeServings = recipeDetails.servings;
           originalRecipe = {
             id: recipeId,
-            ingredients: recipeDetails.ingredients || []
+            ingredients: recipeDetails.ingredients || [],
+            servings: recipeDetails.servings || 4 // CRITICAL: Store servings from API!
           };
+          
+          // Update servings from API response
+          recipeServings = recipeDetails.servings || 4;
+          debugCacheLookup.recipeServingsUsed = recipeServings;
+          debugCacheLookup.defaultedTo4 = !recipeDetails.servings;
+          
+          // CACHE THE RECIPE for future use!
+          try {
+            const recipeToCache: any = {
+              provider: customizations.source,
+              externalRecipeId: recipeId,
+              externalRecipeUri: (recipeDetails as any).sourceUrl || (recipeDetails as any).uri,
+              recipeName: recipeDetails.title,
+              recipeSource: customizations.source,
+              recipeUrl: (recipeDetails as any).sourceUrl,
+              recipeImageUrl: recipeDetails.image,
+              cuisineTypes: (recipeDetails as any).cuisines || (recipeDetails as any).cuisineType || [],
+              mealTypes: (recipeDetails as any).mealTypes || (recipeDetails as any).mealType || [],
+              dishTypes: (recipeDetails as any).dishTypes || (recipeDetails as any).dishType || [],
+              healthLabels: (recipeDetails as any).healthLabels || [],
+              dietLabels: (recipeDetails as any).diets || (recipeDetails as any).dietLabels || [],
+              servings: recipeDetails.servings,
+              prepTimeMinutes: (recipeDetails as any).prepTimeMinutes || null,
+              cookTimeMinutes: (recipeDetails as any).cookTimeMinutes || null,
+              totalTimeMinutes: (recipeDetails as any).readyInMinutes || (recipeDetails as any).totalTimeMinutes,
+              caloriesPerServing: (recipeDetails as any).calories?.toString() || recipeDetails.calories?.toString(),
+              proteinPerServingG: (recipeDetails as any).protein?.toString() || recipeDetails.protein?.toString(),
+              carbsPerServingG: (recipeDetails as any).carbs?.toString() || recipeDetails.carbs?.toString(),
+              fatPerServingG: (recipeDetails as any).fat?.toString() || recipeDetails.fat?.toString(),
+              fiberPerServingG: (recipeDetails as any).fiber?.toString() || recipeDetails.fiber?.toString(),
+              ingredients: recipeDetails.ingredients,
+              ingredientLines: (recipeDetails as any).ingredientLines || [],
+              cookingInstructions: (recipeDetails as any).instructions || [],
+              nutritionDetails: (recipeDetails as any).nutrition || {},
+              originalApiResponse: recipeDetails,
+              hasCompleteNutrition: !!((recipeDetails as any).nutrition?.calories),
+              hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
+              hasCookingInstructions: !!((recipeDetails as any).instructions && (recipeDetails as any).instructions.length > 0),
+              dataQualityScore: 85
+            };
+            await cacheService.storeRecipe(recipeToCache);
+            console.log('  ✅ Recipe cached successfully');
+          } catch (cacheError) {
+            console.error('  ⚠️ Failed to cache recipe:', cacheError);
+            // Don't fail the request if caching fails
+          }
           
           // Look up original amounts from API recipe ingredients
           for (const mod of customizations.modifications) {
@@ -1409,8 +1514,13 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
       // Calculate new nutrition using the NEW micronutrient-aware service
       // Pass recipe servings so ingredient changes are correctly divided
-      const recipeServings = cachedRecipe?.servings || recipe.servings || 1;
-      console.log(`🍽️ Recipe servings for nutrition calculation: ${recipeServings}`);
+      console.log(`🚨🚨🚨 CRITICAL DEBUG 🚨🚨🚨`);
+      console.log(`Recipe servings breakdown:`);
+      console.log(`  - recipe.servings (from draft): ${recipe.servings}`);
+      console.log(`  - cachedRecipe?.servings: ${cachedRecipe?.servings}`);
+      console.log(`  - originalRecipe.servings: ${(originalRecipe as any)?.servings}`);
+      console.log(`  - FINAL recipeServings being passed: ${recipeServings}`);
+      console.log(`🚨🚨🚨 END DEBUG 🚨🚨🚨`);
       
       customizations.customNutrition = await calculateNutritionForModifications(
         originalNutritionWithMicros, // Now passing FULL nutrition with micros!
@@ -1461,6 +1571,47 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           sourceUrl: recipeDetails.sourceUrl
         };
         console.log(`✅ Fetched recipe with ${baseRecipe.ingredients.length} ingredients from API`);
+        
+        // CACHE THE RECIPE for future use!
+        try {
+          const recipeToCache: any = {
+            provider: customizations.source,
+            externalRecipeId: recipeId,
+            externalRecipeUri: (recipeDetails as any).sourceUrl || (recipeDetails as any).uri,
+            recipeName: recipeDetails.title,
+            recipeSource: customizations.source,
+            recipeUrl: (recipeDetails as any).sourceUrl,
+            recipeImageUrl: recipeDetails.image,
+            cuisineTypes: (recipeDetails as any).cuisines || (recipeDetails as any).cuisineType || [],
+            mealTypes: (recipeDetails as any).mealTypes || (recipeDetails as any).mealType || [],
+            dishTypes: (recipeDetails as any).dishTypes || (recipeDetails as any).dishType || [],
+            healthLabels: (recipeDetails as any).healthLabels || [],
+            dietLabels: (recipeDetails as any).diets || (recipeDetails as any).dietLabels || [],
+            servings: recipeDetails.servings,
+            prepTimeMinutes: (recipeDetails as any).prepTimeMinutes || null,
+            cookTimeMinutes: (recipeDetails as any).cookTimeMinutes || null,
+            totalTimeMinutes: (recipeDetails as any).readyInMinutes || (recipeDetails as any).totalTimeMinutes,
+            caloriesPerServing: (recipeDetails as any).calories?.toString() || recipeDetails.calories?.toString(),
+            proteinPerServingG: (recipeDetails as any).protein?.toString() || recipeDetails.protein?.toString(),
+            carbsPerServingG: (recipeDetails as any).carbs?.toString() || recipeDetails.carbs?.toString(),
+            fatPerServingG: (recipeDetails as any).fat?.toString() || recipeDetails.fat?.toString(),
+            fiberPerServingG: (recipeDetails as any).fiber?.toString() || recipeDetails.fiber?.toString(),
+            ingredients: recipeDetails.ingredients,
+            ingredientLines: (recipeDetails as any).ingredientLines || [],
+            cookingInstructions: (recipeDetails as any).instructions || [],
+            nutritionDetails: (recipeDetails as any).nutrition || {},
+            originalApiResponse: recipeDetails,
+            hasCompleteNutrition: !!((recipeDetails as any).nutrition?.calories),
+            hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
+            hasCookingInstructions: !!((recipeDetails as any).instructions && (recipeDetails as any).instructions.length > 0),
+            dataQualityScore: 85
+          };
+          await cacheService.storeRecipe(recipeToCache);
+          console.log('  ✅ Recipe cached successfully');
+        } catch (cacheError) {
+          console.error('  ⚠️ Failed to cache recipe:', cacheError);
+          // Don't fail the request if caching fails
+        }
       } else {
         // Last resort fallback
         baseRecipe = {
@@ -1630,9 +1781,27 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     // Normalize cookingInstructions to array of objects with number and step
     if (customizedRecipe.cookingInstructions && Array.isArray(customizedRecipe.cookingInstructions)) {
       customizedRecipe.cookingInstructions = customizedRecipe.cookingInstructions.map((instruction: any, index: number) => {
-        // If it's already an object with step, return as is
+        // If it's already an object with step, check if step is double-encoded JSON
         if (typeof instruction === 'object' && instruction.step) {
-          return instruction;
+          let stepText = instruction.step;
+          
+          // Check if step is a stringified JSON object (double-encoded)
+          if (typeof stepText === 'string' && stepText.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(stepText);
+              // If it parsed successfully and has a step property, use that
+              if (parsed && typeof parsed === 'object' && parsed.step) {
+                stepText = parsed.step;
+              }
+            } catch (e) {
+              // If parsing fails, keep the original string
+            }
+          }
+          
+          return {
+            number: instruction.number || index + 1,
+            step: stepText
+          };
         }
         // If it's a string, convert to object format
         if (typeof instruction === 'string') {
@@ -1727,6 +1896,10 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       notes: mod.notes || null
     })) || [];
 
+    // Final safety check: ensure recipeServings is correct (use baseRecipe.servings as final source of truth)
+    const finalServings = baseRecipe.servings || recipeServings || recipe.servings || 2;
+    console.log(`📊 Final servings used in response: ${finalServings} (baseRecipe: ${baseRecipe.servings}, recipeServings: ${recipeServings}, recipe: ${recipe.servings})`);
+
     // Return exact same structure as GET /api/recipes/customized
     return res.status(200).json({
       success: true,
@@ -1735,7 +1908,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       customizations: {
         modifications: customizations.modifications || [],
         customizationSummary: customizationSummary,
-        appliedServings: 1,
+      appliedServings: finalServings, // Use actual recipe servings from baseRecipe!
         micronutrientsIncluded: !!(customizations.customNutrition?.micros),
         nutritionComparison: nutritionComparison,
         originalNutrition: {
@@ -1757,6 +1930,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition,
       // TEMPORARY DEBUG INFO - Remove after debugging
       _debug: {
+        cacheLookup: debugCacheLookup,
         step1_originalNutritionBeforeCheck: debugOriginalNutritionBeforeCheck,
         step2_originalNutritionAfterCheck: debugOriginalNutritionAfterCheck,
         step3_calculatedCustomNutrition: customizations.customNutrition,
@@ -1782,7 +1956,14 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           count: customizedRecipe.ingredients?.length || 0,
           sample: customizedRecipe.ingredients?.slice(0, 3).map((i: any) => i.name || i.food) || []
         },
-        cachedRecipeFound: !!cachedRecipe,
+        servingsDebug: {
+          recipeFromDraft: recipe.servings,
+          recipeServingsVariable: typeof recipeServings !== 'undefined' ? recipeServings : 'NOT_DEFINED',
+          finalServings: finalServings,
+          baseRecipe: baseRecipe.servings
+        },
+        nutritionSource: hadStoredCustomNutrition ? 'STORED_FROM_PREVIOUS' : 'FRESHLY_CALCULATED',
+        calculationDebug: (customizations.customNutrition as any)?._calculationDebug || [],
         modificationsApplied: customizations.modifications,
         modificationsCount: customizations.modifications?.length || 0,
         source: customizations.source,

@@ -27,7 +27,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { q, mode, source, recipeId, ingredientId } = req.query;
+    const { q, mode, source, recipeId, ingredientId, selectedUnit } = req.query;
 
     // Validate query parameter
     if (!q || typeof q !== 'string') {
@@ -68,8 +68,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     let result: any = { suggestions: [], unitSuggestions: {}, substitutes: [] };
 
     if (finalSource === 'edamam') {
-      // Use Edamam autocomplete
-      result = await edamamService.getIngredientAutocomplete(q, finalMode);
+      // Use Edamam autocomplete (doesn't support with_substitutes mode)
+      const edamamMode = finalMode === 'with_substitutes' ? 'basic' : finalMode;
+      result = await edamamService.getIngredientAutocomplete(q, edamamMode);
     } else if (finalSource === 'spoonacular') {
       // Use Spoonacular autocomplete with unit suggestions support
       if (finalMode === 'with_substitutes' && recipeId && ingredientId) {
@@ -93,8 +94,23 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // For units_only mode, return only the units field
     if (finalMode === 'units_only') {
+      let units = result.units || [];
+      
+      // If selectedUnit is provided, add it to the top and remove duplicates
+      if (selectedUnit && typeof selectedUnit === 'string' && selectedUnit.trim()) {
+        const selectedUnitTrimmed = selectedUnit.trim();
+        
+        // Remove the selected unit if it already exists in the array (case-insensitive)
+        units = units.filter((unit: string) => 
+          unit.toLowerCase() !== selectedUnitTrimmed.toLowerCase()
+        );
+        
+        // Add selected unit to the top
+        units = [selectedUnitTrimmed, ...units];
+      }
+      
       return res.status(200).json({
-        units: result.units || []
+        units: units
       });
     }
 

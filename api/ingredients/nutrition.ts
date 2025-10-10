@@ -1,6 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { EdamamService } from '../../lib/edamamService';
 import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
+import { NutritionMappingService } from '../../lib/nutritionMappingService';
 import { requireAuth } from '../../lib/auth';
 
 const edamamService = new EdamamService();
@@ -38,38 +39,78 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Validate source parameter
-    const validSources = ['edamam', 'spoonacular'];
-    const finalSource = source && typeof source === 'string' && validSources.includes(source)
-      ? source as 'edamam' | 'spoonacular'
-      : 'spoonacular'; // Default to Spoonacular for more accurate portion sizes
+    const validSources = ['edamam', 'spoonacular', 'auto'];
+    const requestedSource = source && typeof source === 'string' && validSources.includes(source)
+      ? source as 'edamam' | 'spoonacular' | 'auto'
+      : 'auto'; // Default to auto (try Spoonacular first, then Edamam)
 
     // Build ingredient text with amount and unit if provided
     let ingredientText = ingredient.trim();
-    if (amount && unit) {
-      ingredientText = `${amount} ${unit} ${ingredient}`;
+    if (amount) {
+      // If unit is provided (even if empty string), include it in the text
+      if (unit !== undefined) {
+        ingredientText = unit ? `${amount} ${unit} ${ingredient}` : `${amount} ${ingredient}`;
+      }
     }
 
     let nutritionData: any = null;
+    let actualSource: string = requestedSource;
 
-    if (finalSource === 'edamam') {
-      // Get nutrition from Edamam
+    if (requestedSource === 'edamam') {
+      // Explicitly requested Edamam only
+      console.log('🔍 Using Edamam (explicitly requested)');
       nutritionData = await edamamService.getIngredientNutrition(ingredientText);
-    } else if (finalSource === 'spoonacular') {
-      // Get nutrition from Spoonacular
+      actualSource = 'edamam';
+    } else if (requestedSource === 'spoonacular') {
+      // Explicitly requested Spoonacular only
+      console.log('🔍 Using Spoonacular (explicitly requested)');
       nutritionData = await multiProviderService.getIngredientNutrition(ingredientText);
+      actualSource = 'spoonacular';
+    } else {
+      // Auto mode: Try Spoonacular first, fallback to Edamam
+      console.log('🔍 Auto mode: Trying Spoonacular first...');
+      nutritionData = await multiProviderService.getIngredientNutrition(ingredientText);
+      
+      if (nutritionData) {
+        console.log('✅ Found in Spoonacular');
+        actualSource = 'spoonacular';
+      } else {
+        console.log('⚠️ Not found in Spoonacular, falling back to Edamam...');
+        nutritionData = await edamamService.getIngredientNutrition(ingredientText);
+        
+        if (nutritionData) {
+          console.log('✅ Found in Edamam');
+          actualSource = 'edamam';
+        } else {
+          console.log('❌ Not found in either source');
+        }
+      }
     }
 
     if (!nutritionData) {
-      return res.status(404).json({
-        error: 'Nutrition data not found',
-        message: 'No nutrition information available for this ingredient'
+      return res.status(200).json({
+        success: false,
+        ingredient: ingredientText,
+        requestedSource: requestedSource,
+        message: 'No nutrition information available for this ingredient in either Spoonacular or Edamam',
+        timestamp: new Date().toISOString()
       });
+    }
+
+    // Transform to standardized format with exhaustive vitamins/minerals (all fields, even if 0)
+    let standardizedNutrition;
+    if (actualSource === 'spoonacular') {
+      standardizedNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(nutritionData);
+    } else {
+      // Edamam - servings is 1 for ingredient nutrition (already for the specified amount)
+      standardizedNutrition = NutritionMappingService.transformEdamamNutrition(nutritionData, 1);
     }
 
     return res.status(200).json({
       success: true,
       ingredient: ingredientText,
-      source: finalSource,
+      source: actualSource,
+      requestedSource: requestedSource,
       nutrition: nutritionData,
       timestamp: new Date().toISOString()
     });
