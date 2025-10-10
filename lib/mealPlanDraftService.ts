@@ -631,30 +631,10 @@ export class MealPlanDraftService {
       }
     }
 
-    // Merge new customizations with existing ones (don't replace entirely)
-    const existingCustomizations = dayPlan.meals[mealName].customizations[recipeId];
-    
-    if (existingCustomizations && existingCustomizations.modifications) {
-      // Merge modifications arrays
-      const mergedModifications = [
-        ...existingCustomizations.modifications,
-        ...customizations.modifications
-      ];
-      
-      // Merge customizations, preserving existing data
-      const mergedCustomizations = {
-        ...existingCustomizations,
-        ...customizations,
-        modifications: mergedModifications
-      };
-      
-      console.log(`🔄 Merged customizations: ${existingCustomizations.modifications.length} existing + ${customizations.modifications.length} new = ${mergedModifications.length} total`);
-      dayPlan.meals[mealName].customizations[recipeId] = mergedCustomizations;
-    } else {
-      // No existing customizations, use new ones
-      console.log(`🆕 Setting new customizations: ${customizations.modifications.length} modifications`);
-      dayPlan.meals[mealName].customizations[recipeId] = customizations;
-    }
+    // REPLACE customizations (smart merge already happened in API handler)
+    // The API handler in draft.ts already handles smart merging, so we just save what we're given
+    console.log(`💾 Saving customizations: ${customizations.modifications.length} modifications (smart merge already applied)`);
+    dayPlan.meals[mealName].customizations[recipeId] = customizations;
 
     // Recalculate total nutrition for this meal
     dayPlan.meals[mealName].totalNutrition = 

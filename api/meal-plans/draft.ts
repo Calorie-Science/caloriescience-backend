@@ -1084,14 +1084,28 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     const debugCacheLookup: any = {
       lookupKey: { source: customizations.source, recipeId: recipeId }
     };
+    
+    const debugSmartMerge: any = {
+      enabled: false,
+      existingCount: 0,
+      newCount: 0,
+      mergedCount: 0,
+      deletedDueToNoChange: false,
+      operations: []
+    };
 
     // MERGE with existing modifications (frontend sends one at a time)
     // SMART MERGE: If modifying the same ingredient, replace the old modification instead of appending
     if (meal && meal.customizations) {
       const existingCustomizations = meal.customizations[recipeId];
       if (existingCustomizations?.modifications && customizations.modifications) {
+        debugSmartMerge.enabled = true;
+        
         const existingMods = existingCustomizations.modifications;
         const newMods = customizations.modifications;
+        
+        debugSmartMerge.existingCount = existingMods.length;
+        debugSmartMerge.newCount = newMods.length;
         
         console.log(`🔗 SMART MERGE - Merging modifications: ${existingMods.length} existing + ${newMods.length} new`);
         console.log(`   Existing:`, JSON.stringify(existingMods, null, 2));
@@ -1207,13 +1221,79 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             console.log(`    Old: ${oldMod.originalIngredient} → ${oldMod.newIngredient} (${oldMod.amount} ${oldMod.unit})`);
             console.log(`    New: ${updatedMod.originalIngredient} → ${updatedMod.newIngredient} (${updatedMod.amount} ${updatedMod.unit})`);
             
-            mergedMods[existingModIndex] = updatedMod;
+            // Check if this results in NO NET CHANGE from base recipe
+            // Use Number() to ensure type-safe comparison (handles both number and string)
+            const originalAmountNum = Number(updatedMod.originalAmount);
+            const amountNum = Number(updatedMod.amount);
+            const amountMatches = !isNaN(originalAmountNum) && !isNaN(amountNum) && originalAmountNum === amountNum;
+            
+            const isNoChange = updatedMod.type === 'replace' && 
+                               amountMatches && 
+                               updatedMod.originalUnit === updatedMod.unit &&
+                               updatedMod.originalIngredient?.toLowerCase() === updatedMod.newIngredient?.toLowerCase();
+            
+            console.log(`  🔍 Checking for no net change:`);
+            console.log(`     type: ${updatedMod.type} === 'replace' ? ${updatedMod.type === 'replace'}`);
+            console.log(`     originalAmount: ${updatedMod.originalAmount} (${typeof updatedMod.originalAmount}) vs amount: ${updatedMod.amount} (${typeof updatedMod.amount})`);
+            console.log(`     originalAmountNum: ${originalAmountNum} === amountNum: ${amountNum} ? ${amountMatches}`);
+            console.log(`     originalUnit: "${updatedMod.originalUnit}" === unit: "${updatedMod.unit}" ? ${updatedMod.originalUnit === updatedMod.unit}`);
+            console.log(`     originalIng: "${updatedMod.originalIngredient}" === newIng: "${updatedMod.newIngredient}" ? ${updatedMod.originalIngredient?.toLowerCase() === updatedMod.newIngredient?.toLowerCase()}`);
+            console.log(`     isNoChange: ${isNoChange}`);
+            
+            if (isNoChange) {
+              console.log(`  🗑️ Modification results in no net change - REMOVING it`);
+              debugSmartMerge.deletedDueToNoChange = true;
+              debugSmartMerge.operations.push({
+                action: 'DELETE',
+                reason: 'NO_NET_CHANGE',
+                ingredient: targetIngredient,
+                details: `${updatedMod.originalAmount} ${updatedMod.originalUnit} → ${updatedMod.amount} ${updatedMod.unit}`
+              });
+              mergedMods.splice(existingModIndex, 1);
+            } else {
+              debugSmartMerge.operations.push({
+                action: 'REPLACE',
+                ingredient: targetIngredient,
+                oldMod: `${oldMod.originalAmount} ${oldMod.originalUnit} → ${oldMod.amount} ${oldMod.unit}`,
+                newMod: `${updatedMod.originalAmount} ${updatedMod.originalUnit} → ${updatedMod.amount} ${updatedMod.unit}`
+              });
+              mergedMods[existingModIndex] = updatedMod;
+            }
           } else {
             console.log(`  ➕ Adding new modification for "${targetIngredient}"`);
-            mergedMods.push(newMod);
+            
+            // Check if this new modification results in NO NET CHANGE
+            // Use Number() to ensure type-safe comparison
+            const newOriginalAmountNum = Number((newMod as any).originalAmount);
+            const newAmountNum = Number((newMod as any).amount);
+            const newAmountMatches = !isNaN(newOriginalAmountNum) && !isNaN(newAmountNum) && newOriginalAmountNum === newAmountNum;
+            
+            const isNoChange = newMod.type === 'replace' && 
+                               newAmountMatches && 
+                               (newMod as any).originalUnit === (newMod as any).unit &&
+                               newMod.originalIngredient?.toLowerCase() === newMod.newIngredient?.toLowerCase();
+            
+            if (isNoChange) {
+              console.log(`  🗑️ New modification results in no net change - NOT adding it`);
+              debugSmartMerge.deletedDueToNoChange = true;
+              debugSmartMerge.operations.push({
+                action: 'SKIP_ADD',
+                reason: 'NO_NET_CHANGE',
+                ingredient: targetIngredient,
+                details: `${(newMod as any).originalAmount} ${(newMod as any).originalUnit} → ${(newMod as any).amount} ${(newMod as any).unit}`
+              });
+            } else {
+              debugSmartMerge.operations.push({
+                action: 'ADD',
+                ingredient: targetIngredient,
+                details: `${(newMod as any).originalAmount || '?'} ${(newMod as any).originalUnit || ''} → ${(newMod as any).amount} ${(newMod as any).unit}`
+              });
+              mergedMods.push(newMod);
+            }
           }
         }
         
+        debugSmartMerge.mergedCount = mergedMods.length;
         customizations.modifications = mergedMods;
         console.log(`  📝 Total modifications after merge: ${customizations.modifications.length}`);
         console.log(`  📋 Full list:`, customizations.modifications.map((m: any) => `${m.type}: ${m.originalIngredient || m.newIngredient} (${m.amount || '?'} ${m.unit || ''})`));
@@ -1448,16 +1528,17 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
       console.log('🔍 Original recipe ingredients:', originalRecipe?.ingredients?.slice(0, 3).map((ing: any) => ing.name));
       
-      // DE-DUPLICATE modifications for nutrition calculation (keep only FIRST = most recent)
+      // DE-DUPLICATE modifications for nutrition calculation (keep only LAST = most recent)
+      // Iterate BACKWARDS to keep the most recent modification for each ingredient
       const dedupedForNutrition: any[] = [];
       const processedForNutrition = new Map<string, boolean>();
       
-      for (let i = 0; i < customizations.modifications.length; i++) {
+      for (let i = customizations.modifications.length - 1; i >= 0; i--) {
         const mod = customizations.modifications[i];
         const ingredientKey = (mod.originalIngredient || mod.newIngredient)?.toLowerCase().trim();
         
         if (ingredientKey && !processedForNutrition.has(ingredientKey)) {
-          dedupedForNutrition.push(mod);
+          dedupedForNutrition.unshift(mod); // Add to beginning to maintain order
           processedForNutrition.set(ingredientKey, true);
         }
       }
@@ -1930,6 +2011,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition,
       // TEMPORARY DEBUG INFO - Remove after debugging
       _debug: {
+        smartMerge: debugSmartMerge,
         cacheLookup: debugCacheLookup,
         step1_originalNutritionBeforeCheck: debugOriginalNutritionBeforeCheck,
         step2_originalNutritionAfterCheck: debugOriginalNutritionAfterCheck,

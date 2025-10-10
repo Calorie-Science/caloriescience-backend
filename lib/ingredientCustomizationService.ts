@@ -402,13 +402,24 @@ export class IngredientCustomizationService {
         case 'omit':
           if (modification.originalIngredient) {
             // Construct full ingredient text with amount and unit
-            const amount = (modification as any).amount || 1;
-            const unit = (modification as any).unit || '';
+            // Use originalAmount/originalUnit since we're removing the original ingredient
+            const amount = (modification as any).originalAmount || (modification as any).amount || 1;
+            const unit = (modification as any).originalUnit || (modification as any).unit || '';
             const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
             const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
             
+            debugSteps.push({
+              step: 'OMIT_START',
+              ingredientText: ingredientText,
+              amount: amount,
+              unit: unit,
+              ingredientName: ingredientName
+            });
+            
+            const nutritionBefore = adjustedNutrition.calories.quantity;
             const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
             const ingredientData = ingredientResult?.data;
+            
             if (ingredientData && ingredientResult) {
               const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
                 ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
@@ -422,8 +433,29 @@ export class IngredientCustomizationService {
               console.log(`     Removing (per serving): ${ingredientNutritionPerServing.calories.quantity} kcal`);
               
               adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, ingredientNutritionPerServing);
+              
+              debugSteps.push({
+                step: 'OMIT_SUCCESS',
+                ingredientText: ingredientText,
+                source: ingredientResult.source,
+                ingredientNutritionTotal: ingredientNutritionTotal.calories.quantity,
+                ingredientNutritionPerServing: ingredientNutritionPerServing.calories.quantity,
+                servings: servings,
+                nutritionBefore: nutritionBefore,
+                nutritionAfter: adjustedNutrition.calories.quantity
+              });
+              
               appliedModifications.push(modification);
               micronutrientsTracked = true;
+            } else {
+              debugSteps.push({
+                step: 'OMIT_FAILED',
+                ingredientText: ingredientText,
+                reason: 'Nutrition fetch returned null',
+                ingredientResult: ingredientResult,
+                message: `Could not find nutrition for: ${ingredientText}`
+              });
+              console.warn(`  ⚠️ Omit failed: Could not find nutrition for ${ingredientText}`);
             }
           }
           break;
@@ -435,8 +467,18 @@ export class IngredientCustomizationService {
             const unit = (modification as any).unit || '';
             const ingredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
             
+            debugSteps.push({
+              step: 'ADD_START',
+              ingredientText: ingredientText,
+              amount: amount,
+              unit: unit,
+              ingredientName: modification.newIngredient
+            });
+            
+            const nutritionBefore = adjustedNutrition.calories.quantity;
             const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
             const ingredientData = ingredientResult?.data;
+            
             if (ingredientData && ingredientResult) {
               const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
                 ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
@@ -450,8 +492,28 @@ export class IngredientCustomizationService {
               console.log(`     Adding (per serving): ${ingredientNutritionPerServing.calories.quantity} kcal`);
               
               adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, ingredientNutritionPerServing);
+              
+              debugSteps.push({
+                step: 'ADD_SUCCESS',
+                ingredientText: ingredientText,
+                source: ingredientResult.source,
+                ingredientNutritionTotal: ingredientNutritionTotal.calories.quantity,
+                ingredientNutritionPerServing: ingredientNutritionPerServing.calories.quantity,
+                servings: servings,
+                nutritionBefore: nutritionBefore,
+                nutritionAfter: adjustedNutrition.calories.quantity
+              });
+              
               appliedModifications.push(modification);
               micronutrientsTracked = true;
+            } else {
+              debugSteps.push({
+                step: 'ADD_FAILED',
+                ingredientText: ingredientText,
+                reason: 'Nutrition fetch returned null',
+                message: `Could not find nutrition for: ${ingredientText}`
+              });
+              console.warn(`  ⚠️ Add failed: Could not find nutrition for ${ingredientText}`);
             }
           }
           break;
@@ -459,13 +521,25 @@ export class IngredientCustomizationService {
         case 'reduce':
           if (modification.originalIngredient && modification.reductionPercent) {
             // Construct full ingredient text with amount and unit
-            const amount = (modification as any).amount || 1;
-            const unit = (modification as any).unit || '';
+            // Use originalAmount/originalUnit since we're reducing the original ingredient
+            const amount = (modification as any).originalAmount || (modification as any).amount || 1;
+            const unit = (modification as any).originalUnit || (modification as any).unit || '';
             const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
             const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
             
+            debugSteps.push({
+              step: 'REDUCE_START',
+              ingredientText: ingredientText,
+              amount: amount,
+              unit: unit,
+              ingredientName: ingredientName,
+              reductionPercent: modification.reductionPercent
+            });
+            
+            const nutritionBefore = adjustedNutrition.calories.quantity;
             const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
             const ingredientData = ingredientResult?.data;
+            
             if (ingredientData && ingredientResult) {
               const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
                 ? NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData)
@@ -485,8 +559,30 @@ export class IngredientCustomizationService {
               
               adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, amountToRemove);
               
+              debugSteps.push({
+                step: 'REDUCE_SUCCESS',
+                ingredientText: ingredientText,
+                source: ingredientResult.source,
+                reductionPercent: modification.reductionPercent,
+                reductionFactor: reductionFactor,
+                ingredientNutritionTotal: ingredientNutritionTotal.calories.quantity,
+                ingredientNutritionPerServing: ingredientNutritionPerServing.calories.quantity,
+                amountToRemove: amountToRemove.calories.quantity,
+                servings: servings,
+                nutritionBefore: nutritionBefore,
+                nutritionAfter: adjustedNutrition.calories.quantity
+              });
+              
               appliedModifications.push(modification);
               micronutrientsTracked = true;
+            } else {
+              debugSteps.push({
+                step: 'REDUCE_FAILED',
+                ingredientText: ingredientText,
+                reason: 'Nutrition fetch returned null',
+                message: `Could not find nutrition for: ${ingredientText}`
+              });
+              console.warn(`  ⚠️ Reduce failed: Could not find nutrition for ${ingredientText}`);
             }
           }
           break;
