@@ -849,15 +849,17 @@ export class MultiProviderRecipeSearchService {
       const data = await response.json();
       const recipe = data.recipe;
 
+      const servings = recipe.yield || 1;
+      
       return {
         id: recipeId,
         title: recipe.label,
         image: recipe.image,
         sourceUrl: recipe.url,
         source: 'edamam',
-        servings: recipe.yield || 1,
+        servings: servings,
         readyInMinutes: recipe.totalTime,
-        nutrition: this.transformEdamamNutrition(recipe.totalNutrients, recipe.totalDaily),
+        nutrition: this.transformEdamamNutrition(recipe.totalNutrients, recipe.totalDaily, servings),
         ingredients: recipe.ingredients.map((ing: any) => ({
           name: ing.food,
           amount: ing.quantity,
@@ -936,8 +938,11 @@ export class MultiProviderRecipeSearchService {
 
   /**
    * Transform Edamam nutrition data to standard format
+   * @param totalNutrients - Edamam's totalNutrients object (TOTAL nutrition for all servings)
+   * @param totalDaily - Edamam's totalDaily object
+   * @param servings - Number of servings to divide by (to get PER-SERVING nutrition)
    */
-  private transformEdamamNutrition(totalNutrients: any, totalDaily: any): any {
+  private transformEdamamNutrition(totalNutrients: any, totalDaily: any, servings: number = 1): any {
     const nutrition: any = {
       calories: null,
       macros: {},
@@ -946,6 +951,8 @@ export class MultiProviderRecipeSearchService {
         minerals: {}
       }
     };
+    
+    console.log(`📊 transformEdamamNutrition: dividing by ${servings} servings to get PER-SERVING nutrition`);
     
     // Map Edamam nutrients to standard format
     const nutrientMap: { [key: string]: { key: string; category: 'calories' | 'macros' | 'vitamins' | 'minerals' } } = {
@@ -990,20 +997,24 @@ export class MultiProviderRecipeSearchService {
 
     for (const [edamamKey, mapping] of Object.entries(nutrientMap)) {
       if (totalNutrients[edamamKey]) {
-        const value = Math.round(totalNutrients[edamamKey].quantity * 100) / 100;
+        // Divide by servings to get PER-SERVING value (Edamam returns TOTAL for all servings)
+        const totalValue = totalNutrients[edamamKey].quantity;
+        const perServingValue = Math.round((totalValue / servings) * 100) / 100;
         const unit = totalNutrients[edamamKey].unit || 'g';
         
         if (mapping.category === 'calories') {
-          nutrition.calories = { quantity: value, unit: unit };
+          nutrition.calories = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'macros') {
-          nutrition.macros[mapping.key] = { quantity: value, unit: unit };
+          nutrition.macros[mapping.key] = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'vitamins') {
-          nutrition.micros.vitamins[mapping.key] = { quantity: value, unit: unit };
+          nutrition.micros.vitamins[mapping.key] = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'minerals') {
-          nutrition.micros.minerals[mapping.key] = { quantity: value, unit: unit };
+          nutrition.micros.minerals[mapping.key] = { quantity: perServingValue, unit: unit };
         }
       }
     }
+
+    console.log(`✅ Transformed nutrition (per serving): ${nutrition.calories?.quantity || 0} kcal`);
 
     return nutrition;
   }

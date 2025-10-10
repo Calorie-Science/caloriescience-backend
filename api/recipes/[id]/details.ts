@@ -65,9 +65,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               console.log('  ✅ Transformed Spoonacular nutrition');
             }
           } else if (originalResponse.totalNutrients) {
-            // Edamam format
-            standardizedRecipe.nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse);
-            console.log('  ✅ Transformed Edamam nutrition');
+            // Edamam format - pass servings to get PER-SERVING nutrition (Edamam returns total)
+            const recipeServings = cachedRecipe?.servings || originalResponse.yield || 1;
+            standardizedRecipe.nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse, recipeServings);
+            console.log(`  ✅ Transformed Edamam nutrition (${recipeServings} servings)`);
           }
           
           // Update cache with extracted nutrition

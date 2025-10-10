@@ -129,55 +129,58 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               micronutrients: null
             };
 
-            // Check if customizations have nutrition (with or without micronutrients)
-            if (customizations?.customNutrition) {
-              console.log(`📊 Using custom nutrition from modifications`);
+            // NUTRITION STRATEGY (same as draft.ts and recipes/customized):
+            // 1. If customNutrition exists with proper structure (has micros), TRUST IT - it was calculated correctly
+            // 2. If customNutrition is old format or missing, use base nutrition from cache
+            
+            // Check if we have valid stored customNutrition
+            const hasValidCustomNutrition = customizations?.customNutrition && 
+                                             customizations.customNutrition.calories &&
+                                             (customizations.customNutrition.calories.quantity > 0 || customizations.customNutrition.calories > 0);
+            
+            if (hasValidCustomNutrition && customizations.customNutrition.micros) {
+              // Use stored customNutrition with micronutrients (already calculated correctly)
+              console.log(`✅ Using STORED customNutrition WITH micronutrients: ${customizations.customNutrition.calories.quantity} kcal`);
               
-              // Check if it's the new standardized format with micros
-              const hasStandardizedFormat = customizations.customNutrition.micros !== undefined;
+              detailedNutrition.macros = {
+                calories: customizations.customNutrition.calories?.quantity || 0,
+                protein: customizations.customNutrition.macros?.protein?.quantity || 0,
+                carbs: customizations.customNutrition.macros?.carbs?.quantity || 0,
+                fat: customizations.customNutrition.macros?.fat?.quantity || 0,
+                fiber: customizations.customNutrition.macros?.fiber?.quantity || 0,
+                sugar: customizations.customNutrition.macros?.sugar?.quantity || null,
+                sodium: customizations.customNutrition.macros?.sodium?.quantity || null,
+                saturatedFat: customizations.customNutrition.macros?.saturatedFat?.quantity || null,
+                cholesterol: customizations.customNutrition.macros?.cholesterol?.quantity || null
+              };
               
-              if (hasStandardizedFormat) {
-                console.log(`✅ Customizations include MICRONUTRIENTS!`);
-                // New format with micronutrients
-                detailedNutrition.macros = {
-                  calories: customizations.customNutrition.calories?.quantity || 0,
-                  protein: customizations.customNutrition.macros?.protein?.quantity || 0,
-                  carbs: customizations.customNutrition.macros?.carbs?.quantity || 0,
-                  fat: customizations.customNutrition.macros?.fat?.quantity || 0,
-                  fiber: customizations.customNutrition.macros?.fiber?.quantity || 0,
-                  sugar: customizations.customNutrition.macros?.sugar?.quantity || null,
-                  sodium: customizations.customNutrition.macros?.sodium?.quantity || null,
-                  saturatedFat: customizations.customNutrition.macros?.saturatedFat?.quantity || null,
-                  cholesterol: customizations.customNutrition.macros?.cholesterol?.quantity || null
-                };
-                
-                // Use customized micronutrients (includes changes from added/removed ingredients!)
+              // Use customized micronutrients (includes changes from added/removed ingredients!)
+              detailedNutrition.micronutrients = {
+                vitamins: customizations.customNutrition.micros?.vitamins || {},
+                minerals: customizations.customNutrition.micros?.minerals || {}
+              };
+            } else if (hasValidCustomNutrition) {
+              // Has customNutrition but no micros (old format)
+              console.log(`⚠️ Using stored customNutrition (old format, macros only)`);
+              
+              detailedNutrition.macros = {
+                calories: customizations.customNutrition.calories?.quantity || customizations.customNutrition.calories || 0,
+                protein: customizations.customNutrition.macros?.protein?.quantity || customizations.customNutrition.protein || 0,
+                carbs: customizations.customNutrition.macros?.carbs?.quantity || customizations.customNutrition.carbs || 0,
+                fat: customizations.customNutrition.macros?.fat?.quantity || customizations.customNutrition.fat || 0,
+                fiber: customizations.customNutrition.macros?.fiber?.quantity || customizations.customNutrition.fiber || 0,
+                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : null,
+                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : null,
+                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
+                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
+              };
+              
+              // Fallback to base recipe micros if no custom micros
+              if (standardizedRecipe?.nutritionDetails?.micros) {
                 detailedNutrition.micronutrients = {
-                  vitamins: customizations.customNutrition.micros?.vitamins || {},
-                  minerals: customizations.customNutrition.micros?.minerals || {}
+                  vitamins: standardizedRecipe.nutritionDetails.micros.vitamins || {},
+                  minerals: standardizedRecipe.nutritionDetails.micros.minerals || {}
                 };
-              } else {
-                // Old format (just numbers, no micros)
-                console.log(`⚠️ Using old format custom nutrition (no micronutrients)`);
-                detailedNutrition.macros = {
-                  calories: customizations.customNutrition.calories || 0,
-                  protein: customizations.customNutrition.protein || 0,
-                  carbs: customizations.customNutrition.carbs || 0,
-                  fat: customizations.customNutrition.fat || 0,
-                  fiber: customizations.customNutrition.fiber || 0,
-                  sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : null,
-                  sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : null,
-                  saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || null,
-                  cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || null
-                };
-                
-                // Fallback to base recipe micros if no custom micros
-                if (standardizedRecipe?.nutritionDetails?.micros) {
-                  detailedNutrition.micronutrients = {
-                    vitamins: standardizedRecipe.nutritionDetails.micros.vitamins || {},
-                    minerals: standardizedRecipe.nutritionDetails.micros.minerals || {}
-                  };
-                }
               }
             } else {
               // Use base nutrition from recipe (no customizations)

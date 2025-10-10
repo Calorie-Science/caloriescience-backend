@@ -160,7 +160,7 @@ export class NutritionMappingService {
    * Transform Edamam nutrition data to standardized format
    * Handles BOTH recipe format (totalNutrients) and ingredient format (ingredients[0].parsed[0].nutrients)
    */
-  static transformEdamamNutrition(edamamData: any): StandardizedNutrition {
+  static transformEdamamNutrition(edamamData: any, servings?: number): StandardizedNutrition {
     const nutrition: StandardizedNutrition = {
       calories: { quantity: 0, unit: 'kcal' },
       macros: {},
@@ -176,16 +176,23 @@ export class NutritionMappingService {
 
     // Determine which format we're dealing with
     let totalNutrients: any = null;
+    let recipeServings: number = servings || 1;
     
     // Format 1: Recipe format with totalNutrients
     if (edamamData.totalNutrients) {
       totalNutrients = edamamData.totalNutrients;
-      console.log('📊 Using recipe format (totalNutrients)');
+      // Get servings from recipe if not provided
+      if (!servings && edamamData.yield) {
+        recipeServings = edamamData.yield;
+      }
+      console.log(`📊 Using recipe format (totalNutrients), servings: ${recipeServings}`);
     }
     // Format 2: Ingredient format with nested structure
     else if (edamamData.ingredients && edamamData.ingredients[0]?.parsed && edamamData.ingredients[0].parsed[0]?.nutrients) {
       totalNutrients = edamamData.ingredients[0].parsed[0].nutrients;
-      console.log('📊 Using ingredient format (ingredients[0].parsed[0].nutrients)');
+      // For ingredient format, servings is always 1 (it's already per the specified amount)
+      recipeServings = 1;
+      console.log('📊 Using ingredient format (ingredients[0].parsed[0].nutrients), already per-serving');
     }
     
     if (!totalNutrients) {
@@ -193,25 +200,28 @@ export class NutritionMappingService {
       return nutrition;
     }
 
-    // Map all nutrients
+    // Map all nutrients and divide by servings to get PER-SERVING values
+    // Edamam returns TOTAL nutrition for the whole recipe, so we need to divide
     for (const [edamamKey, mapping] of Object.entries(this.EDAMAM_NUTRIENT_MAP)) {
       if (totalNutrients[edamamKey]) {
-        const value = Math.round(totalNutrients[edamamKey].quantity * 100) / 100;
+        // Divide by servings to get per-serving value (for recipe format)
+        const totalValue = totalNutrients[edamamKey].quantity;
+        const perServingValue = Math.round((totalValue / recipeServings) * 100) / 100;
         const unit = totalNutrients[edamamKey].unit || 'g';
         
         if (mapping.category === 'calories') {
-          nutrition.calories = { quantity: value, unit: unit };
+          nutrition.calories = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'macros') {
-          nutrition.macros[mapping.key as keyof typeof nutrition.macros] = { quantity: value, unit: unit };
+          nutrition.macros[mapping.key as keyof typeof nutrition.macros] = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'vitamins') {
-          nutrition.micros.vitamins[mapping.key as keyof typeof nutrition.micros.vitamins] = { quantity: value, unit: unit };
+          nutrition.micros.vitamins[mapping.key as keyof typeof nutrition.micros.vitamins] = { quantity: perServingValue, unit: unit };
         } else if (mapping.category === 'minerals') {
-          nutrition.micros.minerals[mapping.key as keyof typeof nutrition.micros.minerals] = { quantity: value, unit: unit };
+          nutrition.micros.minerals[mapping.key as keyof typeof nutrition.micros.minerals] = { quantity: perServingValue, unit: unit };
         }
       }
     }
 
-    console.log(`✅ Transformed nutrition: ${nutrition.calories.quantity} kcal, ${Object.keys(nutrition.micros.vitamins).length} vitamins, ${Object.keys(nutrition.micros.minerals).length} minerals`);
+    console.log(`✅ Transformed nutrition (per serving): ${nutrition.calories.quantity} kcal, ${Object.keys(nutrition.micros.vitamins).length} vitamins, ${Object.keys(nutrition.micros.minerals).length} minerals`);
 
     return nutrition;
   }
@@ -461,6 +471,53 @@ export class NutritionMappingService {
     for (const [key, value] of Object.entries(nutrition.micros.minerals)) {
       result.micros.minerals[key as keyof typeof result.micros.minerals] = {
         quantity: Math.round((value?.quantity || 0) * factor * 100) / 100,
+        unit: value?.unit || 'mg'
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Divide nutrition by a factor (useful for converting from total servings to per-serving)
+   * @param nutrition - The nutrition object to divide
+   * @param divisor - The number to divide by (e.g., number of servings)
+   */
+  static divideNutrition(nutrition: StandardizedNutrition, divisor: number): StandardizedNutrition {
+    if (divisor === 0 || divisor === 1) return nutrition;
+    
+    const result: StandardizedNutrition = {
+      calories: {
+        quantity: Math.round((nutrition.calories?.quantity || 0) / divisor * 100) / 100,
+        unit: nutrition.calories?.unit || 'kcal'
+      },
+      macros: {},
+      micros: {
+        vitamins: {},
+        minerals: {}
+      }
+    };
+
+    // Divide macros
+    for (const [key, value] of Object.entries(nutrition.macros)) {
+      result.macros[key as keyof typeof result.macros] = {
+        quantity: Math.round((value?.quantity || 0) / divisor * 100) / 100,
+        unit: value?.unit || 'g'
+      };
+    }
+
+    // Divide vitamins
+    for (const [key, value] of Object.entries(nutrition.micros.vitamins)) {
+      result.micros.vitamins[key as keyof typeof result.micros.vitamins] = {
+        quantity: Math.round((value?.quantity || 0) / divisor * 100) / 100,
+        unit: value?.unit || 'mg'
+      };
+    }
+
+    // Divide minerals
+    for (const [key, value] of Object.entries(nutrition.micros.minerals)) {
+      result.micros.minerals[key as keyof typeof result.micros.minerals] = {
+        quantity: Math.round((value?.quantity || 0) / divisor * 100) / 100,
         unit: value?.unit || 'mg'
       };
     }

@@ -797,25 +797,29 @@ async function handleDeselectRecipe(req: VercelRequest, res: VercelResponse, use
 /**
  * Helper function to auto-calculate nutrition for modifications
  * NOW WITH MICRONUTRIENT TRACKING!
+ * @param recipeServings - Number of servings in the recipe (ingredients are for ALL servings, nutrition is PER SERVING)
  */
 async function calculateNutritionForModifications(
   originalRecipeNutrition: any,
   modifications: any[],
   source: 'edamam' | 'spoonacular',
-  originalRecipe?: any
+  originalRecipe?: any,
+  recipeServings: number = 1
 ): Promise<any> {
   console.log('🧮 Auto-calculating nutrition with MICRONUTRIENT TRACKING...');
-  console.log(`📊 Original recipe nutrition:`, originalRecipeNutrition);
+  console.log(`📊 Original recipe nutrition (PER SERVING):`, originalRecipeNutrition);
   console.log(`📝 Modifications count:`, modifications.length);
+  console.log(`🍽️ Recipe servings:`, recipeServings);
 
   try {
     // Use the new IngredientCustomizationService for complete nutrition tracking
+    // Pass recipeServings so it can divide ingredient nutrition correctly
     const result = await ingredientCustomizationService.applyModifications(
       originalRecipe?.id || 'recipe',
       source,
       originalRecipeNutrition,
       modifications,
-      1 // servings
+      recipeServings // Pass servings so ingredient changes are divided by servings
     );
 
     console.log(`✅ Micronutrients included:`, result.micronutrientsIncluded);
@@ -1112,7 +1116,23 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             // For OMIT modifications, match if targeting the same ingredient
             if (newMod.type === 'omit' && existing.type === 'omit' && newMod.originalIngredient && existing.originalIngredient) {
               const match = targetIngredient === existingTarget;
-              console.log(`      OMIT match: ${match}`);
+              console.log(`      OMIT vs OMIT match: ${match}`);
+              return match;
+            }
+            
+            // NEW: OMIT on existing REPLACE (user wants to delete an ingredient they previously modified)
+            if (newMod.type === 'omit' && existing.type === 'replace' && newMod.originalIngredient && existing.originalIngredient) {
+              const newOmitTarget = newMod.originalIngredient.toLowerCase().trim();
+              const existingReplaceOriginal = existing.originalIngredient.toLowerCase().trim();
+              const existingReplaceResult = existing.newIngredient.toLowerCase().trim();
+              
+              // Match if OMIT targets either the original ingredient OR the result of the REPLACE
+              // Example: eggs→eggs (replace 2→3), then omit eggs should match
+              const matchesOriginal = newOmitTarget === existingReplaceOriginal;
+              const matchesResult = newOmitTarget === existingReplaceResult;
+              const match = matchesOriginal || matchesResult;
+              
+              console.log(`      OMIT vs REPLACE match: ${match} (omit "${newOmitTarget}" vs replace "${existingReplaceOriginal}"→"${existingReplaceResult}")`);
               return match;
             }
             
@@ -1121,7 +1141,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
               const newIngredientName = newMod.newIngredient.toLowerCase().trim();
               const existingIngredientName = existing.newIngredient.toLowerCase().trim();
               const match = newIngredientName === existingIngredientName;
-              console.log(`      ADD match: ${match}`);
+              console.log(`      ADD vs ADD match: ${match}`);
               return match;
             }
             
@@ -1388,11 +1408,16 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       });
 
       // Calculate new nutrition using the NEW micronutrient-aware service
+      // Pass recipe servings so ingredient changes are correctly divided
+      const recipeServings = cachedRecipe?.servings || recipe.servings || 1;
+      console.log(`🍽️ Recipe servings for nutrition calculation: ${recipeServings}`);
+      
       customizations.customNutrition = await calculateNutritionForModifications(
         originalNutritionWithMicros, // Now passing FULL nutrition with micros!
         customizations.modifications,
         customizations.source,
-        originalRecipe
+        originalRecipe,
+        recipeServings // Pass servings so ingredient changes are divided by servings
       );
       customizations.customizationsApplied = true;
       

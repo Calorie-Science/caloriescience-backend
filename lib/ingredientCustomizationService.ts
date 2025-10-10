@@ -108,6 +108,9 @@ export class IngredientCustomizationService {
   /**
    * Apply modifications using Edamam's existing system
    * Now includes full micronutrient tracking
+   * 
+   * IMPORTANT: Recipe nutrition is PER SERVING, but ingredients are for ALL servings!
+   * @param servings - Number of servings in the recipe (used to divide ingredient nutrition)
    */
   private async applyEdamamModifications(
     recipeId: string,
@@ -117,6 +120,8 @@ export class IngredientCustomizationService {
   ): Promise<CustomizationResult> {
     
     console.log('🔬 Starting Edamam ingredient modifications with micronutrient tracking');
+    console.log(`   ⚠️ IMPORTANT: Original nutrition is PER SERVING, ingredients are for ${servings} servings TOTAL`);
+    console.log(`   📐 Will DIVIDE ingredient nutrition by ${servings} to get per-serving contribution`);
     
     // Convert original nutrition to standardized format
     let adjustedNutrition: StandardizedNutrition;
@@ -191,10 +196,14 @@ export class IngredientCustomizationService {
                 
                 // Scale the base nutrition by the delta
                 const deltaNutrition = NutritionMappingService.multiplyNutrition(baseNutrition, amountDelta);
-                console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}): ${deltaNutrition.calories.quantity} kcal`);
+                console.log(`  📊 Delta nutrition (${amountDelta} ${newUnit}, TOTAL): ${deltaNutrition.calories.quantity} kcal`);
                 
-                // Add the delta to original nutrition
-                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, deltaNutrition);
+                // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
+                const deltaPerServing = NutritionMappingService.divideNutrition(deltaNutrition, servings);
+                console.log(`  📐 Divided by ${servings} servings: ${deltaPerServing.calories.quantity} kcal per serving`);
+                
+                // Add the per-serving delta to original per-serving nutrition
+                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, deltaPerServing);
                 
                 console.log(`  ✅ Applied quantity change using linear scaling`);
                 console.log(`     Result: ${adjustedNutrition.calories.quantity} kcal`);
@@ -220,18 +229,26 @@ export class IngredientCustomizationService {
               
               if (oldNutritionData && newNutritionData) {
                 // Transform to standardized format with full micronutrient data
-                const oldNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
-                const newNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
+                const oldNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(oldNutritionData);
+                const newNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(newNutritionData);
                 
                 console.log(`  🔄 Replace: ${oldIngredientText} → ${newIngredientText}`);
-                console.log(`     Old: ${oldNutrition.calories.quantity} kcal`);
-                console.log(`     New: ${newNutrition.calories.quantity} kcal`);
-                console.log(`     Net change: ${newNutrition.calories.quantity - oldNutrition.calories.quantity} kcal`);
+                console.log(`     Old (TOTAL for ${servings} servings): ${oldNutritionTotal.calories.quantity} kcal`);
+                console.log(`     New (TOTAL for ${servings} servings): ${newNutritionTotal.calories.quantity} kcal`);
+                console.log(`     Net change (TOTAL): ${newNutritionTotal.calories.quantity - oldNutritionTotal.calories.quantity} kcal`);
+                
+                // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
+                const oldNutritionPerServing = NutritionMappingService.divideNutrition(oldNutritionTotal, servings);
+                const newNutritionPerServing = NutritionMappingService.divideNutrition(newNutritionTotal, servings);
+                
+                console.log(`     Old (per serving): ${oldNutritionPerServing.calories.quantity} kcal`);
+                console.log(`     New (per serving): ${newNutritionPerServing.calories.quantity} kcal`);
+                console.log(`     Net change (per serving): ${newNutritionPerServing.calories.quantity - oldNutritionPerServing.calories.quantity} kcal`);
                 
                 // Subtract old ingredient nutrition (including micros)
-                adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutrition);
+                adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, oldNutritionPerServing);
                 // Add new ingredient nutrition (including micros)
-                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutrition);
+                adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, newNutritionPerServing);
                 
                 appliedModifications.push(modification);
                 micronutrientsTracked = true;
@@ -250,12 +267,16 @@ export class IngredientCustomizationService {
             console.log(`  📝 Fetching nutrition for omit: "${ingredientText}" (Spoonacular)`);
             const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
             if (ingredientData) {
-              const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
               
               console.log(`  🚫 Omit: ${ingredientText}`);
-              console.log(`     Removing: ${ingredientNutrition.calories.quantity} kcal, Iron: ${ingredientNutrition.micros.minerals.iron?.quantity || 0}mg`);
+              console.log(`     Removing (TOTAL for ${servings} servings): ${ingredientNutritionTotal.calories.quantity} kcal, Iron: ${ingredientNutritionTotal.micros.minerals.iron?.quantity || 0}mg`);
               
-              adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, ingredientNutrition);
+              // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
+              const ingredientNutritionPerServing = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
+              console.log(`     Removing (per serving): ${ingredientNutritionPerServing.calories.quantity} kcal`);
+              
+              adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, ingredientNutritionPerServing);
               appliedModifications.push(modification);
               micronutrientsTracked = true;
             }
@@ -272,12 +293,16 @@ export class IngredientCustomizationService {
             console.log(`  📝 Fetching nutrition for: "${ingredientText}" (Spoonacular)`);
             const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
             if (ingredientData) {
-              const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
               
               console.log(`  ➕ Add: ${ingredientText}`);
-              console.log(`     Adding: ${ingredientNutrition.calories.quantity} kcal, Calcium: ${ingredientNutrition.micros.minerals.calcium?.quantity || 0}mg`);
+              console.log(`     Adding (TOTAL for ${servings} servings): ${ingredientNutritionTotal.calories.quantity} kcal, Calcium: ${ingredientNutritionTotal.micros.minerals.calcium?.quantity || 0}mg`);
               
-              adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, ingredientNutrition);
+              // DIVIDE by servings to get per-serving contribution (ingredients are for ALL servings)
+              const ingredientNutritionPerServing = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
+              console.log(`     Adding (per serving): ${ingredientNutritionPerServing.calories.quantity} kcal`);
+              
+              adjustedNutrition = NutritionMappingService.addNutrition(adjustedNutrition, ingredientNutritionPerServing);
               appliedModifications.push(modification);
               micronutrientsTracked = true;
             }
@@ -294,13 +319,20 @@ export class IngredientCustomizationService {
             console.log(`  📝 Fetching nutrition for reduce: "${ingredientText}" (Spoonacular)`);
             const ingredientData = await this.spoonacularService.getIngredientNutrition(ingredientText);
             if (ingredientData) {
-              const ingredientNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
+              const ingredientNutritionTotal = NutritionMappingService.transformSpoonacularIngredientNutrition(ingredientData);
               const reductionFactor = modification.reductionPercent / 100;
               
               console.log(`  📉 Reduce: ${ingredientText} by ${modification.reductionPercent}%`);
+              console.log(`     Ingredient nutrition (TOTAL): ${ingredientNutritionTotal.calories.quantity} kcal`);
               
-              // Calculate the amount to remove (reductionPercent of the ingredient)
-              const amountToRemove = NutritionMappingService.multiplyNutrition(ingredientNutrition, reductionFactor);
+              // DIVIDE by servings first to get per-serving contribution
+              const ingredientNutritionPerServing = NutritionMappingService.divideNutrition(ingredientNutritionTotal, servings);
+              console.log(`     Ingredient nutrition (per serving): ${ingredientNutritionPerServing.calories.quantity} kcal`);
+              
+              // Calculate the amount to remove (reductionPercent of the per-serving ingredient)
+              const amountToRemove = NutritionMappingService.multiplyNutrition(ingredientNutritionPerServing, reductionFactor);
+              console.log(`     Removing (per serving): ${amountToRemove.calories.quantity} kcal`);
+              
               adjustedNutrition = NutritionMappingService.subtractNutrition(adjustedNutrition, amountToRemove);
               
               appliedModifications.push(modification);
@@ -311,14 +343,13 @@ export class IngredientCustomizationService {
       }
     }
 
-    // Apply serving adjustment
-    if (servings !== 1) {
-      console.log(`📊 Adjusting for ${servings} servings`);
-      adjustedNutrition = NutritionMappingService.multiplyNutrition(adjustedNutrition, servings);
-    }
-
+    // NO LONGER NEED TO MULTIPLY by servings at the end because:
+    // - Original nutrition is already PER SERVING
+    // - We divided each ingredient modification by servings to get per-serving changes
+    // - Result is PER SERVING nutrition (which is what we want!)
+    
     console.log('✅ Edamam modifications complete');
-    console.log(`   Final: ${adjustedNutrition.calories.quantity} kcal`);
+    console.log(`   Final (PER SERVING): ${adjustedNutrition.calories.quantity} kcal`);
     console.log(`   Micros tracked: ${micronutrientsTracked}`);
 
     // Convert original nutrition to standardized format for comparison

@@ -430,7 +430,9 @@ export class MealPlanDraftService {
         if ((recipeDetails as any).nutrition) {
           // Use the nutrition object from the API response
           if (source === 'edamam') {
-            nutritionDetails = NutritionMappingService.transformEdamamNutrition((recipeDetails as any).nutrition);
+            // Pass servings to get PER-SERVING nutrition (Edamam returns total)
+            const recipeServings = recipeDetails.servings || (recipeDetails as any).nutrition?.yield || 1;
+            nutritionDetails = NutritionMappingService.transformEdamamNutrition((recipeDetails as any).nutrition, recipeServings);
           } else if (source === 'spoonacular') {
             nutritionDetails = NutritionMappingService.transformSpoonacularNutrition((recipeDetails as any).nutrition);
           }

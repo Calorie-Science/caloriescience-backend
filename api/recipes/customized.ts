@@ -127,7 +127,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           if (originalResponse.totalNutrients) {
             console.log('  📊 Found Edamam totalNutrients in originalApiResponse');
             const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
-            nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse);
+            // Pass servings to get PER-SERVING nutrition (Edamam returns total)
+            const recipeServings = cached.servings || originalResponse.yield || 1;
+            nutritionDetails = NutritionMappingService.transformEdamamNutrition(originalResponse, recipeServings);
           }
           // Try Spoonacular format or already standardized
           else if (originalResponse.nutrition) {
@@ -172,7 +174,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             
             // Transform based on source
             if (source === 'edamam' && freshRecipeDetails.nutrition.totalNutrients) {
-              nutritionDetails = NutritionMappingService.transformEdamamNutrition(freshRecipeDetails.nutrition);
+              // Pass servings to get PER-SERVING nutrition (Edamam returns total)
+              const recipeServings = freshRecipeDetails.servings || freshRecipeDetails.nutrition.yield || 1;
+              nutritionDetails = NutritionMappingService.transformEdamamNutrition(freshRecipeDetails.nutrition, recipeServings);
             } else if (source === 'spoonacular') {
               nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(freshRecipeDetails.nutrition);
             }
