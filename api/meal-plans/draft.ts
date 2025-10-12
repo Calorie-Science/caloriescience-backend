@@ -1257,7 +1257,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
                 oldMod: `${oldMod.originalAmount} ${oldMod.originalUnit} → ${oldMod.amount} ${oldMod.unit}`,
                 newMod: `${updatedMod.originalAmount} ${updatedMod.originalUnit} → ${updatedMod.amount} ${updatedMod.unit}`
               });
-              mergedMods[existingModIndex] = updatedMod;
+            mergedMods[existingModIndex] = updatedMod;
             }
           } else {
             console.log(`  ➕ Adding new modification for "${targetIngredient}"`);
@@ -1288,7 +1288,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
                 ingredient: targetIngredient,
                 details: `${(newMod as any).originalAmount || '?'} ${(newMod as any).originalUnit || ''} → ${(newMod as any).amount} ${(newMod as any).unit}`
               });
-              mergedMods.push(newMod);
+            mergedMods.push(newMod);
             }
           }
         }

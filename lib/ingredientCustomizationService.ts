@@ -32,28 +32,48 @@ export class IngredientCustomizationService {
   }
 
   /**
-   * Get ingredient nutrition with automatic fallback: Spoonacular → Edamam
+   * Get ingredient nutrition using the recipe's source, with fallback to the other source
    * @param ingredientText - Full ingredient text (e.g., "2 cups flour")
+   * @param recipeSource - The source of the original recipe ('edamam' or 'spoonacular')
    * @returns Nutrition data and the source that was used
    */
-  private async getIngredientNutritionWithFallback(ingredientText: string): Promise<{ data: any; source: 'spoonacular' | 'edamam' } | null> {
-    console.log(`🔍 Fetching nutrition for: "${ingredientText}" (Spoonacular → Edamam fallback)`);
+  private async getIngredientNutritionWithFallback(ingredientText: string, recipeSource: 'edamam' | 'spoonacular'): Promise<{ data: any; source: 'spoonacular' | 'edamam' } | null> {
+    console.log(`🔍 Fetching nutrition for: "${ingredientText}" (Recipe source: ${recipeSource})`);
     
-    // Try Spoonacular first
-    const spoonacularData = await this.spoonacularService.getIngredientNutrition(ingredientText);
-    
-    if (spoonacularData) {
-      console.log(`✅ Found in Spoonacular: ${spoonacularData.nutrition?.calories || 'N/A'} kcal`);
-      return { data: spoonacularData, source: 'spoonacular' };
-    }
-    
-    // Fallback to Edamam
-    console.log(`⚠️ Not found in Spoonacular, trying Edamam...`);
-    const edamamData = await this.edamamService.getIngredientNutrition(ingredientText);
-    
-    if (edamamData) {
-      console.log(`✅ Found in Edamam`);
-      return { data: edamamData, source: 'edamam' };
+    if (recipeSource === 'spoonacular') {
+      // Try Spoonacular first (same as recipe)
+      const spoonacularData = await this.spoonacularService.getIngredientNutrition(ingredientText);
+      
+      if (spoonacularData) {
+        console.log(`✅ Found in Spoonacular: ${spoonacularData.nutrition?.calories || 'N/A'} kcal`);
+        return { data: spoonacularData, source: 'spoonacular' };
+      }
+      
+      // Fallback to Edamam
+      console.log(`⚠️ Not found in Spoonacular, trying Edamam fallback...`);
+      const edamamData = await this.edamamService.getIngredientNutrition(ingredientText);
+      
+      if (edamamData) {
+        console.log(`✅ Found in Edamam (fallback)`);
+        return { data: edamamData, source: 'edamam' };
+      }
+    } else {
+      // Try Edamam first (same as recipe)
+      const edamamData = await this.edamamService.getIngredientNutrition(ingredientText);
+      
+      if (edamamData) {
+        console.log(`✅ Found in Edamam`);
+        return { data: edamamData, source: 'edamam' };
+      }
+      
+      // Fallback to Spoonacular
+      console.log(`⚠️ Not found in Edamam, trying Spoonacular fallback...`);
+      const spoonacularData = await this.spoonacularService.getIngredientNutrition(ingredientText);
+      
+      if (spoonacularData) {
+        console.log(`✅ Found in Spoonacular (fallback): ${spoonacularData.nutrition?.calories || 'N/A'} kcal`);
+        return { data: spoonacularData, source: 'spoonacular' };
+      }
     }
     
     console.log(`❌ Not found in either source`);
@@ -107,9 +127,9 @@ export class IngredientCustomizationService {
   ): Promise<CustomizationResult> {
     
     if (source === 'edamam') {
-      return this.applyEdamamModifications(recipeId, originalNutrition, modifications, servings);
+      return this.applyEdamamModifications(recipeId, originalNutrition, modifications, servings, source);
     } else {
-      return this.applySpoonacularModifications(recipeId, originalNutrition, modifications, servings);
+      return this.applySpoonacularModifications(recipeId, originalNutrition, modifications, servings, source);
     }
   }
 
@@ -140,12 +160,14 @@ export class IngredientCustomizationService {
    * 
    * IMPORTANT: Recipe nutrition is PER SERVING, but ingredients are for ALL servings!
    * @param servings - Number of servings in the recipe (used to divide ingredient nutrition)
+   * @param source - The source of the original recipe (used to prioritize ingredient lookups)
    */
   private async applyEdamamModifications(
     recipeId: string,
     originalNutrition: any,
     modifications: IngredientModification[],
-    servings: number
+    servings: number,
+    source: 'edamam' | 'spoonacular'
   ): Promise<CustomizationResult> {
     
     console.log('🔬 Starting Edamam ingredient modifications with micronutrient tracking');
@@ -218,7 +240,7 @@ export class IngredientCustomizationService {
               
               // Fetch nutrition for 1 unit (use exact ingredient name if provided)
               const baseIngredientText = `1 ${newUnit} ${oldIngredientName}`;
-              const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText);
+              const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText, source);
               const baseNutritionData = baseNutritionResult?.data;
               
               if (baseNutritionData && baseNutritionResult) {
@@ -314,11 +336,11 @@ export class IngredientCustomizationService {
               });
               
               // Get nutrition data for both ingredients with fallback
-              const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText);
+              const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText, source);
               const oldNutritionData = oldNutritionResult?.data;
               console.log(`  📝 OLD nutrition fetched:`, oldNutritionData ? `SUCCESS (${oldNutritionResult?.source})` : 'NULL');
               
-              const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText);
+              const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText, source);
               const newNutritionData = newNutritionResult?.data;
               console.log(`  📝 NEW nutrition fetched:`, newNutritionData ? `SUCCESS (${newNutritionResult?.source})` : 'NULL');
               
@@ -417,7 +439,7 @@ export class IngredientCustomizationService {
             });
             
             const nutritionBefore = adjustedNutrition.calories.quantity;
-            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
             const ingredientData = ingredientResult?.data;
             
             if (ingredientData && ingredientResult) {
@@ -476,7 +498,7 @@ export class IngredientCustomizationService {
             });
             
             const nutritionBefore = adjustedNutrition.calories.quantity;
-            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
             const ingredientData = ingredientResult?.data;
             
             if (ingredientData && ingredientResult) {
@@ -537,7 +559,7 @@ export class IngredientCustomizationService {
             });
             
             const nutritionBefore = adjustedNutrition.calories.quantity;
-            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+            const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
             const ingredientData = ingredientResult?.data;
             
             if (ingredientData && ingredientResult) {
@@ -618,12 +640,14 @@ export class IngredientCustomizationService {
   /**
    * Apply modifications using Spoonacular's API
    * Includes full micronutrient tracking
+   * @param source - The source of the original recipe (used to prioritize ingredient lookups)
    */
   private async applySpoonacularModifications(
     recipeId: string,
     originalNutrition: any,
     modifications: IngredientModification[],
-    servings: number
+    servings: number,
+    source: 'edamam' | 'spoonacular'
   ): Promise<CustomizationResult> {
     
     console.log('🔬 Starting Spoonacular ingredient modifications with micronutrient tracking');
@@ -698,7 +722,7 @@ export class IngredientCustomizationService {
                 
                 // Fetch nutrition for 1 unit (use exact ingredient name if provided)
                 const baseIngredientText = `1 ${newUnit} ${oldIngredientName}`;
-                const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText);
+                const baseNutritionResult = await this.getIngredientNutritionWithFallback(baseIngredientText, source);
                 const baseNutritionData = baseNutritionResult?.data;
                 
                 if (baseNutritionData && baseNutritionResult) {
@@ -743,11 +767,11 @@ export class IngredientCustomizationService {
                 const oldIngredientText = effectiveOldUnit ? `${oldAmount} ${effectiveOldUnit} ${oldIngredientName}` : `${oldAmount} ${oldIngredientName}`;
                 
                 // Get ingredient nutrition with fallback
-                const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText);
+                const oldNutritionResult = await this.getIngredientNutritionWithFallback(oldIngredientText, source);
                 const oldNutritionData = oldNutritionResult?.data;
                 console.log(`  📝 OLD nutrition fetched:`, oldNutritionData ? `SUCCESS (${oldNutritionResult?.source})` : 'NULL');
                 
-                const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText);
+                const newNutritionResult = await this.getIngredientNutritionWithFallback(newIngredientText, source);
                 const newNutritionData = newNutritionResult?.data;
                 console.log(`  📝 NEW nutrition fetched:`, newNutritionData ? `SUCCESS (${newNutritionResult?.source})` : 'NULL');
                 
@@ -788,7 +812,7 @@ export class IngredientCustomizationService {
               const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
               const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
               
-              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
               const ingredientData = ingredientResult?.data;
               if (ingredientData && ingredientResult) {
                 const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
@@ -814,7 +838,7 @@ export class IngredientCustomizationService {
               const unit = (modification as any).unit || '';
               const ingredientText = unit ? `${amount} ${unit} ${modification.newIngredient}` : `${amount} ${modification.newIngredient}`;
               
-              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
               const ingredientData = ingredientResult?.data;
               if (ingredientData && ingredientResult) {
                 const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'
@@ -841,7 +865,7 @@ export class IngredientCustomizationService {
               const ingredientName = (modification as any).originalIngredientName || modification.originalIngredient;
               const ingredientText = unit ? `${amount} ${unit} ${ingredientName}` : `${amount} ${ingredientName}`;
               
-              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText);
+              const ingredientResult = await this.getIngredientNutritionWithFallback(ingredientText, source);
               const ingredientData = ingredientResult?.data;
               if (ingredientData && ingredientResult) {
                 const ingredientNutritionTotal = ingredientResult.source === 'spoonacular'

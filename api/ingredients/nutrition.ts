@@ -97,7 +97,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Transform to standardized format with exhaustive vitamins/minerals (all fields, even if 0)
+    // Transform to standardized format to extract key fields
     let standardizedNutrition;
     if (actualSource === 'spoonacular') {
       standardizedNutrition = NutritionMappingService.transformSpoonacularIngredientNutrition(nutritionData);
@@ -106,12 +106,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       standardizedNutrition = NutritionMappingService.transformEdamamNutrition(nutritionData, 1);
     }
 
+    // Add quick-access fields to the nutrition object
+    const nutritionWithQuickAccess = {
+      calories: standardizedNutrition.calories.quantity,
+      protein: standardizedNutrition.macros.protein.quantity,
+      carbs: standardizedNutrition.macros.carbs.quantity,
+      fat: standardizedNutrition.macros.fat.quantity,
+      fiber: standardizedNutrition.macros.fiber.quantity,
+      ...nutritionData // Keep all original fields from source
+    };
+
     return res.status(200).json({
       success: true,
       ingredient: ingredientText,
       source: actualSource,
       requestedSource: requestedSource,
-      nutrition: nutritionData,
+      nutrition: nutritionWithQuickAccess,
       timestamp: new Date().toISOString()
     });
 
