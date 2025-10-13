@@ -210,6 +210,13 @@ export class NutritionCalculationService {
       'SUGAR',      // Sugars
       'SUGAR.added' // Added sugars
     ];
+    
+    // Also include standardized macro keys for already-transformed data
+    const standardizedMacroKeys = [
+      'calories', 'protein', 'carbs', 'netCarbs', 'fat', 
+      'saturatedFat', 'monounsaturatedFat', 'polyunsaturatedFat', 
+      'transFat', 'fiber', 'sugar', 'sugars', 'addedSugars', 'cholesterol', 'sodium'
+    ];
 
     // Define Edamam to standardized key mappings for macronutrients
     const macroMappings: { [key: string]: string } = {
@@ -273,8 +280,8 @@ export class NutritionCalculationService {
 
     // Categorize nutrients using mappings
     Object.entries(totalNutrients).forEach(([key, nutrientData]) => {
-      if (macroKeys.includes(key)) {
-        // Map macro keys to standardized format
+      if (macroKeys.includes(key) || standardizedMacroKeys.includes(key)) {
+        // Map macro keys to standardized format (or use as-is if already standardized)
         const standardKey = macroMappings[key] || key;
         macros[standardKey] = nutrientData;
       } else if (vitaminMappings[key]) {
