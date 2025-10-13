@@ -946,11 +946,19 @@ export class MealPlanDraftService {
       baseNutrition.totalNutrients = adjustedNutrients;
     }
 
-    // Standardize nutrient keys and calculate with NutritionCalculationService
+    // Standardize nutrient keys for aggregation
     const standardizedNutrients = nutritionService.standardizeNutrientKeys(baseNutrition.totalNutrients);
-    const fullNutrition = nutritionService.calculateDailyNutrition([baseNutrition]);
-
-    return fullNutrition;
+    
+    // Return in the format that calculateDailyNutrition expects
+    // It expects fields: totalCalories, protein, carbs, fat, fiber, totalNutrients
+    return {
+      totalCalories: baseNutrition.totalCalories,
+      protein: baseNutrition.protein,
+      carbs: baseNutrition.carbs,
+      fat: baseNutrition.fat,
+      fiber: baseNutrition.fiber,
+      totalNutrients: standardizedNutrients
+    };
   }
 
   /**
