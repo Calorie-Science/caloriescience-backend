@@ -194,6 +194,8 @@ export class NutritionCalculationService {
       vitamins: this.getCompleteVitamins(),
       minerals: this.getCompleteMinerals()
     };
+    
+    console.log(`🔍 Categorizing ${Object.keys(totalNutrients).length} nutrients:`, Object.keys(totalNutrients).slice(0, 10));
 
     // Define Edamam nutrient codes for categorization
     const macroKeys = [
@@ -283,7 +285,11 @@ export class NutritionCalculationService {
       if (macroKeys.includes(key) || standardizedMacroKeys.includes(key)) {
         // Map macro keys to standardized format (or use as-is if already standardized)
         const standardKey = macroMappings[key] || key;
-        macros[standardKey] = nutrientData;
+        macros[standardKey] = {
+          label: nutrientData.label || standardKey,
+          quantity: nutrientData.quantity,
+          unit: nutrientData.unit
+        };
       } else if (vitaminMappings[key]) {
         // Handle Edamam vitamin keys
         const standardKey = vitaminMappings[key];
@@ -315,12 +321,19 @@ export class NutritionCalculationService {
     });
 
     // Round all quantities to 2 decimal places
+    Object.keys(macros).forEach(key => {
+      if (macros[key] && macros[key].quantity !== undefined) {
+        macros[key].quantity = Math.round(macros[key].quantity * 100) / 100;
+      }
+    });
     Object.keys(micros.vitamins).forEach(key => {
       micros.vitamins[key].quantity = Math.round(micros.vitamins[key].quantity * 100) / 100;
     });
     Object.keys(micros.minerals).forEach(key => {
       micros.minerals[key].quantity = Math.round(micros.minerals[key].quantity * 100) / 100;
     });
+
+    console.log(`✅ Categorized: ${Object.keys(macros).length} macros, ${Object.keys(micros.vitamins).filter(k => micros.vitamins[k].quantity > 0).length} vitamins with values, ${Object.keys(micros.minerals).filter(k => micros.minerals[k].quantity > 0).length} minerals with values`);
 
     return { macros, micros };
   }

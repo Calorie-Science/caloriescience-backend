@@ -639,13 +639,20 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
       })
     );
 
+    // Get the nutrition status for this draft
+    const status = await draftService.getDraftStatus(draftId);
+
     return res.status(200).json({
       success: true,
       data: {
         ...draft,
-        suggestions: enrichedSuggestions
+        suggestions: enrichedSuggestions,
+        totalNutrition: status?.totalNutrition || null,
+        dayWiseNutrition: status?.dayWiseNutrition || null,
+        mealSummary: status?.mealSummary || null,
+        completionStatus: status?.completionStatus || null
       },
-      message: 'Draft retrieved with micronutrient data'
+      message: 'Draft retrieved with nutrition data'
     });
   } catch (error) {
     console.error('❌ Error getting draft:', error);

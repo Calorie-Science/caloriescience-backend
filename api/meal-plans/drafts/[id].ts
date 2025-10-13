@@ -452,6 +452,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
     } : null;
 
+    // Get standardized nutrition using getDraftStatus
+    const status = await draftService.getDraftStatus(id);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -467,7 +470,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         nutritionSummary: {
           overall: overallTotals,
           dailyAverages: dailyAverages
-        }
+        },
+        // Add standardized nutrition data (same format as other endpoints)
+        totalNutrition: status?.totalNutrition || null,
+        dayWiseNutrition: status?.dayWiseNutrition || null,
+        mealSummary: status?.mealSummary || null,
+        completionStatus: status?.completionStatus || null
       },
       message: 'Meal plan draft retrieved with detailed nutrition'
     });
