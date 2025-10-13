@@ -1,7 +1,14 @@
 #!/bin/bash
 
 # Test Spoonacular API with different parameters
-API_KEY="41788d9689d442ecb2e386bcf93d4bf7"
+# Make sure to set SPOONACULAR_API_KEY environment variable before running
+API_KEY="${SPOONACULAR_API_KEY}"
+
+if [ -z "$API_KEY" ]; then
+  echo "Error: SPOONACULAR_API_KEY environment variable is not set"
+  echo "Usage: SPOONACULAR_API_KEY=your_key_here ./test-spoonacular.sh"
+  exit 1
+fi
 
 echo "=== Testing Spoonacular API ==="
 echo ""

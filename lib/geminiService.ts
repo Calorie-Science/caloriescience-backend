@@ -21,7 +21,7 @@ export class GeminiService {
   private baseUrl: string;
 
   constructor() {
-    this.apiKey = process.env.GEMINI_API_KEY || 'AIzaSyCxWPyeQrOQIrd39LbfyUC2GT-KDXolwJc'; // Fallback to provided key
+    this.apiKey = process.env.GEMINI_API_KEY || '';
     this.model = 'gemini-2.0-flash-exp'; // Use the latest Gemini model
     this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
     

@@ -25,7 +25,11 @@ export class OpenAIAssistantService {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
-    this.assistantId = process.env.OPENAI_ASSISTANT_ID || 'asst_WgJCEyh92kZqUBcwcYspU3oC';
+    this.assistantId = process.env.OPENAI_ASSISTANT_ID || '';
+    
+    if (!this.assistantId) {
+      throw new Error('OPENAI_ASSISTANT_ID environment variable is required');
+    }
   }
 
   /**

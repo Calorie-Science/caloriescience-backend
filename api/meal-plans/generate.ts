@@ -150,6 +150,7 @@ interface MealProgram {
       fiber: number;
       name: string;
       mealTime: string;
+      recipeSearchType?: string; // The actual meal type to use for recipe searching
     }
   };
 }
@@ -416,8 +417,8 @@ async function getClientData(
   
   // Apply meal program override if provided
   if (overrideMealProgram) {
-    // Convert array format to object format, using mealName as key to avoid conflicts
-    const meals: { [mealType: string]: { calories: number; protein: number; carbs: number; fat: number; fiber: number; name: string; mealTime: string } } = {};
+    // Convert array format to object format, using mealName as key but preserving mealType for recipe search
+    const meals: { [mealType: string]: { calories: number; protein: number; carbs: number; fat: number; fiber: number; name: string; mealTime: string; recipeSearchType: string } } = {};
     
     overrideMealProgram.meals.forEach(meal => {
       // Use mealName as key to ensure unique entries
@@ -429,7 +430,8 @@ async function getClientData(
         fat: 0,     // Will be calculated based on calorie ratio
         fiber: 0,   // Will be calculated based on calorie ratio
         name: meal.mealName,
-        mealTime: meal.mealTime + ':00' // Convert HH:MM to HH:MM:SS
+        mealTime: meal.mealTime + ':00', // Convert HH:MM to HH:MM:SS
+        recipeSearchType: meal.mealType // Store the meal type for recipe searching
       };
     });
     
@@ -458,17 +460,20 @@ async function getClientData(
 
       if (!mealsError && meals) {
         // Build flexible meal program structure
-        const mealProgramMeals: { [mealType: string]: { calories: number; protein: number; carbs: number; fat: number; fiber: number; name: string; mealTime: string } } = {};
+        // Use meal_name as key but preserve meal_type for recipe searching
+        const mealProgramMeals: { [mealType: string]: { calories: number; protein: number; carbs: number; fat: number; fiber: number; name: string; mealTime: string; recipeSearchType: string } } = {};
         
         meals.forEach(meal => {
-          mealProgramMeals[meal.meal_type] = {
+          const mealKey = (meal.meal_name || meal.meal_type).toLowerCase();
+          mealProgramMeals[mealKey] = {
             calories: meal.target_calories || 0,
             protein: 0, // Will be calculated based on calorie ratio
             carbs: 0,   // Will be calculated based on calorie ratio
             fat: 0,     // Will be calculated based on calorie ratio
             fiber: 0,   // Will be calculated based on calorie ratio
             name: meal.meal_name || meal.meal_type,
-            mealTime: meal.meal_time || '00:00:00'
+            mealTime: meal.meal_time || '00:00:00',
+            recipeSearchType: meal.meal_type // Store the meal type for recipe searching
           };
         });
 
@@ -601,10 +606,25 @@ async function fetchAllMealSuggestions(
   // Use meal program meals if available, otherwise use 4-meal fallback
   const mealTypesToFetch = mealProgram ? Object.keys(mealProgram.meals) : ['breakfast', 'lunch', 'dinner', 'snacks'];
   
+  // Build a mapping of meal keys to recipe search types
+  // This allows us to use the proper mealType for recipe searching while keeping the meal name as key
+  const mealKeyToSearchType: { [key: string]: string } = {};
+  if (mealProgram) {
+    Object.keys(mealProgram.meals).forEach(mealKey => {
+      const meal = mealProgram.meals[mealKey];
+      mealKeyToSearchType[mealKey] = meal.recipeSearchType || mealKey;
+    });
+  } else {
+    mealTypesToFetch.forEach(mealType => {
+      mealKeyToSearchType[mealType] = mealType;
+    });
+  }
+  
   console.log(`🔍 Meal program analysis:`, {
     hasMealProgram: !!mealProgram,
     mealTargets: mealTargets,
-    mealTypesToFetch: mealTypesToFetch
+    mealTypesToFetch: mealTypesToFetch,
+    mealKeyToSearchType: mealKeyToSearchType
   });
   
   console.log(`🔍 About to fetch recipes for meal types:`, mealTypesToFetch);
@@ -616,18 +636,19 @@ async function fetchAllMealSuggestions(
   const recipesPerMealType = Math.max(18, days * 3); // At least 18, or 3 per day
   console.log(`🔍 Fetching ${recipesPerMealType} recipes per meal type for ${days} day(s)`);
   
-  for (const mealType of mealTypesToFetch) {
-    console.log(`🔄 Fetching ${mealType} suggestions...`);
+  for (const mealKey of mealTypesToFetch) {
+    const recipeSearchType = mealKeyToSearchType[mealKey];
+    console.log(`🔄 Fetching ${mealKey} suggestions (using ${recipeSearchType} for recipe search)...`);
     
-    const edamamResult = await getRecipesFromProvider('edamam', mealType, mealTargets[mealType as keyof typeof mealTargets], dietaryPreferences, recipesPerMealType);
-    const spoonacularResult = await getRecipesFromProvider('spoonacular', mealType, mealTargets[mealType as keyof typeof mealTargets], dietaryPreferences, recipesPerMealType);
+    const edamamResult = await getRecipesFromProvider('edamam', recipeSearchType, mealTargets[mealKey as keyof typeof mealTargets], dietaryPreferences, recipesPerMealType);
+    const spoonacularResult = await getRecipesFromProvider('spoonacular', recipeSearchType, mealTargets[mealKey as keyof typeof mealTargets], dietaryPreferences, recipesPerMealType);
     
-    cachedSuggestions[mealType] = {
+    cachedSuggestions[mealKey] = {
       edamam: edamamResult.recipes,
       spoonacular: spoonacularResult.recipes
     };
     
-    console.log(`✅ ${mealType}: ${edamamResult.recipes.length} Edamam + ${spoonacularResult.recipes.length} Spoonacular`);
+    console.log(`✅ ${mealKey} (${recipeSearchType}): ${edamamResult.recipes.length} Edamam + ${spoonacularResult.recipes.length} Spoonacular`);
   }
 
   return cachedSuggestions;
@@ -1028,13 +1049,16 @@ async function enrichMealPlanWithCache(mealPlan: DayMealPlan[]): Promise<DayMeal
 
 function getMealTypeKeywords(mealType: string): string {
   // Use simple meal type names - let calorie and allergen filters do the work
-  const keywords = {
+  const keywords: { [key: string]: string } = {
     breakfast: 'breakfast',
+    brunch: 'brunch',
+    'lunch/dinner': 'meal',
     lunch: 'lunch', 
     dinner: 'dinner',
-    snack: 'snack'
+    snack: 'snack',
+    teatime: 'snack'
   };
-  return keywords[mealType as keyof typeof keywords] || mealType;
+  return keywords[mealType.toLowerCase()] || mealType;
 }
 
 function getDishTypesForMeal(mealType: string): string[] {
@@ -1044,11 +1068,14 @@ function getDishTypesForMeal(mealType: string): string[] {
   // Side dish, Soup, Starter, Sweets
   const dishTypeMap: { [key: string]: string[] } = {
     breakfast: ['Cereals', 'Pancake', 'Bread', 'Main course'],
+    brunch: ['Cereals', 'Pancake', 'Bread', 'Main course', 'Salad'],
+    'lunch/dinner': ['Main course', 'Salad', 'Soup', 'Sandwiches'],
     lunch: ['Main course', 'Salad', 'Soup', 'Sandwiches'],
     dinner: ['Main course', 'Soup', 'Salad'],
-    snack: ['Starter', 'Salad', 'Biscuits and cookies']
+    snack: ['Starter', 'Salad', 'Biscuits and cookies', 'Drinks'],
+    teatime: ['Biscuits and cookies', 'Bread', 'Sweets', 'Drinks', 'Starter']
   };
-  return dishTypeMap[mealType] || ['Main course'];
+  return dishTypeMap[mealType.toLowerCase()] || ['Main course'];
 }
 
 function shuffleArray<T>(array: T[]): T[] {

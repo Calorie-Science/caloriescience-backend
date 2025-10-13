@@ -128,13 +128,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         fiberPerServingG: externalRecipe.nutrition?.macros?.fiber?.quantity || 0,
         ingredients: externalRecipe.ingredients || [],
         cookingInstructions: externalRecipe.instructions || [],
-        nutritionDetails: externalRecipe.nutrition || {},
+        nutritionDetails: externalRecipe.nutrition || null, // Use null instead of {} for missing nutrition
         originalApiResponse: externalRecipe,
         hasCompleteNutrition: !!(externalRecipe.nutrition?.calories?.quantity && externalRecipe.nutrition?.macros?.protein?.quantity),
         hasDetailedIngredients: !!(externalRecipe.ingredients && externalRecipe.ingredients.length > 0),
         hasCookingInstructions: !!(externalRecipe.instructions && externalRecipe.instructions.length > 0),
         dataQualityScore: calculateDataQuality(externalRecipe)
       };
+      
+      if (!cacheRecipeData.nutritionDetails) {
+        console.warn(`⚠️ Recipe ${externalRecipe.id} has no nutrition data - caching with null nutritionDetails`);
+      }
       
       await cacheService.storeRecipe(cacheRecipeData);
 

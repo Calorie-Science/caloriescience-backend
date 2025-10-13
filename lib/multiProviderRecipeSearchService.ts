@@ -164,10 +164,10 @@ export class MultiProviderRecipeSearchService {
 
   constructor() {
     this.edamamService = new EdamamService();
-    this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '0c6f2e35fab0436eafec876a66fd2c51';
+    this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '';
     
     if (!this.spoonacularApiKey) {
-      console.warn('⚠️ Spoonacular API key not found. Spoonacular searches will be disabled.');
+      throw new Error('SPOONACULAR_API_KEY environment variable is required');
     }
   }
 
@@ -1023,7 +1023,26 @@ export class MultiProviderRecipeSearchService {
    * Transform Spoonacular nutrition data to standard format
    */
   private transformSpoonacularNutrition(nutrition: any): any {
-    if (!nutrition || !nutrition.nutrients) {
+    if (!nutrition) {
+      return {
+        calories: null,
+        macros: {},
+        micros: {
+          vitamins: {},
+          minerals: {}
+        }
+      };
+    }
+
+    // Check if data is already in standardized format (has macros/micros structure)
+    if (nutrition.macros && nutrition.calories) {
+      console.log('📊 Spoonacular nutrition is already in standardized format');
+      return nutrition;
+    }
+
+    // Check if data has nutrients array (raw Spoonacular format)
+    if (!nutrition.nutrients) {
+      console.warn('⚠️ Spoonacular nutrition data has no nutrients array and is not in standardized format');
       return {
         calories: null,
         macros: {},

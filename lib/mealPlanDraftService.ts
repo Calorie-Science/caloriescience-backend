@@ -393,18 +393,45 @@ export class MealPlanDraftService {
     dayPlan.meals[mealName].totalNutrition = 
       await this.calculateMealTotalNutrition(dayPlan.meals[mealName]);
 
-    // Update database
-    const { error } = await supabase
+    // Log what we're about to save for debugging
+    console.log(`💾 Saving recipe selection for ${mealName}:`, {
+      draftId,
+      day,
+      mealName,
+      recipeId,
+      selectedRecipeId: dayPlan.meals[mealName].selectedRecipeId,
+      totalMealsInDay: Object.keys(dayPlan.meals).length,
+      mealsWithSelections: Object.entries(dayPlan.meals)
+        .filter(([_, meal]: [string, any]) => meal.selectedRecipeId)
+        .map(([name, meal]: [string, any]) => ({ name, recipeId: meal.selectedRecipeId }))
+    });
+
+    // Update database with optimistic locking using updated_at
+    const newUpdatedAt = new Date().toISOString();
+    const { data: updateResult, error } = await supabase
       .from('meal_plan_drafts')
       .update({
         suggestions: draft.suggestions,
-        updated_at: new Date().toISOString()
+        updated_at: newUpdatedAt
       })
-      .eq('id', draftId);
+      .eq('id', draftId)
+      .eq('updated_at', draft.updatedAt) // Optimistic lock: only update if not modified by another request
+      .select('id');
 
     if (error) {
+      console.error(`❌ Failed to update draft for ${mealName}:`, error);
       throw new Error(`Failed to update draft: ${error.message}`);
     }
+    
+    // Check if the update actually happened (optimistic lock check)
+    if (!updateResult || updateResult.length === 0) {
+      console.warn(`⚠️ Draft was modified by another request during ${mealName} selection. Retrying...`);
+      // Retry the operation by recursively calling selectRecipe
+      // This will fetch the fresh draft and try again
+      return await this.selectRecipe(draftId, day, mealName, recipeId, customizations);
+    }
+    
+    console.log(`✅ Successfully saved recipe selection for ${mealName}`);
   }
 
   /**
@@ -420,10 +447,49 @@ export class MealPlanDraftService {
         // Normalize ingredients and instructions from cache
         const normalizedIngredients = MealPlanDraftService.normalizeIngredients(cachedRecipe.ingredients, source);
         const normalizedInstructions = MealPlanDraftService.normalizeInstructions(cachedRecipe.cookingInstructions);
+        
+        // Transform nutritionDetails format to totalNutrients format
+        const nutritionDetails = cachedRecipe.nutritionDetails || {};
+        const totalNutrients: any = {};
+        
+        // Add macros
+        if (nutritionDetails.macros) {
+          Object.entries(nutritionDetails.macros).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add vitamins
+        if (nutritionDetails.micros?.vitamins) {
+          Object.entries(nutritionDetails.micros.vitamins).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add minerals
+        if (nutritionDetails.micros?.minerals) {
+          Object.entries(nutritionDetails.micros.minerals).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
+        }
+        
         return {
           ingredients: normalizedIngredients,
           instructions: normalizedInstructions,
-          nutrition: cachedRecipe.nutritionDetails || {}
+          nutrition: {
+            calories: nutritionDetails.calories?.quantity || 0,
+            protein: nutritionDetails.macros?.protein?.quantity || 0,
+            carbs: nutritionDetails.macros?.carbs?.quantity || 0,
+            fat: nutritionDetails.macros?.fat?.quantity || 0,
+            fiber: nutritionDetails.macros?.fiber?.quantity || 0,
+            totalNutrients: totalNutrients
+          }
         };
       }
 
@@ -438,22 +504,77 @@ export class MealPlanDraftService {
         
         // Store in cache for future use (store normalized data)
         console.log(`💾 Storing recipe in cache with ${normalizedIngredients.length} normalized ingredients and ${normalizedInstructions.length} instructions`);
-        // Transform nutrition to standardized format with micronutrients
-        const NutritionMappingService = (await import('./nutritionMappingService')).NutritionMappingService;
-        let nutritionDetails: any = {};
+        
+        // NOTE: multiProviderService.getRecipeDetails() already transforms nutrition to standardized format
+        // So we just use it directly, no need to transform again!
+        let nutritionDetails: any = null;
         
         if ((recipeDetails as any).nutrition) {
-          // Use the nutrition object from the API response
-          if (source === 'edamam') {
-            // Pass servings to get PER-SERVING nutrition (Edamam returns total)
-            const recipeServings = recipeDetails.servings || (recipeDetails as any).nutrition?.yield || 1;
-            nutritionDetails = NutritionMappingService.transformEdamamNutrition((recipeDetails as any).nutrition, recipeServings);
-          } else if (source === 'spoonacular') {
-            nutritionDetails = NutritionMappingService.transformSpoonacularNutrition((recipeDetails as any).nutrition);
+          nutritionDetails = (recipeDetails as any).nutrition;
+          
+          // Validate that we got actual nutrition data
+          const hasValidNutrition = nutritionDetails && 
+            nutritionDetails.macros && 
+            (nutritionDetails.macros.protein?.quantity > 0 || 
+             nutritionDetails.macros.carbs?.quantity > 0 ||
+             nutritionDetails.macros.fat?.quantity > 0);
+          
+          if (hasValidNutrition) {
+            console.log(`  💾 Caching with micronutrients: ${Object.keys(nutritionDetails.micros?.vitamins || {}).length} vitamins, ${Object.keys(nutritionDetails.micros?.minerals || {}).length} minerals`);
+            console.log(`  💾 Nutrition values: protein=${nutritionDetails.macros.protein?.quantity}g, carbs=${nutritionDetails.macros.carbs?.quantity}g, fat=${nutritionDetails.macros.fat?.quantity}g`);
+          } else {
+            console.warn(`  ⚠️ Nutrition data is empty for recipe ${recipeId} - skipping cache`);
+            nutritionDetails = null; // Mark as missing rather than empty
           }
-          console.log(`  💾 Caching with micronutrients: ${Object.keys(nutritionDetails.micros?.vitamins || {}).length} vitamins, ${Object.keys(nutritionDetails.micros?.minerals || {}).length} minerals`);
         } else {
-          console.warn(`  ⚠️ No nutrition data in API response, caching with empty nutritionDetails`);
+          console.warn(`  ⚠️ No nutrition data in API response for recipe ${recipeId} - skipping cache`);
+        }
+        
+        // Only cache if we have complete nutrition
+        if (!nutritionDetails) {
+          console.log('⚠️ Skipping cache - incomplete nutrition data. Recipe will be fetched fresh when needed.');
+          return {
+            ingredients: normalizedIngredients,
+            instructions: normalizedInstructions,
+            nutrition: {
+              calories: recipeDetails.calories || 0,
+              protein: recipeDetails.protein || 0,
+              carbs: recipeDetails.carbs || 0,
+              fat: recipeDetails.fat || 0,
+              fiber: recipeDetails.fiber || 0,
+              totalNutrients: {}
+            }
+          };
+        }
+        
+        // Transform nutritionDetails format to totalNutrients format
+        const totalNutrients: any = {};
+        
+        // Add macros
+        if (nutritionDetails.macros) {
+          Object.entries(nutritionDetails.macros).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add vitamins
+        if (nutritionDetails.micros?.vitamins) {
+          Object.entries(nutritionDetails.micros.vitamins).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add minerals
+        if (nutritionDetails.micros?.minerals) {
+          Object.entries(nutritionDetails.micros.minerals).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              totalNutrients[key] = value;
+            }
+          });
         }
         
         await cacheService.storeRecipe({
@@ -488,11 +609,12 @@ export class MealPlanDraftService {
           ingredients: normalizedIngredients,
           instructions: normalizedInstructions,
           nutrition: {
-            calories: recipeDetails.calories || 0,
-            protein: recipeDetails.protein || 0,
-            carbs: recipeDetails.carbs || 0,
-            fat: recipeDetails.fat || 0,
-            fiber: recipeDetails.fiber || 0
+            calories: nutritionDetails.calories?.quantity || 0,
+            protein: nutritionDetails.macros?.protein?.quantity || 0,
+            carbs: nutritionDetails.macros?.carbs?.quantity || 0,
+            fat: nutritionDetails.macros?.fat?.quantity || 0,
+            fiber: nutritionDetails.macros?.fiber?.quantity || 0,
+            totalNutrients: totalNutrients
           }
         };
       }
@@ -984,9 +1106,12 @@ export class MealPlanDraftService {
 
       // For each meal, keep only the selected recipe
       Object.entries(day.meals).forEach(([mealName, meal]: [string, any]) => {
+        console.log(`🔍 Checking meal "${mealName}" - selectedRecipeId: ${meal.selectedRecipeId || 'NONE'}, recipes count: ${meal.recipes?.length || 0}`);
+        
         if (meal.selectedRecipeId) {
           const selectedRecipe = meal.recipes.find((r: any) => r.id === meal.selectedRecipeId);
           if (selectedRecipe) {
+            console.log(`✅ Including meal "${mealName}" with recipe "${selectedRecipe.title}" (${selectedRecipe.id})`);
             // Keep the same structure but remove allRecipes and displayOffset
             finalizedDay.meals[mealName] = {
               recipes: [selectedRecipe], // Only the selected recipe, with all its properties
@@ -995,7 +1120,11 @@ export class MealPlanDraftService {
               selectedRecipeId: meal.selectedRecipeId,
               totalNutrition: meal.totalNutrition
             };
+          } else {
+            console.warn(`⚠️ Selected recipe ${meal.selectedRecipeId} not found in meal "${mealName}" recipes array`);
           }
+        } else {
+          console.warn(`⚠️ Meal "${mealName}" has no selectedRecipeId - will be excluded from finalized plan`);
         }
       });
 

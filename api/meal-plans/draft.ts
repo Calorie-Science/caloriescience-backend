@@ -1418,6 +1418,23 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           
           // CACHE THE RECIPE for future use!
           try {
+            // NOTE: multiProviderService.getRecipeDetails() already returns transformed nutrition
+            // So we just use it directly, no need to transform again!
+            let nutritionDetails: any = null;
+            
+            if ((recipeDetails as any).nutrition) {
+              nutritionDetails = (recipeDetails as any).nutrition;
+              console.log(`  💾 Using pre-transformed nutrition for caching: protein=${nutritionDetails?.macros?.protein?.quantity || 0}g`);
+            } else {
+              console.warn(`  ⚠️ No nutrition data in API response for recipe ${recipeId}`);
+            }
+            
+            // Only cache if we have complete nutrition with detailed macros
+            const hasCompleteNutrition = !!(nutritionDetails?.macros?.protein?.quantity);
+            
+            if (!hasCompleteNutrition) {
+              console.log('⚠️ Skipping cache - incomplete nutrition data. Recipe will be fetched fresh when needed.');
+            } else {
             const recipeToCache: any = {
               provider: customizations.source,
               externalRecipeId: recipeId,
@@ -1443,15 +1460,16 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
               ingredients: recipeDetails.ingredients,
               ingredientLines: (recipeDetails as any).ingredientLines || [],
               cookingInstructions: (recipeDetails as any).instructions || [],
-              nutritionDetails: (recipeDetails as any).nutrition || {},
+              nutritionDetails: nutritionDetails, // Use properly transformed nutrition
               originalApiResponse: recipeDetails,
-              hasCompleteNutrition: !!((recipeDetails as any).nutrition?.calories),
+              hasCompleteNutrition: !!(nutritionDetails?.macros?.protein?.quantity),
               hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
               hasCookingInstructions: !!((recipeDetails as any).instructions && (recipeDetails as any).instructions.length > 0),
               dataQualityScore: 85
             };
             await cacheService.storeRecipe(recipeToCache);
-            console.log('  ✅ Recipe cached successfully');
+            console.log('  ✅ Recipe cached successfully with complete nutrition');
+            }
           } catch (cacheError) {
             console.error('  ⚠️ Failed to cache recipe:', cacheError);
             // Don't fail the request if caching fails
@@ -1655,6 +1673,23 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         
         // CACHE THE RECIPE for future use!
         try {
+          // NOTE: multiProviderService.getRecipeDetails() already returns transformed nutrition
+          // So we just use it directly, no need to transform again!
+          let nutritionDetails: any = null;
+          
+          if ((recipeDetails as any).nutrition) {
+            nutritionDetails = (recipeDetails as any).nutrition;
+            console.log(`  💾 Using pre-transformed nutrition for caching: protein=${nutritionDetails?.macros?.protein?.quantity || 0}g`);
+          } else {
+            console.warn(`  ⚠️ No nutrition data in API response for recipe ${recipeId}`);
+          }
+          
+          // Only cache if we have complete nutrition with detailed macros
+          const hasCompleteNutrition = !!(nutritionDetails?.macros?.protein?.quantity);
+          
+          if (!hasCompleteNutrition) {
+            console.log('⚠️ Skipping cache - incomplete nutrition data. Recipe will be fetched fresh when needed.');
+          } else {
           const recipeToCache: any = {
             provider: customizations.source,
             externalRecipeId: recipeId,
@@ -1680,15 +1715,16 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             ingredients: recipeDetails.ingredients,
             ingredientLines: (recipeDetails as any).ingredientLines || [],
             cookingInstructions: (recipeDetails as any).instructions || [],
-            nutritionDetails: (recipeDetails as any).nutrition || {},
+            nutritionDetails: nutritionDetails, // Use properly transformed nutrition
             originalApiResponse: recipeDetails,
-            hasCompleteNutrition: !!((recipeDetails as any).nutrition?.calories),
+            hasCompleteNutrition: !!(nutritionDetails?.macros?.protein?.quantity),
             hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
             hasCookingInstructions: !!((recipeDetails as any).instructions && (recipeDetails as any).instructions.length > 0),
             dataQualityScore: 85
           };
           await cacheService.storeRecipe(recipeToCache);
-          console.log('  ✅ Recipe cached successfully');
+          console.log('  ✅ Recipe cached successfully with complete nutrition');
+          }
         } catch (cacheError) {
           console.error('  ⚠️ Failed to cache recipe:', cacheError);
           // Don't fail the request if caching fails

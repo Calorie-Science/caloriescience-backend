@@ -11,7 +11,8 @@
     "start": "node server.js",
     "vercel:dev": "vercel dev",
     "type-check": "tsc --noEmit",
-    "test": "echo \"No tests specified\" && exit 0"
+    "test": "echo \"No tests specified\" && exit 0",
+    "fix-spoonacular-nutrition": "node scripts/fix-spoonacular-nutrition.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.63.0",

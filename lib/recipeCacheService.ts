@@ -179,8 +179,13 @@ export class RecipeCacheService {
         await this.updateLastAccessed(recipes.map(r => r.id));
       }
 
+      // Fix nutrition data for any recipes with empty nutritionDetails before converting
+      const fixedRecipes = recipes ? await Promise.all(
+        recipes.map(recipe => this.ensureNutritionDetails(recipe))
+      ) : [];
+
       // Convert cached recipes to standardized format
-      const standardizedRecipes = recipes ? this.convertCachedRecipesToUnified(recipes) : [];
+      const standardizedRecipes = this.convertCachedRecipesToUnified(fixedRecipes);
 
       return {
         recipes: standardizedRecipes,
@@ -220,7 +225,10 @@ export class RecipeCacheService {
       // Update last accessed
       await this.updateLastAccessed([recipe.id]);
 
-      return recipe;
+      // Fix nutrition data if it's empty but originalApiResponse has data
+      const fixedRecipe = await this.ensureNutritionDetails(recipe);
+
+      return fixedRecipe;
     } catch (error) {
       console.error('Get cached recipe error:', error);
       return null;
@@ -253,6 +261,19 @@ export class RecipeCacheService {
    */
   async storeRecipe(recipe: Partial<CachedRecipe>): Promise<CachedRecipe | null> {
     try {
+      // Validate that nutritionDetails is properly populated before caching
+      const hasValidNutrition = recipe.nutritionDetails && 
+        recipe.nutritionDetails.macros && 
+        (recipe.nutritionDetails.macros.protein?.quantity > 0 || 
+         recipe.nutritionDetails.macros.carbs?.quantity > 0 ||
+         recipe.nutritionDetails.macros.fat?.quantity > 0);
+
+      if (!hasValidNutrition) {
+        console.warn(`⚠️ Attempting to cache recipe ${recipe.externalRecipeId} with empty nutritionDetails!`);
+        console.warn(`   This should not happen - nutritionDetails should be populated before caching.`);
+        console.warn(`   Recipe will still be cached, but may need repair later.`);
+      }
+
       const { data: storedRecipe, error } = await supabase
         .from('cached_recipes')
         .insert({
@@ -370,6 +391,65 @@ export class RecipeCacheService {
     } catch (error) {
       console.error('Update recipe error:', error);
       return null;
+    }
+  }
+
+  /**
+   * Ensure nutritionDetails is populated, reconstructing from originalApiResponse if needed
+   */
+  private async ensureNutritionDetails(recipe: any): Promise<CachedRecipe> {
+    try {
+      // Check if nutritionDetails is missing or empty
+      const hasNutritionDetails = recipe.nutrition_details && 
+        recipe.nutrition_details.macros && 
+        (recipe.nutrition_details.macros.protein?.quantity > 0 || 
+         recipe.nutrition_details.macros.carbs?.quantity > 0 ||
+         recipe.nutrition_details.macros.fat?.quantity > 0);
+
+      if (!hasNutritionDetails && recipe.original_api_response?.nutrition) {
+        console.log(`🔧 Fixing empty nutritionDetails for recipe ${recipe.external_recipe_id} from originalApiResponse`);
+        
+        // Dynamically import NutritionMappingService to avoid circular dependencies
+        const { NutritionMappingService } = await import('./nutritionMappingService');
+        
+        let nutritionDetails: any = {};
+        
+        if (recipe.provider === 'spoonacular') {
+          nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(recipe.original_api_response.nutrition);
+        } else if (recipe.provider === 'edamam') {
+          const servings = recipe.servings || recipe.original_api_response.yield || 1;
+          nutritionDetails = NutritionMappingService.transformEdamamNutrition(recipe.original_api_response.nutrition, servings);
+        }
+        
+        console.log(`✅ Reconstructed nutritionDetails:`, {
+          recipeId: recipe.external_recipe_id,
+          hasVitamins: Object.keys(nutritionDetails.micros?.vitamins || {}).length,
+          hasMinerals: Object.keys(nutritionDetails.micros?.minerals || {}).length,
+          protein: nutritionDetails.macros?.protein?.quantity,
+          calories: nutritionDetails.calories?.quantity
+        });
+        
+        // Update the cache with the fixed nutrition data
+        await supabase
+          .from('cached_recipes')
+          .update({
+            nutrition_details: nutritionDetails,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', recipe.id);
+        
+        // Return the fixed recipe
+        return {
+          ...recipe,
+          nutritionDetails: nutritionDetails
+        };
+      }
+      
+      return recipe;
+    } catch (error) {
+      console.error('Error ensuring nutrition details:', error);
+      // Return original recipe if fix fails
+      return recipe;
     }
   }
 

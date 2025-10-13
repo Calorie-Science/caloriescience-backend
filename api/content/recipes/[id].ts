@@ -83,36 +83,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Step 3: Store in cache (async, don't wait)
-      console.log('💾 Storing recipe in cache...');
-      try {
-        await cacheService.storeRecipe({
-          provider: source as 'edamam' | 'spoonacular',
-          externalRecipeId: id,
-          recipeName: recipe.title,
-          recipeUrl: recipe.sourceUrl,
-          recipeImageUrl: recipe.image,
-          servings: recipe.servings,
-          totalTimeMinutes: recipe.readyInMinutes,
-          caloriesPerServing: recipe.calories,
-          proteinPerServingG: recipe.protein,
-          carbsPerServingG: recipe.carbs,
-          fatPerServingG: recipe.fat,
-          fiberPerServingG: recipe.fiber,
-          ingredients: recipe.ingredients,
-          healthLabels: recipe.healthLabels,
-          dietLabels: recipe.dietLabels,
-          cuisineTypes: recipe.cuisineType,
-          dishTypes: recipe.dishType,
-          mealTypes: recipe.mealType,
-          originalApiResponse: recipe,
-          hasCompleteNutrition: recipe.calories > 0 && recipe.protein > 0,
-          hasDetailedIngredients: recipe.ingredients && recipe.ingredients.length > 0,
-          dataQualityScore: calculateDataQuality(recipe)
-        });
-      } catch (error) {
-        console.error('Error storing recipe in cache:', error);
-      }
+      // Step 3: DON'T cache from this endpoint 
+      // This endpoint uses UnifiedRecipe format which only has basic nutrition (no micronutrients)
+      // Recipes will be properly cached when fetched via getRecipeDetails() with full nutrition
+      console.log('⚠️ Skipping cache - UnifiedRecipe format lacks detailed nutrition. Will cache when full details are fetched.');
 
       return res.status(200).json({
         success: true,

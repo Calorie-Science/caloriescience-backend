@@ -281,7 +281,19 @@ export class NutritionMappingService {
     // Start with complete template with all nutrients initialized to 0
     const nutrition: StandardizedNutrition = this.getCompleteNutritionTemplate();
 
-    if (!spoonacularData || !spoonacularData.nutrients) {
+    if (!spoonacularData) {
+      return nutrition;
+    }
+
+    // Check if data is already in standardized format (has macros/micros structure)
+    if (spoonacularData.macros && spoonacularData.calories) {
+      console.log('📊 Spoonacular nutrition is already in standardized format');
+      return spoonacularData as StandardizedNutrition;
+    }
+
+    // Check if data has nutrients array (raw Spoonacular format)
+    if (!spoonacularData.nutrients) {
+      console.warn('⚠️ Spoonacular nutrition data has no nutrients array and is not in standardized format');
       return nutrition;
     }
 
@@ -302,6 +314,8 @@ export class NutritionMappingService {
         }
       }
     }
+
+    console.log(`✅ Transformed Spoonacular nutrition: ${nutrition.calories.quantity} kcal`);
 
     return nutrition;
   }

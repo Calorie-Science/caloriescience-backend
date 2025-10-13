@@ -28,7 +28,11 @@ export class IngredientCustomizationService {
   constructor() {
     this.edamamService = new EdamamService();
     this.spoonacularService = new MultiProviderRecipeSearchService();
-    this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '0c6f2e35fab0436eafec876a66fd2c51';
+    this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '';
+    
+    if (!this.spoonacularApiKey) {
+      throw new Error('SPOONACULAR_API_KEY environment variable is required');
+    }
   }
 
   /**

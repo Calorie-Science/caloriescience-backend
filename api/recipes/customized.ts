@@ -311,40 +311,59 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // CACHE THE RECIPE for future use!
       try {
         console.log('💾 Caching recipe for future use...');
-        const recipeToCache: any = {
-          provider: source,
-          externalRecipeId: recipeDetails.id,
-          externalRecipeUri: recipeDetails.uri || recipeDetails.sourceUrl,
-          recipeName: recipeDetails.title,
-          recipeSource: source,
-          recipeUrl: recipeDetails.sourceUrl,
-          recipeImageUrl: recipeDetails.image,
-          cuisineTypes: recipeDetails.cuisineTypes || recipeDetails.cuisineType || [],
-          mealTypes: recipeDetails.mealTypes || recipeDetails.mealType || [],
-          dishTypes: recipeDetails.dishTypes || recipeDetails.dishType || [],
-          healthLabels: recipeDetails.healthLabels || [],
-          dietLabels: recipeDetails.dietLabels || recipeDetails.diets || [],
-          servings: recipeDetails.servings,
-          prepTimeMinutes: recipeDetails.prepTimeMinutes || null,
-          cookTimeMinutes: recipeDetails.cookTimeMinutes || null,
-          totalTimeMinutes: recipeDetails.readyInMinutes || recipeDetails.totalTimeMinutes,
-          caloriesPerServing: recipeDetails.calories?.toString(),
-          proteinPerServingG: recipeDetails.protein?.toString(),
-          carbsPerServingG: recipeDetails.carbs?.toString(),
-          fatPerServingG: recipeDetails.fat?.toString(),
-          fiberPerServingG: recipeDetails.fiber?.toString(),
-          ingredients: recipeDetails.ingredients,
-          ingredientLines: recipeDetails.ingredientLines || [],
-          cookingInstructions: recipeDetails.instructions || [],
-          nutritionDetails: recipeDetails.nutrition || {},
-          originalApiResponse: recipeDetails,
-          hasCompleteNutrition: !!(recipeDetails.nutrition?.calories),
-          hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
-          hasCookingInstructions: !!(recipeDetails.instructions && recipeDetails.instructions.length > 0),
-          dataQualityScore: 85
-        };
-        await cacheService.storeRecipe(recipeToCache);
-        console.log('✅ Recipe cached successfully');
+        
+        // NOTE: multiProviderService.getRecipeDetails() already returns transformed nutrition
+        // So we just use it directly, no need to transform again!
+        let nutritionDetails: any = null;
+        
+        if (recipeDetails.nutrition) {
+          nutritionDetails = recipeDetails.nutrition;
+          console.log(`  💾 Using pre-transformed nutrition for caching: protein=${nutritionDetails?.macros?.protein?.quantity || 0}g`);
+        } else {
+          console.warn(`  ⚠️ No nutrition data in API response for recipe ${recipeDetails.id}`);
+        }
+        
+        // Only cache if we have complete nutrition with detailed macros
+        const hasCompleteNutrition = !!(nutritionDetails?.macros?.protein?.quantity);
+        
+        if (!hasCompleteNutrition) {
+          console.log('⚠️ Skipping cache - incomplete nutrition data. Recipe will be fetched fresh when needed.');
+        } else {
+          const recipeToCache: any = {
+            provider: source,
+            externalRecipeId: recipeDetails.id,
+            externalRecipeUri: recipeDetails.uri || recipeDetails.sourceUrl,
+            recipeName: recipeDetails.title,
+            recipeSource: source,
+            recipeUrl: recipeDetails.sourceUrl,
+            recipeImageUrl: recipeDetails.image,
+            cuisineTypes: recipeDetails.cuisineTypes || recipeDetails.cuisineType || [],
+            mealTypes: recipeDetails.mealTypes || recipeDetails.mealType || [],
+            dishTypes: recipeDetails.dishTypes || recipeDetails.dishType || [],
+            healthLabels: recipeDetails.healthLabels || [],
+            dietLabels: recipeDetails.dietLabels || recipeDetails.diets || [],
+            servings: recipeDetails.servings,
+            prepTimeMinutes: recipeDetails.prepTimeMinutes || null,
+            cookTimeMinutes: recipeDetails.cookTimeMinutes || null,
+            totalTimeMinutes: recipeDetails.readyInMinutes || recipeDetails.totalTimeMinutes,
+            caloriesPerServing: recipeDetails.calories?.toString(),
+            proteinPerServingG: recipeDetails.protein?.toString(),
+            carbsPerServingG: recipeDetails.carbs?.toString(),
+            fatPerServingG: recipeDetails.fat?.toString(),
+            fiberPerServingG: recipeDetails.fiber?.toString(),
+            ingredients: recipeDetails.ingredients,
+            ingredientLines: recipeDetails.ingredientLines || [],
+            cookingInstructions: recipeDetails.instructions || [],
+            nutritionDetails: nutritionDetails, // Use properly transformed nutrition
+            originalApiResponse: recipeDetails,
+            hasCompleteNutrition: true,
+            hasDetailedIngredients: !!(recipeDetails.ingredients && recipeDetails.ingredients.length > 0),
+            hasCookingInstructions: !!(recipeDetails.instructions && recipeDetails.instructions.length > 0),
+            dataQualityScore: 85
+          };
+          await cacheService.storeRecipe(recipeToCache);
+          console.log('✅ Recipe cached successfully with complete nutrition');
+        }
       } catch (cacheError) {
         console.error('⚠️ Failed to cache recipe:', cacheError);
         // Don't fail the request if caching fails
@@ -397,6 +416,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Normalize cookingInstructions to array of objects with number and step
       if (baseRecipe.cookingInstructions && Array.isArray(baseRecipe.cookingInstructions)) {
         baseRecipe.cookingInstructions = baseRecipe.cookingInstructions.map((instruction: any, index: number) => {
+          // If it's a string, check if it's stringified JSON first
+          if (typeof instruction === 'string') {
+            // Try to parse if it looks like JSON
+            if (instruction.trim().startsWith('{')) {
+              try {
+                const parsed = JSON.parse(instruction);
+                // If it's a valid object with number and step, use it
+                if (parsed && typeof parsed === 'object' && parsed.step) {
+                  return {
+                    number: parsed.number || index + 1,
+                    step: parsed.step
+                  };
+                }
+              } catch (e) {
+                // Not valid JSON, treat as plain text step
+              }
+            }
+            // Plain text string - convert to object format
+            return {
+              number: index + 1,
+              step: instruction
+            };
+          }
           // If it's already an object with step, check if step is double-encoded JSON
           if (typeof instruction === 'object' && instruction.step) {
             let stepText = instruction.step;
@@ -417,13 +459,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             return {
               number: instruction.number || index + 1,
               step: stepText
-            };
-          }
-          // If it's a string, convert to object format
-          if (typeof instruction === 'string') {
-            return {
-              number: index + 1,
-              step: instruction
             };
           }
           return instruction;
@@ -503,6 +538,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     // Normalize cookingInstructions to array of objects with number and step
     if (customizedRecipe.cookingInstructions && Array.isArray(customizedRecipe.cookingInstructions)) {
       customizedRecipe.cookingInstructions = customizedRecipe.cookingInstructions.map((instruction: any, index: number) => {
+        // If it's a string, check if it's stringified JSON first
+        if (typeof instruction === 'string') {
+          // Try to parse if it looks like JSON
+          if (instruction.trim().startsWith('{')) {
+            try {
+              const parsed = JSON.parse(instruction);
+              // If it's a valid object with number and step, use it
+              if (parsed && typeof parsed === 'object' && parsed.step) {
+                return {
+                  number: parsed.number || index + 1,
+                  step: parsed.step
+                };
+              }
+            } catch (e) {
+              // Not valid JSON, treat as plain text step
+            }
+          }
+          // Plain text string - convert to object format
+          return {
+            number: index + 1,
+            step: instruction
+          };
+        }
         // If it's already an object with step, check if step is double-encoded JSON
         if (typeof instruction === 'object' && instruction.step) {
           let stepText = instruction.step;
@@ -523,13 +581,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           return {
             number: instruction.number || index + 1,
             step: stepText
-          };
-        }
-        // If it's a string, convert to object format
-        if (typeof instruction === 'string') {
-          return {
-            number: index + 1,
-            step: instruction
           };
         }
         return instruction;
