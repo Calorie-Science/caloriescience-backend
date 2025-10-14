@@ -120,12 +120,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       
       if (!hasActualNutritionData) {
         const originalResponse = cached.original_api_response || cached.originalApiResponse;
-        console.log('⚠️ nutritionDetails empty or has no data in cache, attempting to extract from originalApiResponse');
         
         if (originalResponse) {
           // Try Edamam format
           if (originalResponse.totalNutrients) {
-            console.log('  📊 Found Edamam totalNutrients in originalApiResponse');
             const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
             // Pass servings to get PER-SERVING nutrition (Edamam returns total)
             const recipeServings = cached.servings || originalResponse.yield || 1;
@@ -135,12 +133,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           else if (originalResponse.nutrition) {
             // Check if already in standardized format
             if (originalResponse.nutrition.macros || originalResponse.nutrition.calories) {
-              console.log('  📊 Found standardized nutrition in originalApiResponse');
               nutritionDetails = originalResponse.nutrition;
             } 
             // Raw Spoonacular format with nutrients array
             else if (originalResponse.nutrition.nutrients) {
-              console.log('  📊 Found raw Spoonacular nutrition in originalApiResponse');
               const NutritionMappingService = require('../../lib/nutritionMappingService').NutritionMappingService;
               nutritionDetails = NutritionMappingService.transformSpoonacularNutrition(originalResponse.nutrition);
             }
@@ -156,17 +152,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // If we successfully extracted nutrition from originalApiResponse, update the cache
         if (hasActualDataAfterExtraction && cached.id) {
           try {
-            console.log('  💾 Updating cache with extracted nutrition from originalApiResponse...');
             await cacheService.updateRecipeNutrition(cached.id, nutritionDetails);
-            console.log('  ✅ Cache updated successfully');
           } catch (error) {
-            console.error('  ❌ Failed to update cache:', error);
+            console.error('Failed to update cache:', error);
           }
         }
         
         // If still no nutritionDetails, fetch from API
         if (!hasActualDataAfterExtraction) {
-          console.log('  🔄 Fetching full nutrition from API...');
           const freshRecipeDetails = await multiProviderService.getRecipeDetails(validatedRecipeId);
           if (freshRecipeDetails && freshRecipeDetails.nutrition) {
             console.log('  ✅ Got fresh nutrition from API');

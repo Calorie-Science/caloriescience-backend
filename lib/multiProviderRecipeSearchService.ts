@@ -723,24 +723,6 @@ export class MultiProviderRecipeSearchService {
     return shuffled;
   }
 
-  /**
-   * Get recipe details by ID (supports both providers)
-   */
-  async getRecipeDetails(recipeId: string): Promise<UnifiedRecipe | null> {
-    if (recipeId.startsWith('edamam_')) {
-      // Handle Edamam recipe details
-      const edamamId = recipeId.replace('edamam_', '');
-      // Implementation would call Edamam's recipe details API
-      return null;
-    } else if (recipeId.startsWith('spoonacular_')) {
-      // Handle Spoonacular recipe details
-      const spoonacularId = recipeId.replace('spoonacular_', '');
-      // Implementation would call Spoonacular's recipe details API
-      return null;
-    }
-    
-    return null;
-  }
 
   /**
    * Get available providers
@@ -1129,9 +1111,6 @@ export class MultiProviderRecipeSearchService {
    */
   async getIngredientSuggestions(query: string, mode: 'basic' | 'with_units' | 'units_only' = 'basic'): Promise<{suggestions: string[], unitSuggestions: Record<string, string[]>, units?: string[]}> {
     try {
-      console.log('🔍 SPOONACULAR INGREDIENT SUGGESTIONS - START');
-      console.log('query:', query, 'mode:', mode);
-
       if (!query || query.trim().length === 0) {
         return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
@@ -1144,8 +1123,6 @@ export class MultiProviderRecipeSearchService {
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🔍 SPOONACULAR INGREDIENT CURL COMMAND');
-      console.log(`curl -X GET '${fullUrl}'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -1154,23 +1131,18 @@ export class MultiProviderRecipeSearchService {
         }
       });
 
-      console.log('🔍 SPOONACULAR INGREDIENT RESPONSE STATUS:', response.status);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('❌ SPOONACULAR INGREDIENT ERROR RESPONSE:', errorText);
+        console.error('Spoonacular ingredient suggestions error:', response.status, errorText);
         return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
 
       const data = await response.json();
-      console.log('✅ SPOONACULAR INGREDIENT SUCCESS - Results count:', data?.length || 0);
 
       // Extract ingredient names from the response
       const suggestions = Array.isArray(data) 
         ? data.map((item: any) => item.name || item.title || item).filter(Boolean)
         : [];
-
-      console.log('✅ SPOONACULAR INGREDIENT SUGGESTIONS:', suggestions);
 
       // Handle different modes
       if (mode === 'basic') {
@@ -1213,9 +1185,6 @@ export class MultiProviderRecipeSearchService {
    */
   async getIngredientUnitSuggestions(ingredients: string[]): Promise<Record<string, string[]>> {
     try {
-      console.log('🤖 OPENAI UNIT SUGGESTIONS (for Spoonacular) - START');
-      console.log('ingredients:', ingredients);
-
       if (!ingredients || ingredients.length === 0) {
         return {};
       }
@@ -1287,12 +1256,10 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       }
 
       const unitSuggestions = JSON.parse(jsonMatch[0]);
-      
-      console.log('✅ UNIT SUGGESTIONS SUCCESS:', unitSuggestions);
       return unitSuggestions;
 
     } catch (error) {
-      console.log('❌ UNIT SUGGESTIONS ERROR:', error);
+      console.error('Unit suggestions error:', error);
       // Return default units on error
       const defaultUnits: Record<string, string[]> = {};
       ingredients.forEach(ingredient => {
@@ -1307,9 +1274,6 @@ Return a JSON object where each key is an ingredient name and the value is an ar
    */
   async getIngredientNutrition(ingredientText: string): Promise<any> {
     try {
-      console.log('🔍 SPOONACULAR INGREDIENT NUTRITION - START');
-      console.log('ingredientText:', ingredientText);
-
       if (!ingredientText || ingredientText.trim().length === 0) {
         return null;
       }
@@ -1323,8 +1287,6 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🔍 SPOONACULAR NUTRITION CURL COMMAND');
-      console.log(`curl -X POST '${fullUrl}'`);
 
       const response = await fetch(fullUrl, {
         method: 'POST',
@@ -1333,16 +1295,13 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         }
       });
 
-      console.log('🔍 SPOONACULAR NUTRITION RESPONSE STATUS:', response.status);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('❌ SPOONACULAR NUTRITION ERROR RESPONSE:', errorText);
+        console.error('Spoonacular nutrition API error:', response.status, errorText);
         throw new Error(`Spoonacular nutrition API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ SPOONACULAR NUTRITION SUCCESS');
 
       // Return first ingredient's nutrition data
       if (Array.isArray(data) && data.length > 0) {
@@ -1354,8 +1313,7 @@ Return a JSON object where each key is an ingredient name and the value is an ar
           protein: nutrition?.nutrients?.find((n: any) => n.name === 'Protein')?.amount || 0,
           carbs: nutrition?.nutrients?.find((n: any) => n.name === 'Carbohydrates')?.amount || 0,
           fat: nutrition?.nutrients?.find((n: any) => n.name === 'Fat')?.amount || 0,
-          fiber: nutrition?.nutrients?.find((n: any) => n.name === 'Fiber')?.amount || 0,
-          rawData: ingredient
+          fiber: nutrition?.nutrients?.find((n: any) => n.name === 'Fiber')?.amount || 0
         };
       }
 
@@ -1372,17 +1330,12 @@ Return a JSON object where each key is an ingredient name and the value is an ar
    */
   async getIngredientSubstitutes(recipeId: string, ingredientId: string): Promise<any[]> {
     try {
-      console.log('🔄 SPOONACULAR INGREDIENT SUBSTITUTES - START');
-      console.log('recipeId:', recipeId, 'ingredientId:', ingredientId);
-
       const url = `https://api.spoonacular.com/recipes/${recipeId}/substitutes/${ingredientId}`;
       const params = new URLSearchParams({
         apiKey: this.spoonacularApiKey
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🔄 SPOONACULAR SUBSTITUTES CURL COMMAND');
-      console.log(`curl -X GET '${fullUrl}'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -1391,16 +1344,13 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         }
       });
 
-      console.log('🔄 SPOONACULAR SUBSTITUTES RESPONSE STATUS:', response.status);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('❌ SPOONACULAR SUBSTITUTES ERROR RESPONSE:', errorText);
+        console.error('Spoonacular substitutes API error:', response.status, errorText);
         throw new Error(`Spoonacular substitutes API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ SPOONACULAR SUBSTITUTES SUCCESS');
 
       // Return substitutes with additional metadata
       return Array.isArray(data) ? data : [];

@@ -2,6 +2,7 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MealPlanDraftService } from '../../lib/mealPlanDraftService';
 import { EdamamService } from '../../lib/edamamService';
 import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
+import { NutritionMappingService } from '../../lib/nutritionMappingService';
 import { requireAuth } from '../../lib/auth';
 import Joi from 'joi';
 
@@ -129,7 +130,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     const recipeServings = recipe.servings || 1;
 
     // Get nutrition for the original ingredient
-    console.log(`🔍 Getting nutrition for original ingredient: ${originalIngredient}`);
     let originalIngredientNutrition: any = null;
     if (source === 'edamam') {
       originalIngredientNutrition = await edamamService.getIngredientNutrition(originalIngredient);
@@ -151,7 +151,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Get nutrition data for the new ingredient
-    console.log(`🔍 Getting nutrition for new ingredient: ${newIngredientText}`);
     let newIngredientNutrition: any = null;
     if (source === 'edamam') {
       newIngredientNutrition = await edamamService.getIngredientNutrition(newIngredientText);
@@ -166,41 +165,18 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Extract nutrition values (handle both Edamam and Spoonacular formats)
-    const extractNutrition = (data: any) => {
-      // Spoonacular format (direct properties)
-      if (data.calories !== undefined) {
-        return {
-          calories: data.calories || 0,
-          protein: data.protein || 0,
-          carbs: data.carbs || 0,
-          fat: data.fat || 0,
-          fiber: data.fiber || 0
-        };
-      }
-      
-      // Edamam format (nested in ingredients array)
-      if (data.ingredients?.[0]?.parsed?.[0]?.nutrients) {
-        const nutrients = data.ingredients[0].parsed[0].nutrients;
-        return {
-          calories: nutrients.ENERC_KCAL?.quantity || 0,
-          protein: nutrients.PROCNT?.quantity || 0,
-          carbs: nutrients.CHOCDF?.quantity || 0,
-          fat: nutrients.FAT?.quantity || 0,
-          fiber: nutrients.FIBTG?.quantity || 0
-        };
-      }
+    // Extract nutrition values using NutritionMappingService
+    const oldNutritionStd = source === 'edamam' 
+      ? NutritionMappingService.transformEdamamNutrition(originalIngredientNutrition)
+      : NutritionMappingService.transformSpoonacularIngredientNutrition(originalIngredientNutrition);
+    
+    const newNutritionStd = source === 'edamam'
+      ? NutritionMappingService.transformEdamamNutrition(newIngredientNutrition)
+      : NutritionMappingService.transformSpoonacularIngredientNutrition(newIngredientNutrition);
 
-      return { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
-    };
-
-    const oldNutrition = extractNutrition(originalIngredientNutrition);
-    const newNutrition = extractNutrition(newIngredientNutrition);
-
-    console.log(`📊 Original ingredient nutrition (total):`, oldNutrition);
-    console.log(`📊 New ingredient nutrition (total):`, newNutrition);
-    console.log(`📊 Original recipe nutrition (per serving):`, originalRecipeNutrition);
-    console.log(`📊 Recipe servings:`, recipeServings);
+    // Convert to simplified format for calculations
+    const oldNutrition = NutritionMappingService.toSimplifiedFormat(oldNutritionStd);
+    const newNutrition = NutritionMappingService.toSimplifiedFormat(newNutritionStd);
 
     // Calculate the total recipe nutrition (all servings)
     const totalRecipeNutrition = {
@@ -237,9 +213,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       fat: parseFloat((newPerServingNutrition.fat * servings).toFixed(1)),
       fiber: parseFloat((newPerServingNutrition.fiber * servings).toFixed(1))
     };
-
-    console.log(`📊 New recipe nutrition (per serving):`, newPerServingNutrition);
-    console.log(`📊 Final nutrition (with ${servings} servings):`, finalNutrition);
 
     // Get existing customizations or create new
     const existingCustomization = meal.customizations[recipeId] || {

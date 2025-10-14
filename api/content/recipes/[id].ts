@@ -39,31 +39,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      console.log('🔍 Recipe Details Request:', {
-        user: user.id,
-        recipeId: id,
-        source
-      });
-
       // Step 1: Check cache first
-      console.log('📦 Checking cache for recipe details...');
       const cachedRecipe = await cacheService.getRecipeByExternalId(source as 'edamam' | 'spoonacular', id);
       
       if (cachedRecipe) {
-        console.log('✅ Cache hit: Found recipe in cache');
         const unifiedRecipe = cacheService.convertCachedToUnified(cachedRecipe);
         
         return res.status(200).json({
           success: true,
-          data: unifiedRecipe,
-          message: 'Recipe details retrieved from cache',
-          fromCache: true,
-          cacheId: cachedRecipe.id
+          data: unifiedRecipe
         });
       }
 
       // Step 2: Fetch from API provider
-      console.log('⚠️ Cache miss: Fetching from API provider...');
       let recipe: UnifiedRecipe | null = null;
 
       if (source === 'edamam') {

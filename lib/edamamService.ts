@@ -119,22 +119,6 @@ export class EdamamService {
     this.openai = new OpenAI({
       apiKey: config.openai.apiKey,
     });
-    
-    // Log constructor values for debugging
-    console.log('🚨🚨🚨 EDAMAM SERVICE CONSTRUCTOR 🚨🚨🚨');
-    console.log('Recipe API - appId exists:', !!this.appId);
-    console.log('Recipe API - appId value:', this.appId);
-    console.log('Recipe API - appKey exists:', !!this.appKey);
-    console.log('Recipe API - appKey value:', this.appKey);
-    console.log('Nutrition API - appId exists:', !!this.nutritionAppId);
-    console.log('Nutrition API - appKey exists:', !!this.nutritionAppKey);
-    console.log('Environment check:');
-    console.log('  - EDAMAM_APP_ID exists:', !!process.env.EDAMAM_APP_ID);
-    console.log('  - EDAMAM_APP_ID value:', process.env.EDAMAM_APP_ID);
-    console.log('  - EDAMAM_APP_KEY exists:', !!process.env.EDAMAM_APP_KEY);
-    console.log('  - EDAMAM_APP_KEY value:', process.env.EDAMAM_APP_KEY);
-    console.log('  - EDAMAM_NUTRITION_APP_ID exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
-    console.log('  - EDAMAM_NUTRITION_APP_KEY exists:', !!process.env.EDAMAM_NUTRITION_APP_KEY);
   }
 
   /**
@@ -241,23 +225,6 @@ export class EdamamService {
         console.warn(`⚠️ Edamam Service - No active ${apiType} key found in database, falling back to hardcoded keys`);
         throw new Error(`No active ${apiType} key found`);
       }
-
-      // Key rotation disabled - using static keys
-      // if (keyResult.needsRotation) {
-      //   console.log(`🔄 Edamam Service - ${apiType} key needs rotation, attempting rotation...`);
-      //   const rotationResult = await this.keyRotationService.checkAndRotateIfNeeded(apiType, keyResult.appId);
-      //   
-      //   if (rotationResult.needsRotation && rotationResult.rotationResult?.success) {
-      //     console.log(`✅ Edamam Service - Key rotation successful for ${apiType}`);
-      //     // Get the new key after rotation
-      //     const newKeyResult = await this.apiKeyService.getActiveApiKey(apiType);
-      //     if (newKeyResult.success && newKeyResult.appId && newKeyResult.appKey) {
-      //       return { appId: newKeyResult.appId, appKey: newKeyResult.appKey };
-      //     }
-      //   } else {
-      //     console.warn(`⚠️ Edamam Service - Key rotation failed for ${apiType}, using current key`);
-      //   }
-      // }
 
       // Increment usage count
       await this.apiKeyService.incrementUsage(keyResult.appId, apiType);
@@ -561,9 +528,6 @@ export class EdamamService {
    */
   async getIngredientNutrition(ingredientText: string, nutritionType: 'cooking' | 'logging' = 'logging'): Promise<any> {
     try {
-      console.log('🚨🚨🚨 EDAMAM NUTRITION DATA API - START 🚨🚨🚨');
-      console.log('ingredientText:', ingredientText);
-      console.log('nutritionType:', nutritionType);
 
       // Get Nutrition API credentials with automatic rotation
       const nutritionKeys = await this.getApiKeyWithRotation('nutrition');
@@ -578,9 +542,6 @@ export class EdamamService {
       const fullUrl = `${url}?${params.toString()}`;
       const credentials = `${nutritionKeys.appId}:${nutritionKeys.appKey}`;
       const base64Credentials = Buffer.from(credentials).toString('base64');
-      
-      console.log('🚨🚨🚨 HARDCODED CURL COMMAND 🚨🚨🚨');
-      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json' -H 'Authorization: Basic ${base64Credentials}'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -590,26 +551,16 @@ export class EdamamService {
         }
       });
 
-      console.log('🚨🚨🚨 RESPONSE STATUS 🚨🚨🚨');
-      console.log('Response status:', response.status);
-      console.log('Response statusText:', response.statusText);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('🚨🚨🚨 ERROR RESPONSE 🚨🚨🚨');
-        console.log('errorText:', errorText);
+        console.error('Edamam Nutrition Data API error:', response.status, errorText);
         throw new Error(`Edamam Nutrition Data API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('🚨🚨🚨 SUCCESS RESPONSE 🚨🚨🚨');
-      console.log('Calories:', data.calories);
-      console.log('Protein:', data.totalNutrients?.PROCNT?.quantity);
-
       return data;
     } catch (error) {
-      console.log('🚨🚨🚨 NUTRITION API ERROR 🚨🚨🚨');
-      console.log('error:', error);
+      console.error('Nutrition API error:', error);
       throw error;
     }
   }
@@ -619,9 +570,6 @@ export class EdamamService {
    */
   async getIngredientAutocomplete(query: string, mode: 'basic' | 'with_units' | 'units_only' = 'basic'): Promise<{suggestions: string[], unitSuggestions: Record<string, string[]>, units?: string[], unitsCount?: number}> {
     try {
-      console.log('🔍 EDAMAM AUTOCOMPLETE API - START');
-      console.log('query:', query);
-
       if (!query || query.trim().length === 0) {
         return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
@@ -636,8 +584,6 @@ export class EdamamService {
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🔍 AUTOCOMPLETE CURL COMMAND');
-      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
 
       // Use logged API call wrapper
       const suggestions = await this.loggedApiCall<string[]>(
@@ -654,8 +600,6 @@ export class EdamamService {
           featureContext: 'ingredient_autocomplete'
         }
       );
-      console.log('✅ AUTOCOMPLETE SUCCESS - Suggestions count:', suggestions?.length || 0);
-      console.log('✅ AUTOCOMPLETE SUGGESTIONS:', suggestions);
 
       const validSuggestions = Array.isArray(suggestions) ? suggestions : [];
       
@@ -693,7 +637,7 @@ export class EdamamService {
         };
       }
     } catch (error) {
-      console.log('❌ AUTOCOMPLETE API ERROR:', error);
+      console.error('Autocomplete API error:', error);
       // Return empty object instead of throwing error for better UX
       return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
     }
@@ -704,9 +648,6 @@ export class EdamamService {
    */
   async getIngredientUnitSuggestions(ingredients: string[]): Promise<Record<string, string[]>> {
     try {
-      console.log('🤖 OPENAI UNIT SUGGESTIONS - START');
-      console.log('ingredients:', ingredients);
-
       if (!ingredients || ingredients.length === 0) {
         return {};
       }
@@ -798,12 +739,10 @@ Example format:
       }
 
       const unitSuggestions = JSON.parse(jsonMatch[0]);
-      
-      console.log('✅ UNIT SUGGESTIONS SUCCESS:', unitSuggestions);
       return unitSuggestions;
 
     } catch (error) {
-      console.log('❌ UNIT SUGGESTIONS ERROR:', error);
+      console.error('Unit suggestions error:', error);
       // Return empty object instead of throwing error for better UX
       return {};
     }
@@ -814,10 +753,6 @@ Example format:
    */
   async getIngredientDetails(ingredient: string, nutritionType: 'cooking' | 'logging' = 'cooking'): Promise<any> {
     try {
-      console.log('🔍 EDAMAM FOOD DATABASE PARSER API - START');
-      console.log('ingredient:', ingredient);
-      console.log('nutritionType:', nutritionType);
-
       if (!ingredient || ingredient.trim().length === 0) {
         return null;
       }
@@ -833,8 +768,6 @@ Example format:
       });
 
       const fullUrl = `${url}?${params.toString()}`;
-      console.log('🔍 FOOD PARSER CURL COMMAND');
-      console.log(`curl -X GET '${fullUrl}' -H 'accept: application/json'`);
 
       const response = await fetch(fullUrl, {
         method: 'GET',
@@ -843,21 +776,16 @@ Example format:
         }
       });
 
-      console.log('🔍 FOOD PARSER RESPONSE STATUS:', response.status);
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('❌ FOOD PARSER ERROR RESPONSE:', errorText);
+        console.error('Edamam Food Database Parser API error:', response.status, errorText);
         throw new Error(`Edamam Food Database Parser API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ FOOD PARSER SUCCESS - Results count:', data?.hints?.length || 0);
-      console.log('✅ FOOD PARSER PARSED COUNT:', data?.parsed?.length || 0);
-
       return data;
     } catch (error) {
-      console.log('❌ FOOD PARSER API ERROR:', error);
+      console.error('Food Parser API error:', error);
       // Return null instead of throwing error for better UX
       return null;
     }

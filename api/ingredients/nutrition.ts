@@ -58,42 +58,32 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     if (requestedSource === 'edamam') {
       // Explicitly requested Edamam only
-      console.log('🔍 Using Edamam (explicitly requested)');
       nutritionData = await edamamService.getIngredientNutrition(ingredientText);
       actualSource = 'edamam';
     } else if (requestedSource === 'spoonacular') {
       // Explicitly requested Spoonacular only
-      console.log('🔍 Using Spoonacular (explicitly requested)');
       nutritionData = await multiProviderService.getIngredientNutrition(ingredientText);
       actualSource = 'spoonacular';
     } else {
       // Auto mode: Try Spoonacular first, fallback to Edamam
-      console.log('🔍 Auto mode: Trying Spoonacular first...');
       nutritionData = await multiProviderService.getIngredientNutrition(ingredientText);
       
       if (nutritionData) {
-        console.log('✅ Found in Spoonacular');
         actualSource = 'spoonacular';
       } else {
-        console.log('⚠️ Not found in Spoonacular, falling back to Edamam...');
         nutritionData = await edamamService.getIngredientNutrition(ingredientText);
         
         if (nutritionData) {
-          console.log('✅ Found in Edamam');
           actualSource = 'edamam';
-        } else {
-          console.log('❌ Not found in either source');
         }
       }
     }
 
     if (!nutritionData) {
-      return res.status(200).json({
+      return res.status(404).json({
         success: false,
         ingredient: ingredientText,
-        requestedSource: requestedSource,
-        message: 'No nutrition information available for this ingredient in either Spoonacular or Edamam',
-        timestamp: new Date().toISOString()
+        message: 'No nutrition information available for this ingredient'
       });
     }
 
@@ -106,23 +96,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       standardizedNutrition = NutritionMappingService.transformEdamamNutrition(nutritionData, 1);
     }
 
-    // Add quick-access fields to the nutrition object
-    const nutritionWithQuickAccess = {
-      calories: standardizedNutrition.calories.quantity,
-      protein: standardizedNutrition.macros.protein.quantity,
-      carbs: standardizedNutrition.macros.carbs.quantity,
-      fat: standardizedNutrition.macros.fat.quantity,
-      fiber: standardizedNutrition.macros.fiber.quantity,
-      ...nutritionData // Keep all original fields from source
-    };
-
+    // Return only standardized nutrition data (no raw API response)
     return res.status(200).json({
       success: true,
       ingredient: ingredientText,
       source: actualSource,
-      requestedSource: requestedSource,
-      nutrition: nutritionWithQuickAccess,
-      timestamp: new Date().toISOString()
+      nutrition: {
+        calories: standardizedNutrition.calories.quantity,
+        protein: standardizedNutrition.macros.protein?.quantity || 0,
+        carbs: standardizedNutrition.macros.carbs?.quantity || 0,
+        fat: standardizedNutrition.macros.fat?.quantity || 0,
+        fiber: standardizedNutrition.macros.fiber?.quantity || 0,
+        sugar: standardizedNutrition.macros.sugar?.quantity || 0,
+        sodium: standardizedNutrition.macros.sodium?.quantity || 0
+      }
     });
 
   } catch (error) {

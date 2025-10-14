@@ -72,12 +72,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       });
 
-      console.log('🔍 Multi-Provider Recipe Search:', {
-        user: user.id,
-        searchParams,
-        availableProviders: multiProviderService.getAvailableProviders()
-      });
-
       // Search recipes directly from APIs (no caching)
       const results = await multiProviderService.searchRecipes(searchParams, user.id);
 
