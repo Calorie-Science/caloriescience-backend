@@ -1,4 +1,5 @@
 import { EdamamService, RecipeSearchParams as EdamamSearchParams, EdamamRecipe } from './edamamService';
+import { supabase } from './supabase';
 
 // Spoonacular API interfaces
 export interface SpoonacularSearchParams {
@@ -108,6 +109,17 @@ export interface UnifiedRecipeSummary {
   carbs?: number;
   fat?: number;
   fiber?: number;
+  // Allergen warnings (added for client-aware search)
+  allergenWarnings?: {
+    containsOverriddenAllergens: boolean;
+    overriddenAllergensPresent: string[]; // e.g., ['dairy', 'eggs']
+    overriddenPreferencesViolated: string[]; // e.g., ['vegetarian']
+  };
+  // Filter compatibility warnings
+  filterWarnings?: {
+    unsupportedFilters: string[]; // Filters not supported by this recipe's provider
+    message?: string;
+  };
 }
 
 // Unified recipe interface for detailed view
@@ -156,6 +168,29 @@ export interface UnifiedSearchResponse {
   totalResults: number;
   provider: string;
   searchParams: UnifiedSearchParams;
+}
+
+export interface ClientAwareSearchParams extends UnifiedSearchParams {
+  clientId: string;
+  excludeClientAllergens?: string[]; // Allergens to NOT filter (override)
+  excludeClientPreferences?: string[]; // Preferences to NOT filter (override)
+  searchType?: 'broad' | 'name' | 'ingredient'; // Type of search
+  ingredients?: string[]; // For ingredient search (can be multiple)
+}
+
+export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
+  clientProfile: {
+    id: string;
+    name: string;
+    allergies: string[];
+    preferences: string[];
+  };
+  appliedFilters: {
+    allergenFilters: string[]; // Actually applied
+    preferenceFilters: string[]; // Actually applied
+    removedAllergens: string[]; // From client but excluded by nutritionist
+    removedPreferences: string[]; // From client but excluded by nutritionist
+  };
 }
 
 export class MultiProviderRecipeSearchService {
@@ -435,11 +470,14 @@ export class MultiProviderRecipeSearchService {
     
     console.log('🍽️ Mapped cuisine types for Spoonacular:', mappedCuisines);
     
+    // Map Edamam health labels to Spoonacular intolerances
+    const spoonacularIntolerances = this.mapHealthLabelsToSpoonacularIntolerances(params.health || []);
+    
     const spoonacularParams: SpoonacularSearchParams = {
       query: params.query,
       cuisine: mappedCuisines,
       diet: params.diet,
-      intolerances: params.health, // Map health labels to intolerances
+      intolerances: spoonacularIntolerances,
       number: params.maxResults || 20,
       sort: 'random',
       addRecipeNutrition: true
@@ -1359,5 +1397,372 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       console.error('❌ SPOONACULAR INGREDIENT SUBSTITUTES ERROR:', error);
       return [];
     }
+  }
+
+  /**
+   * Search recipes with client allergen filtering
+   * Maps client allergies to API health labels automatically
+   * Allows nutritionist to override/exclude specific filters
+   */
+  async searchRecipesForClient(
+    params: ClientAwareSearchParams,
+    userId: string
+  ): Promise<ClientAwareSearchResponse> {
+    console.log('🔍 searchRecipesForClient called with params:', params);
+
+    // 1. Get client profile with active goals
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select(`
+        id, 
+        first_name, 
+        last_name,
+        client_goals!inner(
+          id,
+          allergies,
+          preferences,
+          cuisine_types,
+          is_active
+        )
+      `)
+      .eq('id', params.clientId)
+      .eq('client_goals.is_active', true)
+      .single();
+
+    if (clientError || !client) {
+      console.error('❌ Client not found or no active goals:', clientError);
+      throw new Error('Client not found or no active goals');
+    }
+
+    const clientFullName = `${client.first_name} ${client.last_name || ''}`.trim();
+    
+    // Get allergies and preferences from active client_goals
+    const activeGoal = Array.isArray(client.client_goals) 
+      ? client.client_goals[0] 
+      : client.client_goals;
+    
+    const clientAllergies = activeGoal?.allergies || [];
+    const clientPreferences = activeGoal?.preferences || [];
+
+    console.log(`👤 Client: ${clientFullName}`);
+    console.log(`⚠️ Client allergies:`, clientAllergies);
+    console.log(`🥗 Client preferences:`, clientPreferences);
+
+    // 2. Map client allergies to health labels
+    const allergenFiltersFromClient = this.mapAllergensToHealthLabels(clientAllergies);
+    console.log(`🏷️ Mapped allergen filters:`, allergenFiltersFromClient);
+
+    // 3. Handle nutritionist overrides
+    const excludeClientAllergens = params.excludeClientAllergens || [];
+    const excludeClientPreferences = params.excludeClientPreferences || [];
+
+    // Filter out excluded allergens
+    const appliedAllergenFilters = allergenFiltersFromClient.filter(filter => {
+      // Check if this filter corresponds to an excluded allergen
+      const correspondingAllergen = clientAllergies.find(allergen => {
+        const mappedFilter = this.mapAllergensToHealthLabels([allergen])[0];
+        return mappedFilter === filter;
+      });
+      return !excludeClientAllergens.includes(correspondingAllergen || '');
+    });
+
+    // Track which allergens were removed
+    const removedAllergens = clientAllergies.filter(allergen => 
+      excludeClientAllergens.includes(allergen)
+    );
+
+    // Filter out excluded preferences
+    const appliedPreferenceFilters = clientPreferences.filter(pref => 
+      !excludeClientPreferences.includes(pref)
+    );
+
+    const removedPreferences = clientPreferences.filter(pref => 
+      excludeClientPreferences.includes(pref)
+    );
+
+    console.log(`✅ Applied allergen filters:`, appliedAllergenFilters);
+    console.log(`❌ Removed allergens (override):`, removedAllergens);
+    console.log(`✅ Applied preferences:`, appliedPreferenceFilters);
+    console.log(`❌ Removed preferences (override):`, removedPreferences);
+
+    // 4. Handle different search types
+    const searchType = params.searchType || 'broad';
+    let searchQuery = params.query || '';
+
+    if (searchType === 'ingredient' && params.ingredients && params.ingredients.length > 0) {
+      // For ingredient search, join ingredients with commas
+      searchQuery = params.ingredients.join(', ');
+      console.log(`🔍 Ingredient search mode: ${searchQuery}`);
+    } else if (searchType === 'name') {
+      console.log(`📝 Name search mode: ${searchQuery}`);
+    } else {
+      console.log(`🔍 Broad search mode: ${searchQuery}`);
+    }
+
+    // 5. Build enhanced search params
+    const enhancedParams: UnifiedSearchParams = {
+      ...params,
+      query: searchQuery,
+      // Merge user-provided health filters with applied allergen filters
+      health: [
+        ...(params.health || []),
+        ...appliedAllergenFilters
+      ],
+      // Merge user-provided diet with applied preferences
+      diet: [
+        ...(params.diet || []),
+        ...appliedPreferenceFilters
+      ]
+    };
+
+    console.log(`🔍 Final search params:`, enhancedParams);
+
+    // 6. Perform standard search (APIs will filter out allergens)
+    let results = await this.searchRecipes(enhancedParams, userId);
+
+    // 7. Post-filter for name-only search
+    if (searchType === 'name' && searchQuery) {
+      const normalizedQuery = searchQuery.toLowerCase();
+      const originalCount = results.recipes.length;
+      
+      results.recipes = results.recipes.filter(recipe =>
+        recipe.title.toLowerCase().includes(normalizedQuery)
+      );
+      
+      console.log(`📝 Name filter: ${originalCount} → ${results.recipes.length} recipes`);
+      results.totalResults = results.recipes.length;
+    }
+
+    // 8. Add allergen warnings and filter compatibility warnings to each recipe
+    const recipesWithWarnings = results.recipes.map(recipe => {
+      const warnings = this.analyzeRecipeForAllergenWarnings(
+        recipe,
+        removedAllergens,
+        removedPreferences
+      );
+      
+      // Check for unsupported filters
+      const unsupportedPrefs = this.getUnsupportedPreferences(
+        appliedPreferenceFilters,
+        recipe.source
+      );
+      
+      const filterWarnings = unsupportedPrefs.length > 0 ? {
+        unsupportedFilters: unsupportedPrefs,
+        message: `This ${recipe.source} recipe may not respect: ${unsupportedPrefs.join(', ')}`
+      } : undefined;
+      
+      return {
+        ...recipe,
+        allergenWarnings: warnings,
+        filterWarnings
+      };
+    });
+
+    // 9. Return with metadata
+    return {
+      ...results,
+      recipes: recipesWithWarnings,
+      clientProfile: {
+        id: client.id,
+        name: clientFullName,
+        allergies: clientAllergies,
+        preferences: clientPreferences
+      },
+      appliedFilters: {
+        allergenFilters: appliedAllergenFilters,
+        preferenceFilters: appliedPreferenceFilters,
+        removedAllergens: removedAllergens,
+        removedPreferences: removedPreferences
+      }
+    };
+  }
+
+  /**
+   * Analyze recipe to determine if it contains overridden allergens
+   * Returns warning metadata for the recipe
+   */
+  private analyzeRecipeForAllergenWarnings(
+    recipe: UnifiedRecipeSummary,
+    removedAllergens: string[],
+    removedPreferences: string[]
+  ): {
+    containsOverriddenAllergens: boolean;
+    overriddenAllergensPresent: string[];
+    overriddenPreferencesViolated: string[];
+  } {
+    // If no overrides, no warnings needed
+    if (removedAllergens.length === 0 && removedPreferences.length === 0) {
+      return {
+        containsOverriddenAllergens: false,
+        overriddenAllergensPresent: [],
+        overriddenPreferencesViolated: []
+      };
+    }
+
+    // Since the recipe passed API filtering WITHOUT the removed filters,
+    // it likely contains those allergens/violates those preferences
+    // We'll flag ALL removed items as potential warnings
+    // The frontend should show these as "May contain" tags
+
+    const overriddenAllergensPresent = [...removedAllergens];
+    const overriddenPreferencesViolated = [...removedPreferences];
+
+    const hasWarnings = 
+      overriddenAllergensPresent.length > 0 || 
+      overriddenPreferencesViolated.length > 0;
+
+    if (hasWarnings) {
+      console.log(
+        `⚠️ Recipe "${recipe.title}" may contain overridden items:`,
+        { allergens: overriddenAllergensPresent, preferences: overriddenPreferencesViolated }
+      );
+    }
+
+    return {
+      containsOverriddenAllergens: hasWarnings,
+      overriddenAllergensPresent,
+      overriddenPreferencesViolated
+    };
+  }
+
+  /**
+   * Check which dietary preferences are supported by each provider
+   */
+  private getUnsupportedPreferences(preferences: string[], provider: 'edamam' | 'spoonacular'): string[] {
+    const edamamOnly = ['balanced', 'high-fiber', 'alcohol-free', 'kosher'];
+    const spoonacularOnly = ['whole30'];
+    const notSupported = ['halal'];
+
+    if (provider === 'edamam') {
+      return [...spoonacularOnly, ...notSupported].filter(p => 
+        preferences.some(pref => pref.toLowerCase().includes(p.toLowerCase()))
+      );
+    } else {
+      return [...edamamOnly, ...notSupported].filter(p => 
+        preferences.some(pref => pref.toLowerCase().includes(p.toLowerCase()))
+      );
+    }
+  }
+
+  /**
+   * Map Edamam health labels to Spoonacular intolerances
+   * Edamam uses: "peanut-free", "dairy-free", etc.
+   * Spoonacular uses: "Peanut", "Dairy", etc.
+   */
+  private mapHealthLabelsToSpoonacularIntolerances(healthLabels: string[]): string[] {
+    const mapping: Record<string, string> = {
+      'peanut-free': 'Peanut',
+      'tree-nut-free': 'Tree Nut',
+      'dairy-free': 'Dairy',
+      'egg-free': 'Egg',
+      'soy-free': 'Soy',
+      'wheat-free': 'Wheat',
+      'gluten-free': 'Gluten',
+      'fish-free': 'Seafood',
+      'shellfish-free': 'Shellfish',
+      'sesame-free': 'Sesame',
+      'sulfite-free': 'Sulfite'
+    };
+
+    const intolerances: string[] = [];
+    const uniqueIntolerances = new Set<string>();
+
+    for (const healthLabel of healthLabels) {
+      const normalized = healthLabel.toLowerCase().trim();
+      const intolerance = mapping[normalized];
+
+      if (intolerance && !uniqueIntolerances.has(intolerance)) {
+        intolerances.push(intolerance);
+        uniqueIntolerances.add(intolerance);
+        console.log(`✅ Mapped health label "${healthLabel}" → Spoonacular intolerance "${intolerance}"`);
+      }
+    }
+
+    return intolerances;
+  }
+
+  /**
+   * Map common allergens to API health label filters
+   * Supports both Edamam and Spoonacular formats
+   */
+  private mapAllergensToHealthLabels(allergies: string[]): string[] {
+    const mapping: Record<string, string> = {
+      // Nuts
+      'peanuts': 'peanut-free',
+      'peanut': 'peanut-free',
+      'tree nuts': 'tree-nut-free',
+      'tree nut': 'tree-nut-free',
+      'nuts': 'tree-nut-free',
+      'almond': 'tree-nut-free',
+      'almonds': 'tree-nut-free',
+      'cashew': 'tree-nut-free',
+      'cashews': 'tree-nut-free',
+      'walnut': 'tree-nut-free',
+      'walnuts': 'tree-nut-free',
+      'pecan': 'tree-nut-free',
+      'pecans': 'tree-nut-free',
+      
+      // Dairy
+      'dairy': 'dairy-free',
+      'milk': 'dairy-free',
+      'lactose': 'dairy-free',
+      'cheese': 'dairy-free',
+      'butter': 'dairy-free',
+      'cream': 'dairy-free',
+      'yogurt': 'dairy-free',
+      
+      // Eggs
+      'eggs': 'egg-free',
+      'egg': 'egg-free',
+      
+      // Soy
+      'soy': 'soy-free',
+      'soya': 'soy-free',
+      'soybeans': 'soy-free',
+      
+      // Wheat/Gluten
+      'wheat': 'wheat-free',
+      'gluten': 'gluten-free',
+      
+      // Seafood
+      'fish': 'fish-free',
+      'shellfish': 'shellfish-free',
+      'shrimp': 'shellfish-free',
+      'crab': 'shellfish-free',
+      'lobster': 'shellfish-free',
+      'oyster': 'shellfish-free',
+      'oysters': 'shellfish-free',
+      'clam': 'shellfish-free',
+      'clams': 'shellfish-free',
+      'mussel': 'shellfish-free',
+      'mussels': 'shellfish-free',
+      
+      // Seeds
+      'sesame': 'sesame-free',
+      
+      // Other
+      'sulfites': 'sulfite-free',
+      'sulfite': 'sulfite-free'
+    };
+
+    const filters: string[] = [];
+    const uniqueFilters = new Set<string>();
+
+    for (const allergen of allergies) {
+      const normalized = allergen.toLowerCase().trim();
+      const filter = mapping[normalized];
+
+      if (filter && !uniqueFilters.has(filter)) {
+        filters.push(filter);
+        uniqueFilters.add(filter);
+        console.log(`✅ Mapped allergen "${allergen}" → "${filter}"`);
+      } else if (!filter) {
+        console.warn(`⚠️ Unknown allergen: "${allergen}" - no API filter available (nutritionist should manually review)`);
+        // Still continue - we'll show visual warning in UI
+      }
+    }
+
+    return filters;
   }
 }
