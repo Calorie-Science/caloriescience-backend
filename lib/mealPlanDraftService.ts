@@ -910,16 +910,95 @@ export class MealPlanDraftService {
       totalNutrients: selectedRecipe.nutrition?.totalNutrients || selectedRecipe.totalNutrients || {}
     };
 
+    // If totalNutrients is empty, try to fetch detailed nutrition from cache
+    const hasEmptyNutrients = !baseNutrition.totalNutrients || Object.keys(baseNutrition.totalNutrients).length === 0;
+    if (hasEmptyNutrients) {
+      try {
+        const cachedRecipe = await cacheService.getRecipeById(selectedRecipe.id);
+        if (cachedRecipe?.nutritionDetails) {
+          console.log(`📊 Fetching detailed nutrition from cache for meal calculation: ${selectedRecipe.id}`);
+          
+          // Build totalNutrients from cached nutritionDetails
+          const totalNutrients: any = {};
+          
+          // Add macros
+          if (cachedRecipe.nutritionDetails.macros) {
+            Object.entries(cachedRecipe.nutritionDetails.macros).forEach(([key, value]: [string, any]) => {
+              if (value && value.quantity !== undefined) {
+                totalNutrients[key] = value;
+              }
+            });
+          }
+          
+          // Add vitamins
+          if (cachedRecipe.nutritionDetails.micros?.vitamins) {
+            Object.entries(cachedRecipe.nutritionDetails.micros.vitamins).forEach(([key, value]: [string, any]) => {
+              if (value && value.quantity !== undefined) {
+                totalNutrients[key] = value;
+              }
+            });
+          }
+          
+          // Add minerals
+          if (cachedRecipe.nutritionDetails.micros?.minerals) {
+            Object.entries(cachedRecipe.nutritionDetails.micros.minerals).forEach(([key, value]: [string, any]) => {
+              if (value && value.quantity !== undefined) {
+                totalNutrients[key] = value;
+              }
+            });
+          }
+          
+          baseNutrition.totalNutrients = totalNutrients;
+          console.log(`✅ Loaded ${Object.keys(totalNutrients).length} nutrients from cache`);
+        }
+      } catch (error) {
+        console.error(`⚠️ Error fetching detailed nutrition from cache:`, error);
+      }
+    }
+
     // Apply customizations if any
     const customization = meal.customizations[meal.selectedRecipeId];
     if (customization && customization.customizationsApplied && customization.customNutrition) {
+      // Check if customNutrition has new format with micros
+      let customTotalNutrients = customization.customNutrition.totalNutrients || {};
+      
+      // If customNutrition has micros in the new format, build totalNutrients from it
+      if (customization.customNutrition.micros && Object.keys(customTotalNutrients).length === 0) {
+        // Add macros from customNutrition
+        if (customization.customNutrition.macros) {
+          Object.entries(customization.customNutrition.macros).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              customTotalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add vitamins
+        if (customization.customNutrition.micros?.vitamins) {
+          Object.entries(customization.customNutrition.micros.vitamins).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              customTotalNutrients[key] = value;
+            }
+          });
+        }
+        
+        // Add minerals
+        if (customization.customNutrition.micros?.minerals) {
+          Object.entries(customization.customNutrition.micros.minerals).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              customTotalNutrients[key] = value;
+            }
+          });
+        }
+      }
+      
       baseNutrition = {
-        totalCalories: customization.customNutrition.calories || 0,
-        protein: customization.customNutrition.protein || 0,
-        carbs: customization.customNutrition.carbs || 0,
-        fat: customization.customNutrition.fat || 0,
-        fiber: customization.customNutrition.fiber || 0,
-        totalNutrients: customization.customNutrition.totalNutrients || baseNutrition.totalNutrients
+        totalCalories: customization.customNutrition.calories?.quantity || customization.customNutrition.calories || 0,
+        protein: customization.customNutrition.macros?.protein?.quantity || customization.customNutrition.protein || 0,
+        carbs: customization.customNutrition.macros?.carbs?.quantity || customization.customNutrition.carbs || 0,
+        fat: customization.customNutrition.macros?.fat?.quantity || customization.customNutrition.fat || 0,
+        fiber: customization.customNutrition.macros?.fiber?.quantity || customization.customNutrition.fiber || 0,
+        totalNutrients: Object.keys(customTotalNutrients).length > 0 ? customTotalNutrients : baseNutrition.totalNutrients
       };
     }
 

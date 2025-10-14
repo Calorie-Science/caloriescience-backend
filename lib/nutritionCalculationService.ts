@@ -103,6 +103,16 @@ export class NutritionCalculationService {
     // Categorize nutrients into macros and micros
     const categorizedNutrients = this.categorizeNutrients(totalMicronutrients);
 
+    // Ensure basic macros are always present in the macros object
+    const finalMacros = {
+      calories: { label: 'Calories', quantity: Math.round(dailyNutrition.totalCalories * 100) / 100, unit: 'kcal' },
+      protein: { label: 'Protein', quantity: Math.round(dailyNutrition.totalProtein * 100) / 100, unit: 'g' },
+      carbs: { label: 'Carbohydrates', quantity: Math.round(dailyNutrition.totalCarbs * 100) / 100, unit: 'g' },
+      fat: { label: 'Fat', quantity: Math.round(dailyNutrition.totalFat * 100) / 100, unit: 'g' },
+      fiber: { label: 'Fiber', quantity: Math.round(dailyNutrition.totalFiber * 100) / 100, unit: 'g' },
+      ...categorizedNutrients.macros // Include any additional macros from totalNutrients (saturatedFat, cholesterol, etc.)
+    };
+
     return {
       totalCalories: Math.round(dailyNutrition.totalCalories * 100) / 100,
       totalProtein: Math.round(dailyNutrition.totalProtein * 100) / 100,
@@ -114,7 +124,7 @@ export class NutritionCalculationService {
       totalCholesterol: Math.round(dailyNutrition.totalCholesterol * 100) / 100,
       totalCalcium: Math.round(dailyNutrition.totalCalcium * 100) / 100,
       totalIron: Math.round(dailyNutrition.totalIron * 100) / 100,
-      macros: categorizedNutrients.macros,
+      macros: finalMacros,
       micros: categorizedNutrients.micros
     };
   }
