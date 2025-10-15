@@ -54,8 +54,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         provider = 'both',
         mealType,
         cuisineType,
-        excludeClientAllergens,
-        excludeClientPreferences
+        diet
       } = req.query;
 
       // Validate required parameters
@@ -98,8 +97,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         searchType: searchType as 'broad' | 'name' | 'ingredient',
         maxResults: parseInt(maxResults as string) || 20,
         provider: (provider as any) || 'both',
-        excludeClientAllergens: parseCsvParam(excludeClientAllergens),
-        excludeClientPreferences: parseCsvParam(excludeClientPreferences)
+        // UX provides the actual preferences and cuisineTypes they want
+        diet: parseCsvParam(diet),
+        cuisineType: parseCsvParam(cuisineType)
       };
 
       // Add ingredients for ingredient search
@@ -112,19 +112,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         searchParams.mealType = [mealType as string];
       }
 
-      if (cuisineType) {
-        searchParams.cuisineType = parseCsvParam(cuisineType);
-      }
-
       console.log('📥 Recipe search request:', {
         nutritionist: user.email,
         clientId,
         searchType,
         query: query || null,
         ingredients: searchParams.ingredients || null,
-        overrides: {
-          excludedAllergens: searchParams.excludeClientAllergens,
-          excludedPreferences: searchParams.excludeClientPreferences
+        uxFilters: {
+          preferences: searchParams.diet,
+          cuisineTypes: searchParams.cuisineType
         }
       });
 
@@ -134,10 +130,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         user.id
       );
 
-      // Add warning flags to response if nutritionist overrode any filters
-      const hasOverrides = 
-        results.appliedFilters.removedAllergens.length > 0 ||
-        results.appliedFilters.removedPreferences.length > 0;
+      // Add info about removed filters (if any)
+      const hasRemovedFilters = 
+        results.appliedFilters.removedPreferences.length > 0 ||
+        results.appliedFilters.removedCuisineTypes.length > 0;
 
       return res.status(200).json({
         success: true,
@@ -146,12 +142,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           clientName: results.clientProfile.name,
           totalResults: results.totalResults,
           appliedFilters: results.appliedFilters,
-          warning: hasOverrides ? {
-            message: 'Some client allergens/preferences were excluded from search',
-            removedAllergens: results.appliedFilters.removedAllergens,
-            removedPreferences: results.appliedFilters.removedPreferences
+          info: hasRemovedFilters ? {
+            message: 'Some client preferences/cuisines were not included in search',
+            removedPreferences: results.appliedFilters.removedPreferences,
+            removedCuisineTypes: results.appliedFilters.removedCuisineTypes
           } : null
-        }
+        },
+        message: `Found ${results.recipes.length} recipes from ${results.provider}`
       });
 
     } catch (error) {

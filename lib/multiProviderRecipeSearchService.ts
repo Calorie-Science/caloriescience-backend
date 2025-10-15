@@ -109,12 +109,6 @@ export interface UnifiedRecipeSummary {
   carbs?: number;
   fat?: number;
   fiber?: number;
-  // Allergen warnings (added for client-aware search)
-  allergenWarnings?: {
-    containsOverriddenAllergens: boolean;
-    overriddenAllergensPresent: string[]; // e.g., ['dairy', 'eggs']
-    overriddenPreferencesViolated: string[]; // e.g., ['vegetarian']
-  };
   // Filter compatibility warnings
   filterWarnings?: {
     unsupportedFilters: string[]; // Filters not supported by this recipe's provider
@@ -172,10 +166,10 @@ export interface UnifiedSearchResponse {
 
 export interface ClientAwareSearchParams extends UnifiedSearchParams {
   clientId: string;
-  excludeClientAllergens?: string[]; // Allergens to NOT filter (override)
-  excludeClientPreferences?: string[]; // Preferences to NOT filter (override)
   searchType?: 'broad' | 'name' | 'ingredient'; // Type of search
   ingredients?: string[]; // For ingredient search (can be multiple)
+  // Note: diet and cuisineType from UnifiedSearchParams are what UX sends
+  // Backend will compare with client profile to detect removed items
 }
 
 export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
@@ -184,12 +178,14 @@ export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
     name: string;
     allergies: string[];
     preferences: string[];
+    cuisineTypes?: string[];
   };
   appliedFilters: {
-    allergenFilters: string[]; // Actually applied
-    preferenceFilters: string[]; // Actually applied
-    removedAllergens: string[]; // From client but excluded by nutritionist
-    removedPreferences: string[]; // From client but excluded by nutritionist
+    allergenFilters: string[]; // Always applied from client (cannot be overridden)
+    uxPreferences: string[]; // What UX sent
+    uxCuisineTypes: string[]; // What UX sent
+    removedPreferences: string[]; // Client preferences NOT in UX request
+    removedCuisineTypes: string[]; // Client cuisine types NOT in UX request
   };
 }
 
@@ -1436,54 +1432,42 @@ Return a JSON object where each key is an ingredient name and the value is an ar
 
     const clientFullName = `${client.first_name} ${client.last_name || ''}`.trim();
     
-    // Get allergies and preferences from active client_goals
+    // Get allergies, preferences, and cuisine types from active client_goals
     const activeGoal = Array.isArray(client.client_goals) 
       ? client.client_goals[0] 
       : client.client_goals;
     
     const clientAllergies = activeGoal?.allergies || [];
     const clientPreferences = activeGoal?.preferences || [];
+    const clientCuisineTypes = activeGoal?.cuisine_types || [];
 
     console.log(`👤 Client: ${clientFullName}`);
     console.log(`⚠️ Client allergies:`, clientAllergies);
     console.log(`🥗 Client preferences:`, clientPreferences);
+    console.log(`🍽️ Client cuisine types:`, clientCuisineTypes);
 
-    // 2. Map client allergies to health labels
+    // 2. Map client allergies to health labels (ALWAYS applied - cannot be overridden)
     const allergenFiltersFromClient = this.mapAllergensToHealthLabels(clientAllergies);
-    console.log(`🏷️ Mapped allergen filters:`, allergenFiltersFromClient);
+    console.log(`🏷️ Mapped allergen filters (always applied):`, allergenFiltersFromClient);
 
-    // 3. Handle nutritionist overrides
-    const excludeClientAllergens = params.excludeClientAllergens || [];
-    const excludeClientPreferences = params.excludeClientPreferences || [];
+    // 3. Get UX-provided preferences and cuisine types (what the frontend sent)
+    const uxPreferences = params.diet || [];
+    const uxCuisineTypes = params.cuisineType || [];
 
-    // Filter out excluded allergens
-    const appliedAllergenFilters = allergenFiltersFromClient.filter(filter => {
-      // Check if this filter corresponds to an excluded allergen
-      const correspondingAllergen = clientAllergies.find(allergen => {
-        const mappedFilter = this.mapAllergensToHealthLabels([allergen])[0];
-        return mappedFilter === filter;
-      });
-      return !excludeClientAllergens.includes(correspondingAllergen || '');
-    });
+    console.log(`📥 UX-provided preferences:`, uxPreferences);
+    console.log(`📥 UX-provided cuisine types:`, uxCuisineTypes);
 
-    // Track which allergens were removed
-    const removedAllergens = clientAllergies.filter(allergen => 
-      excludeClientAllergens.includes(allergen)
-    );
-
-    // Filter out excluded preferences
-    const appliedPreferenceFilters = clientPreferences.filter(pref => 
-      !excludeClientPreferences.includes(pref)
-    );
-
+    // 4. Compare with client profile to identify what was removed by UX
     const removedPreferences = clientPreferences.filter(pref => 
-      excludeClientPreferences.includes(pref)
+      !uxPreferences.includes(pref)
     );
 
-    console.log(`✅ Applied allergen filters:`, appliedAllergenFilters);
-    console.log(`❌ Removed allergens (override):`, removedAllergens);
-    console.log(`✅ Applied preferences:`, appliedPreferenceFilters);
-    console.log(`❌ Removed preferences (override):`, removedPreferences);
+    const removedCuisineTypes = clientCuisineTypes.filter(cuisine => 
+      !uxCuisineTypes.includes(cuisine)
+    );
+
+    console.log(`❌ Removed preferences (not in UX request):`, removedPreferences);
+    console.log(`❌ Removed cuisine types (not in UX request):`, removedCuisineTypes);
 
     // 4. Handle different search types
     const searchType = params.searchType || 'broad';
@@ -1503,16 +1487,14 @@ Return a JSON object where each key is an ingredient name and the value is an ar
     const enhancedParams: UnifiedSearchParams = {
       ...params,
       query: searchQuery,
-      // Merge user-provided health filters with applied allergen filters
+      // Always add allergen filters to health filters
       health: [
         ...(params.health || []),
-        ...appliedAllergenFilters
+        ...allergenFiltersFromClient
       ],
-      // Merge user-provided diet with applied preferences
-      diet: [
-        ...(params.diet || []),
-        ...appliedPreferenceFilters
-      ]
+      // Use UX-provided preferences and cuisine types (already in params.diet and params.cuisineType)
+      diet: uxPreferences,
+      cuisineType: uxCuisineTypes
     };
 
     console.log(`🔍 Final search params:`, enhancedParams);
@@ -1533,17 +1515,11 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       results.totalResults = results.recipes.length;
     }
 
-    // 8. Add allergen warnings and filter compatibility warnings to each recipe
+    // 8. Add filter compatibility warnings to each recipe
     const recipesWithWarnings = results.recipes.map(recipe => {
-      const warnings = this.analyzeRecipeForAllergenWarnings(
-        recipe,
-        removedAllergens,
-        removedPreferences
-      );
-      
-      // Check for unsupported filters
+      // Check for unsupported preferences
       const unsupportedPrefs = this.getUnsupportedPreferences(
-        appliedPreferenceFilters,
+        uxPreferences,
         recipe.source
       );
       
@@ -1554,7 +1530,6 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       
       return {
         ...recipe,
-        allergenWarnings: warnings,
         filterWarnings
       };
     });
@@ -1567,13 +1542,15 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         id: client.id,
         name: clientFullName,
         allergies: clientAllergies,
-        preferences: clientPreferences
+        preferences: clientPreferences,
+        cuisineTypes: clientCuisineTypes
       },
       appliedFilters: {
-        allergenFilters: appliedAllergenFilters,
-        preferenceFilters: appliedPreferenceFilters,
-        removedAllergens: removedAllergens,
-        removedPreferences: removedPreferences
+        allergenFilters: allergenFiltersFromClient,
+        uxPreferences: uxPreferences,
+        uxCuisineTypes: uxCuisineTypes,
+        removedPreferences: removedPreferences,
+        removedCuisineTypes: removedCuisineTypes
       }
     };
   }
