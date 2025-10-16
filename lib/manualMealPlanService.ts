@@ -25,6 +25,7 @@ export interface RemoveRecipeParams {
   draftId: string;
   day: number;
   mealName: string;
+  removeMealSlot?: boolean; // If true, removes entire meal slot from structure
 }
 
 export interface MealSlot {
@@ -210,7 +211,26 @@ export class ManualMealPlanService {
       throw new Error(`Meal ${params.mealName} not found for day ${params.day}`);
     }
 
-    // Convert recipe to the format used in meal plans
+    // Parse full nutrition details from cache (includes macros AND micros)
+    let fullNutrition = null;
+    if (recipe.nutrition_details) {
+      try {
+        fullNutrition = typeof recipe.nutrition_details === 'string' 
+          ? JSON.parse(recipe.nutrition_details) 
+          : recipe.nutrition_details;
+      } catch (e) {
+        console.error('Error parsing nutrition_details:', e);
+      }
+    }
+
+    // Extract values from fullNutrition if available, otherwise fall back to column values
+    const calories = fullNutrition?.calories?.quantity || parseFloat(recipe.calories_per_serving) || 0;
+    const protein = fullNutrition?.macros?.protein?.quantity || parseFloat(recipe.protein_per_serving_g) || 0;
+    const carbs = fullNutrition?.macros?.carbs?.quantity || parseFloat(recipe.carbs_per_serving_g) || 0;
+    const fat = fullNutrition?.macros?.fat?.quantity || parseFloat(recipe.fat_per_serving_g) || 0;
+    const fiber = fullNutrition?.macros?.fiber?.quantity || parseFloat(recipe.fiber_per_serving_g) || 0;
+
+    // Convert recipe to the format used in meal plans (matching automated meal plan format)
     const recipeForPlan = {
       id: recipe.external_recipe_id || recipe.id,
       title: recipe.recipe_name || recipe.title,
@@ -221,17 +241,19 @@ export class ManualMealPlanService {
       readyInMinutes: recipe.ready_in_minutes,
       fromCache: params.source === 'cached',
       cacheId: recipe.id,
-      calories: recipe.calories_per_serving,
-      protein: recipe.protein_per_serving_g,
-      carbs: recipe.carbs_per_serving_g,
-      fat: recipe.fat_per_serving_g,
-      fiber: recipe.fiber_per_serving_g,
-      nutrition: {
-        calories: recipe.calories_per_serving || 0,
-        protein: recipe.protein_per_serving_g || 0,
-        carbs: recipe.carbs_per_serving_g || 0,
-        fat: recipe.fat_per_serving_g || 0,
-        fiber: recipe.fiber_per_serving_g || 0
+      calories: calories,
+      protein: protein,
+      carbs: carbs,
+      fat: fat,
+      fiber: fiber,
+      nutrition: fullNutrition || {
+        calories: { unit: 'kcal', quantity: calories },
+        macros: {
+          protein: { unit: 'g', quantity: protein },
+          carbs: { unit: 'g', quantity: carbs },
+          fat: { unit: 'g', quantity: fat },
+          fiber: { unit: 'g', quantity: fiber }
+        }
       },
       ingredients: recipe.ingredients || [],
       instructions: recipe.instructions || [],
@@ -246,13 +268,15 @@ export class ManualMealPlanService {
     dayPlan.meals[params.mealName].recipes = [recipeForPlan];
     dayPlan.meals[params.mealName].selectedRecipeId = recipeForPlan.id;
     
-    // Calculate meal nutrition
-    dayPlan.meals[params.mealName].totalNutrition = {
-      calories: recipeForPlan.nutrition.calories,
-      protein: recipeForPlan.nutrition.protein,
-      carbs: recipeForPlan.nutrition.carbs,
-      fat: recipeForPlan.nutrition.fat,
-      fiber: recipeForPlan.nutrition.fiber
+    // Calculate meal nutrition (use full nutrition structure if available)
+    dayPlan.meals[params.mealName].totalNutrition = fullNutrition || {
+      calories: { unit: 'kcal', quantity: calories },
+      macros: {
+        protein: { unit: 'g', quantity: protein },
+        carbs: { unit: 'g', quantity: carbs },
+        fat: { unit: 'g', quantity: fat },
+        fiber: { unit: 'g', quantity: fiber }
+      }
     };
 
     // Update the draft
@@ -301,11 +325,18 @@ export class ManualMealPlanService {
       throw new Error(`Meal ${params.mealName} not found for day ${params.day}`);
     }
 
-    // Clear the recipe
-    dayPlan.meals[params.mealName].recipes = [];
-    dayPlan.meals[params.mealName].selectedRecipeId = undefined;
-    dayPlan.meals[params.mealName].totalNutrition = undefined;
-    dayPlan.meals[params.mealName].customizations = {};
+    if (params.removeMealSlot) {
+      // Remove entire meal slot from structure
+      delete dayPlan.meals[params.mealName];
+      console.log(`✅ Removed entire meal slot "${params.mealName}" from day ${params.day}`);
+    } else {
+      // Just clear the recipe, keep the empty slot
+      dayPlan.meals[params.mealName].recipes = [];
+      dayPlan.meals[params.mealName].selectedRecipeId = undefined;
+      dayPlan.meals[params.mealName].totalNutrition = undefined;
+      dayPlan.meals[params.mealName].customizations = {};
+      console.log(`✅ Cleared recipe from ${params.mealName}, day ${params.day} (slot remains)`);
+    }
 
     // Update the draft
     const { error: updateError } = await supabase
@@ -319,8 +350,6 @@ export class ManualMealPlanService {
     if (updateError) {
       throw new Error(`Failed to update draft: ${updateError.message}`);
     }
-
-    console.log(`✅ Removed recipe from ${params.mealName}, day ${params.day}`);
   }
 
   /**
@@ -397,7 +426,8 @@ export class ManualMealPlanService {
     console.log(`🔍 Fetching recipe ${recipeId} from ${provider}`);
 
     // Get the full recipe details from provider
-    const recipe = await recipeSearchService.getRecipeDetails(`${provider}:${recipeId}`);
+    // Note: getRecipeDetails auto-detects provider from ID format
+    const recipe = await recipeSearchService.getRecipeDetails(recipeId);
     
     if (!recipe) {
       throw new Error('Recipe not found');

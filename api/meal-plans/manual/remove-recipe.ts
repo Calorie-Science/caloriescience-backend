@@ -6,7 +6,8 @@ import Joi from 'joi';
 const removeRecipeSchema = Joi.object({
   draftId: Joi.string().required(),
   day: Joi.number().integer().min(1).required(),
-  mealName: Joi.string().required()
+  mealName: Joi.string().required(),
+  removeMealSlot: Joi.boolean().optional().default(false) // If true, removes entire meal slot; if false, just clears recipe
 });
 
 /**
@@ -47,13 +48,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { draftId, day, mealName } = value;
+    const { draftId, day, mealName, removeMealSlot } = value;
 
     console.log('🗑️ Removing recipe from manual meal plan:', {
       nutritionist: user.email,
       draftId,
       day,
-      mealName
+      mealName,
+      removeMealSlot
     });
 
     // Verify draft exists and belongs to this nutritionist
@@ -76,7 +78,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     await manualMealPlanService.removeRecipe({
       draftId,
       day,
-      mealName
+      mealName,
+      removeMealSlot
     });
 
     return res.status(200).json({

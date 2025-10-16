@@ -180,7 +180,7 @@ Customizations are stored in the `suggestions` JSONB field:
 
 **Endpoint:** `DELETE /api/meal-plans/manual/remove-recipe`
 
-**Description:** Remove a recipe from a meal slot.
+**Description:** Remove a recipe from a meal slot, or remove the entire meal slot.
 
 **Authentication:** Required (Nutritionist only)
 
@@ -189,9 +189,15 @@ Customizations are stored in the `suggestions` JSONB field:
 {
   "draftId": "manual-uuid",
   "day": 1,
-  "mealName": "breakfast"
+  "mealName": "breakfast",
+  "removeMealSlot": false  // optional, default: false
 }
 ```
+
+**Parameters:**
+- `removeMealSlot` (optional, default: `false`)
+  - `false`: Clears the recipe but keeps the empty meal slot (requires a recipe before finalization)
+  - `true`: Removes the entire meal slot from the day structure (no recipe needed for this meal)
 
 **Response:**
 ```json
@@ -202,9 +208,18 @@ Customizations are stored in the `suggestions` JSONB field:
 ```
 
 **Behavior:**
+
+**When `removeMealSlot: false` (default):**
 - Clears the recipe from the meal slot
 - Removes all customizations for that meal
 - Resets nutrition to undefined
+- **Slot remains and requires a recipe before finalization**
+- Use this when you want to replace the recipe
+
+**When `removeMealSlot: true`:**
+- Completely removes the meal slot from the day structure
+- **Slot no longer requires a recipe**
+- Use this when the client doesn't need this meal (e.g., skip snack today)
 
 **Validation:**
 - `draftId`: Must exist and belong to nutritionist
@@ -235,8 +250,8 @@ Customizations are stored in the `suggestions` JSONB field:
   "mealName": "breakfast",
   "recipeId": "recipe-id",
   "customizations": {
+    "recipeId": "recipe-id",
     "source": "spoonacular",
-    "servings": 1,
     "modifications": [
       {
         "type": "replace",
@@ -249,7 +264,9 @@ Customizations are stored in the `suggestions` JSONB field:
       },
       {
         "type": "omit",
-        "originalIngredient": "sugar"
+        "originalIngredient": "sugar",
+        "originalAmount": 1.5,
+        "originalUnit": "tablespoons"
       },
       {
         "type": "add",
@@ -288,8 +305,11 @@ Customizations are stored in the `suggestions` JSONB field:
 
 **Modification Types:**
 - `replace`: Replace an ingredient with another (e.g., butter → olive oil)
+  - Required fields: `originalIngredient`, `originalAmount`, `originalUnit`, `newIngredient`, `amount`, `unit`
 - `omit`: Remove an ingredient completely
+  - Required fields: `originalIngredient`, `originalAmount`, `originalUnit`
 - `add`: Add a new ingredient to the recipe
+  - Required fields: `newIngredient`, `amount`, `unit`
 
 **Features:**
 - **Smart Merge**: Automatically merges with existing modifications
@@ -449,12 +469,18 @@ PUT /api/meal-plans/draft
   "mealName": "breakfast",
   "recipeId": "663959",
   "customizations": {
+    "recipeId": "663959",
     "source": "spoonacular",
-    "servings": 1,
     "modifications": [
-      { "type": "omit", "originalIngredient": "sugar" }
+      { 
+        "type": "omit", 
+        "originalIngredient": "sugar",
+        "originalAmount": 0.5,
+        "originalUnit": "tablespoon"
+      }
     ]
-  }
+  },
+  "autoCalculateNutrition": true
 }
 
 # Step 4: Finalize
