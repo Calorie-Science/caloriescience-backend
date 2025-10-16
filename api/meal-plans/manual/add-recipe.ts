@@ -9,7 +9,7 @@ const addRecipeSchema = Joi.object({
   mealName: Joi.string().required(),
   recipe: Joi.object({
     id: Joi.string().required(),
-    provider: Joi.string().valid('edamam', 'spoonacular').required(),
+    provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee').required(),
     source: Joi.string().valid('api', 'cached').required()
   }).required(),
   servings: Joi.number().min(0.1).max(20).optional()
@@ -90,19 +90,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       servings
     });
 
-    // Fetch updated draft to return
+    // Fetch updated draft with complete nutrition (same structure as GET endpoint)
     const updatedDraft = await manualMealPlanService.getDraft(draftId);
-    const dayPlan = updatedDraft.suggestions.find((d: any) => d.day === day);
-    const meal = dayPlan?.meals[mealName];
+    const nutritionSummary = await manualMealPlanService.calculateDraftNutrition(draftId);
 
     return res.status(200).json({
       success: true,
       data: {
-        draftId,
-        day,
-        mealName,
-        recipe: meal?.recipes[0],
-        totalNutrition: meal?.totalNutrition
+        id: updatedDraft.id,
+        clientId: updatedDraft.client_id,
+        nutritionistId: updatedDraft.nutritionist_id,
+        status: updatedDraft.status,
+        creationMethod: updatedDraft.creation_method,
+        planName: updatedDraft.plan_name,
+        planDate: updatedDraft.plan_date,
+        endDate: updatedDraft.end_date,
+        durationDays: updatedDraft.plan_duration_days,
+        searchParams: updatedDraft.search_params,
+        suggestions: updatedDraft.suggestions,
+        nutrition: nutritionSummary,
+        createdAt: updatedDraft.created_at,
+        updatedAt: updatedDraft.updated_at,
+        expiresAt: updatedDraft.expires_at,
+        finalizedAt: updatedDraft.finalized_at
       },
       message: 'Recipe added successfully'
     });

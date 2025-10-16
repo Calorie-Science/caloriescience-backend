@@ -16,7 +16,7 @@ export interface AddRecipeParams {
   day: number;
   mealName: string;
   recipeId: string;
-  provider: 'edamam' | 'spoonacular';
+  provider: 'edamam' | 'spoonacular' | 'bonhappetee';
   source: 'api' | 'cached';
   servings?: number;
 }
@@ -41,8 +41,9 @@ export interface DayStructure {
   meals: {
     [mealName: string]: {
       recipes: any[];
-      customizations: {};
+      customizations: any;
       selectedRecipeId?: string;
+      totalNutrition?: any;
     };
   };
 }
@@ -207,13 +208,28 @@ export class ManualMealPlanService {
       throw new Error(`Day ${params.day} not found in draft`);
     }
 
-    // Find the meal
-    if (!dayPlan.meals[params.mealName]) {
-      throw new Error(`Meal ${params.mealName} not found for day ${params.day}`);
+    // Find the meal (case-insensitive) or create it dynamically
+    let targetMealName = params.mealName;
+    const mealKeys = Object.keys(dayPlan.meals);
+    
+    // Try case-insensitive match first
+    const matchedMeal = mealKeys.find(key => key.toLowerCase() === params.mealName.toLowerCase());
+    
+    if (matchedMeal) {
+      targetMealName = matchedMeal;
+      console.log(`✅ Found meal (case-insensitive): "${params.mealName}" → "${targetMealName}"`);
+    } else {
+      // Create new meal slot dynamically
+      console.log(`➕ Creating new meal slot: "${params.mealName}"`);
+      dayPlan.meals[params.mealName] = {
+        recipes: [],
+        customizations: {}
+      };
+      targetMealName = params.mealName;
     }
 
     // Parse full nutrition details from cache (includes macros AND micros)
-    let fullNutrition = null;
+    let fullNutrition: any = null;
     if (recipe.nutrition_details) {
       try {
         fullNutrition = typeof recipe.nutrition_details === 'string' 
@@ -260,25 +276,26 @@ export class ManualMealPlanService {
       instructions: recipe.instructions || [],
       healthLabels: recipe.health_labels || [],
       dietLabels: recipe.diet_labels || [],
+      allergens: recipe.allergens || [],
       cuisineTypes: recipe.cuisine_types || [],
       isSelected: true,
       selectedAt: new Date().toISOString()
     };
 
     // Add recipe to the meal (append to existing recipes)
-    if (!dayPlan.meals[params.mealName].recipes) {
-      dayPlan.meals[params.mealName].recipes = [];
+    if (!dayPlan.meals[targetMealName].recipes) {
+      dayPlan.meals[targetMealName].recipes = [];
     }
-    dayPlan.meals[params.mealName].recipes.push(recipeForPlan);
+    dayPlan.meals[targetMealName].recipes.push(recipeForPlan);
     
     // Set as selected recipe ID (for backward compatibility, use first recipe)
-    if (!dayPlan.meals[params.mealName].selectedRecipeId) {
-      dayPlan.meals[params.mealName].selectedRecipeId = recipeForPlan.id;
+    if (!dayPlan.meals[targetMealName].selectedRecipeId) {
+      dayPlan.meals[targetMealName].selectedRecipeId = recipeForPlan.id;
     }
     
     // Calculate total meal nutrition by summing all recipes
-    dayPlan.meals[params.mealName].totalNutrition = this.calculateMealNutrition(
-      dayPlan.meals[params.mealName].recipes
+    dayPlan.meals[targetMealName].totalNutrition = this.calculateMealNutrition(
+      dayPlan.meals[targetMealName].recipes
     );
 
     // Update the draft
@@ -322,24 +339,30 @@ export class ManualMealPlanService {
       throw new Error(`Day ${params.day} not found in draft`);
     }
 
-    // Find the meal
-    if (!dayPlan.meals[params.mealName]) {
+    // Find the meal (case-insensitive)
+    let targetMealName = params.mealName;
+    const mealKeys = Object.keys(dayPlan.meals);
+    const matchedMeal = mealKeys.find(key => key.toLowerCase() === params.mealName.toLowerCase());
+    
+    if (matchedMeal) {
+      targetMealName = matchedMeal;
+    } else {
       throw new Error(`Meal ${params.mealName} not found for day ${params.day}`);
     }
 
     if (params.removeMealSlot) {
       // Remove entire meal slot from structure
-      delete dayPlan.meals[params.mealName];
-      console.log(`✅ Removed entire meal slot "${params.mealName}" from day ${params.day}`);
+      delete dayPlan.meals[targetMealName];
+      console.log(`✅ Removed entire meal slot "${targetMealName}" from day ${params.day}`);
     } else if (params.recipeId) {
       // Remove specific recipe by ID
-      const meal = dayPlan.meals[params.mealName];
+      const meal = dayPlan.meals[targetMealName];
       const initialCount = meal.recipes?.length || 0;
       meal.recipes = (meal.recipes || []).filter((r: any) => r.id !== params.recipeId);
       const finalCount = meal.recipes.length;
       
       if (initialCount === finalCount) {
-        throw new Error(`Recipe ${params.recipeId} not found in ${params.mealName}`);
+        throw new Error(`Recipe ${params.recipeId} not found in ${targetMealName}`);
       }
       
       // Update selected recipe ID if we removed it
@@ -359,14 +382,14 @@ export class ManualMealPlanService {
         delete meal.customizations[params.recipeId];
       }
       
-      console.log(`✅ Removed recipe ${params.recipeId} from ${params.mealName}, day ${params.day} (${initialCount} → ${finalCount} recipes)`);
+      console.log(`✅ Removed recipe ${params.recipeId} from ${targetMealName}, day ${params.day} (${initialCount} → ${finalCount} recipes)`);
     } else {
       // Clear all recipes, keep the empty slot
-      dayPlan.meals[params.mealName].recipes = [];
-      dayPlan.meals[params.mealName].selectedRecipeId = undefined;
-      dayPlan.meals[params.mealName].totalNutrition = undefined;
-      dayPlan.meals[params.mealName].customizations = {};
-      console.log(`✅ Cleared all recipes from ${params.mealName}, day ${params.day} (slot remains)`);
+      dayPlan.meals[targetMealName].recipes = [];
+      dayPlan.meals[targetMealName].selectedRecipeId = undefined;
+      dayPlan.meals[targetMealName].totalNutrition = undefined;
+      dayPlan.meals[targetMealName].customizations = {};
+      console.log(`✅ Cleared all recipes from ${targetMealName}, day ${params.day} (slot remains)`);
     }
 
     // Update the draft
@@ -453,7 +476,7 @@ export class ManualMealPlanService {
   /**
    * Fetch recipe from API and cache it
    */
-  private async fetchAndCacheRecipe(recipeId: string, provider: 'edamam' | 'spoonacular'): Promise<any> {
+  private async fetchAndCacheRecipe(recipeId: string, provider: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
     console.log(`🔍 Fetching recipe ${recipeId} from ${provider}`);
 
     // Get the full recipe details from provider
@@ -491,7 +514,7 @@ export class ManualMealPlanService {
     const fiberValue = extractNutritionValue(recipe.nutrition?.macros?.fiber || recipe.nutrition?.fiber);
 
     // Cache the recipe with FULL nutrition details
-    const cacheData = {
+    const cacheData: any = {
       provider: provider,
       external_recipe_id: recipeId,
       external_recipe_uri: recipe.uri || recipe.sourceUrl || null,
@@ -508,17 +531,30 @@ export class ManualMealPlanService {
       fat_per_serving_g: fatValue,
       fiber_per_serving_g: fiberValue,
       ingredients: recipe.ingredients || [],
-      instructions: recipe.instructions || [],
+      cooking_instructions: recipe.instructions || [],
       nutrition_details: recipe.nutrition || null, // CRITICAL: Store full nutrition with micros
       health_labels: recipe.healthLabels || [],
       diet_labels: recipe.dietLabels || [],
-      cuisine_types: recipe.cuisineTypes || [],
-      meal_types: recipe.mealTypes || [],
+      cuisine_types: recipe.cuisineType || recipe.cuisineTypes || [],
+      meal_types: recipe.mealType || recipe.mealTypes || [],
       dish_types: recipe.dishTypes || [],
       cache_status: 'active',
       data_quality_score: 100,
       last_accessed_at: new Date().toISOString()
     };
+
+    // Add allergens if column exists (migration 064)
+    if (recipe.allergens) {
+      cacheData.allergens = recipe.allergens;
+    }
+
+    console.log('💾 Attempting to cache recipe:', {
+      provider,
+      recipeId,
+      title: cacheData.recipe_name,
+      hasNutritionDetails: !!cacheData.nutrition_details,
+      hasAllergens: !!cacheData.allergens
+    });
 
     const { data: cached, error: cacheError } = await supabase
       .from('cached_recipes')
@@ -527,19 +563,25 @@ export class ManualMealPlanService {
       .single();
 
     if (cacheError) {
-      console.error('❌ Error caching recipe:', cacheError);
-      // Return recipe even if caching fails
-      return { ...recipe, ...cacheData };
+      console.error('❌ Error caching Bon Happetee recipe:', {
+        error: cacheError,
+        message: cacheError.message,
+        details: cacheError.details,
+        hint: cacheError.hint,
+        code: cacheError.code
+      });
+      // Throw error instead of silently continuing
+      throw new Error(`Failed to cache recipe: ${cacheError.message}`);
     }
 
-    console.log('✅ Recipe cached successfully');
+    console.log('✅ Recipe cached successfully:', cached.id);
     return cached;
   }
 
   /**
    * Get recipe from cache
    */
-  private async getRecipeFromCache(recipeId: string, provider: 'edamam' | 'spoonacular'): Promise<any> {
+  private async getRecipeFromCache(recipeId: string, provider: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
     const { data: recipe, error } = await supabase
       .from('cached_recipes')
       .select('*')
@@ -682,7 +724,7 @@ export class ManualMealPlanService {
     }
 
     const suggestions = draft.suggestions as DayStructure[];
-    const dayWiseNutrition = [];
+    const dayWiseNutrition: any[] = [];
     const overall: any = {
       calories: { unit: 'kcal', quantity: 0 },
       macros: {},

@@ -80,7 +80,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const meal = dayPlan.meals[validatedMealName];
+    // Find the meal (case-insensitive) to support both automated and manual meal plans
+    let targetMealName = validatedMealName;
+    const mealKeys = Object.keys(dayPlan.meals);
+    const matchedMeal = mealKeys.find(key => key.toLowerCase() === validatedMealName.toLowerCase());
+    
+    if (matchedMeal) {
+      targetMealName = matchedMeal;
+      console.log(`✅ Found meal (case-insensitive): "${validatedMealName}" → "${targetMealName}"`);
+    }
+
+    const meal = dayPlan.meals[targetMealName];
     if (!meal) {
       return res.status(404).json({
         error: 'Meal not found',

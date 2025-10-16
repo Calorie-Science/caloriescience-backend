@@ -627,6 +627,7 @@ CREATE TABLE cached_recipes (
   dish_types TEXT[] DEFAULT '{}',
   health_labels TEXT[] DEFAULT '{}',
   diet_labels TEXT[] DEFAULT '{}',
+  allergens TEXT[] DEFAULT '{}',
   
   -- Servings & Time
   servings INTEGER,

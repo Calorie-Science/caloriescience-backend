@@ -25,6 +25,21 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_ANON_KEY=your-anon-key
 ```
 
+### Recipe Provider APIs
+```env
+# Required: Edamam Recipe & Nutrition APIs
+EDAMAM_RECIPE_APP_ID=your-recipe-app-id
+EDAMAM_RECIPE_APP_KEY=your-recipe-app-key
+EDAMAM_NUTRITION_APP_ID=your-nutrition-app-id
+EDAMAM_NUTRITION_APP_KEY=your-nutrition-app-key
+
+# Required: Spoonacular API
+SPOONACULAR_API_KEY=your-spoonacular-api-key
+
+# Optional: Bon Happetee API (for Indian food database)
+BON_HAPPETEE_API_KEY=your-bonhappetee-api-key
+```
+
 ## Optional Environment Variables
 
 ### JWT Configuration

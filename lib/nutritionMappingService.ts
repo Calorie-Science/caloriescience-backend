@@ -352,6 +352,96 @@ export class NutritionMappingService {
   }
 
   /**
+   * Transform Bon Happetee nutrition data to standardized format
+   * Handles the nutrients array from Bon Happetee API
+   */
+  static transformBonHappeteeNutrition(nutrientsArray: any[]): StandardizedNutrition {
+    if (!nutrientsArray || !Array.isArray(nutrientsArray)) {
+      return this.getCompleteNutritionTemplate();
+    }
+
+    const nutrition = this.getCompleteNutritionTemplate();
+
+    // Nutrient tag mapping for Bon Happetee
+    const nutrientMap: { [key: string]: { category: 'calories' | 'macros' | 'vitamins' | 'minerals', key: string, unit: string } } = {
+      // Energy
+      'ENERC_KCAL': { category: 'calories', key: 'calories', unit: 'kcal' },
+      
+      // Macros
+      'PROCNT': { category: 'macros', key: 'protein', unit: 'g' },
+      'CHOCDF': { category: 'macros', key: 'carbs', unit: 'g' },
+      'FAT': { category: 'macros', key: 'fat', unit: 'g' },
+      'FIBTG': { category: 'macros', key: 'fiber', unit: 'g' },
+      'SUGAR': { category: 'macros', key: 'sugar', unit: 'g' },
+      'NA': { category: 'macros', key: 'sodium', unit: 'mg' },
+      'CHOLE': { category: 'macros', key: 'cholesterol', unit: 'mg' },
+      'FASAT': { category: 'macros', key: 'saturatedFat', unit: 'g' },
+      'FAMS': { category: 'macros', key: 'monounsaturatedFat', unit: 'g' },
+      'FAPU': { category: 'macros', key: 'polyunsaturatedFat', unit: 'g' },
+      'FATRN': { category: 'macros', key: 'transFat', unit: 'g' },
+      
+      // Vitamins
+      'VITA_RAE': { category: 'vitamins', key: 'vitaminA', unit: 'µg' },
+      'VITC': { category: 'vitamins', key: 'vitaminC', unit: 'mg' },
+      'VITD': { category: 'vitamins', key: 'vitaminD', unit: 'µg' },
+      'VITE': { category: 'vitamins', key: 'vitaminE', unit: 'mg' },
+      'VITK1': { category: 'vitamins', key: 'vitaminK', unit: 'µg' },
+      'THIA': { category: 'vitamins', key: 'thiamin', unit: 'mg' },
+      'RIBF': { category: 'vitamins', key: 'riboflavin', unit: 'mg' },
+      'NIA': { category: 'vitamins', key: 'niacin', unit: 'mg' },
+      'PANTAC': { category: 'vitamins', key: 'pantothenicAcid', unit: 'mg' },
+      'VITB6A': { category: 'vitamins', key: 'vitaminB6', unit: 'mg' },
+      'VITB12': { category: 'vitamins', key: 'vitaminB12', unit: 'µg' },
+      'FOL': { category: 'vitamins', key: 'folate', unit: 'µg' },
+      'CHOLN': { category: 'vitamins', key: 'choline', unit: 'mg' },
+      
+      // Minerals
+      'CA': { category: 'minerals', key: 'calcium', unit: 'mg' },
+      'FE': { category: 'minerals', key: 'iron', unit: 'mg' },
+      'MG': { category: 'minerals', key: 'magnesium', unit: 'mg' },
+      'P': { category: 'minerals', key: 'phosphorus', unit: 'mg' },
+      'K': { category: 'minerals', key: 'potassium', unit: 'mg' },
+      'ZN': { category: 'minerals', key: 'zinc', unit: 'mg' },
+      'CU': { category: 'minerals', key: 'copper', unit: 'mg' },
+      'MN': { category: 'minerals', key: 'manganese', unit: 'mg' },
+      'SE': { category: 'minerals', key: 'selenium', unit: 'µg' }
+    };
+
+    // Process each nutrient
+    for (const nutrient of nutrientsArray) {
+      const mapping = nutrientMap[nutrient.nutrient_tag_name];
+      if (mapping && nutrient.measure !== null && nutrient.measure !== undefined) {
+        const value = Math.round(nutrient.measure * 100) / 100;
+        
+        // Convert unit if needed (e.g., "micro g" → "µg", "ug" → "µg")
+        let unit = mapping.unit;
+        if (nutrient.unit_of_measure) {
+          const unitStr = nutrient.unit_of_measure.toLowerCase();
+          if (unitStr.includes('micro') || unitStr === 'ug') {
+            unit = 'µg';
+          } else if (unitStr === 'mg') {
+            unit = 'mg';
+          } else if (unitStr === 'g') {
+            unit = 'g';
+          }
+        }
+        
+        if (mapping.category === 'calories') {
+          nutrition.calories = { quantity: value, unit: unit };
+        } else if (mapping.category === 'macros') {
+          nutrition.macros[mapping.key] = { quantity: value, unit: unit };
+        } else if (mapping.category === 'vitamins') {
+          nutrition.micros.vitamins[mapping.key] = { quantity: value, unit: unit };
+        } else if (mapping.category === 'minerals') {
+          nutrition.micros.minerals[mapping.key] = { quantity: value, unit: unit };
+        }
+      }
+    }
+
+    return nutrition;
+  }
+
+  /**
    * Add two nutrition objects together
    */
   static addNutrition(base: StandardizedNutrition, toAdd: StandardizedNutrition): StandardizedNutrition {

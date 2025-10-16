@@ -18,7 +18,7 @@ CREATE TYPE pregnancy_status AS ENUM ('not_pregnant', 'first_trimester', 'second
 CREATE TYPE lactation_status AS ENUM ('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months');
 CREATE TYPE bmi_category AS ENUM ('underweight', 'normal', 'overweight', 'obese_class_1', 'obese_class_2', 'obese_class_3');
 CREATE TYPE document_type AS ENUM ('blood_report', 'medical_history', 'photo', 'diet_log', 'prescription', 'other');
-CREATE TYPE recipe_provider AS ENUM ('edamam', 'spoonacular', 'usda', 'nutritionix', 'manual');
+CREATE TYPE recipe_provider AS ENUM ('edamam', 'spoonacular', 'usda', 'nutritionix', 'manual', 'bonhappetee');
 
 -- ========================================
 -- CORE TABLES
@@ -627,6 +627,7 @@ CREATE TABLE cached_recipes (
   dish_types TEXT[] DEFAULT '{}',
   health_labels TEXT[] DEFAULT '{}',
   diet_labels TEXT[] DEFAULT '{}',
+  allergens TEXT[] DEFAULT '{}',
   
   -- Servings & Time
   servings INTEGER,

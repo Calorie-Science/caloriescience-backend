@@ -7,6 +7,10 @@ The Manual Meal Plan API allows nutritionists to create custom meal plans by man
 ## Features
 
 - **Draft Workflow**: Create meal plans in draft mode, add/remove recipes, then finalize
+- **Flexible Meal Structure**: 
+  - Supports any custom meal names (e.g., "Pre-Workout", "Brunch", "Late Night Snack")
+  - Case-insensitive meal matching ("Breakfast" matches "breakfast")
+  - Dynamic meal creation - new meals are created automatically when adding recipes
 - **Multiple Recipes Per Meal**: Add multiple recipes to a single meal (e.g., pancakes + eggs + juice for breakfast)
 - **Meal Program Templates**: Optionally use existing meal programs as templates
 - **Recipe Flexibility**: Add recipes from Edamam or Spoonacular, fetched via API or from cache
@@ -123,39 +127,26 @@ Customizations are stored in the `suggestions` JSONB field:
 ```
 
 **Response:**
+Returns the **complete draft** with updated nutrition (same structure as GET endpoint):
 ```json
 {
   "success": true,
   "data": {
-    "draftId": "manual-uuid",
-    "day": 1,
-    "mealName": "breakfast",
-    "recipe": {
-      "id": "recipe-id",
-      "title": "Scrambled Eggs",
-      "image": "https://...",
-      "sourceUrl": "https://...",
-      "source": "spoonacular",
-      "servings": 1.5,
-      "nutrition": {
-        "calories": 480,
-        "protein": 24,
-        "carbs": 12,
-        "fat": 18,
-        "fiber": 2
-      }
+    "id": "manual-uuid",
+    "clientId": "uuid",
+    "status": "draft",
+    "suggestions": [...],
+    "nutrition": {
+      "dayWise": [...],
+      "overall": {...},
+      "dailyAverage": {...}
     },
-    "totalNutrition": {
-      "calories": 480,
-      "protein": 24,
-      "carbs": 12,
-      "fat": 18,
-      "fiber": 2
-    }
+    ...
   },
   "message": "Recipe added successfully"
 }
 ```
+*See GET endpoint for complete response structure*
 
 **Behavior:**
 - If `source: "api"`: Fetches recipe from provider API and caches it
@@ -167,7 +158,9 @@ Customizations are stored in the `suggestions` JSONB field:
 **Validation:**
 - `draftId`: Must exist and belong to nutritionist
 - `day`: Must be within plan duration (1 to durationDays)
-- `mealName`: Must exist in the meal structure
+- `mealName`: Can be any string (case-insensitive matching, creates new meal if doesn't exist)
+  - Standard meals: "breakfast", "lunch", "dinner", "snack"
+  - Custom meals: "Pre-Workout", "Brunch", "Late Night Snack", etc.
 - `recipe.provider`: Must be 'edamam' or 'spoonacular'
 - `recipe.source`: Must be 'api' or 'cached'
 - `servings`: If provided, must be between 0.1 and 20
@@ -207,12 +200,20 @@ Customizations are stored in the `suggestions` JSONB field:
   - `true`: Removes the entire meal slot from the day structure (no recipes needed for this meal)
 
 **Response:**
+Returns the **complete draft** with updated nutrition (same structure as GET endpoint):
 ```json
 {
   "success": true,
+  "data": {
+    "id": "manual-uuid",
+    "suggestions": [...],
+    "nutrition": {...},
+    ...
+  },
   "message": "Recipe removed successfully"
 }
 ```
+*UI can update instantly without additional API call*
 
 **Behavior:**
 
@@ -353,18 +354,28 @@ Customizations are stored in the `suggestions` JSONB field:
 ```
 
 **Response:**
+Returns the **complete finalized plan** with nutrition (same structure as GET endpoint):
 ```json
 {
   "success": true,
   "data": {
-    "planId": "manual-uuid",
+    "id": "manual-uuid",
     "status": "finalized",
     "planName": "Weekly Meal Plan",
-    "finalizedAt": "2025-10-20T12:00:00.000Z"
+    "suggestions": [...],
+    "nutrition": {
+      "dayWise": [...],
+      "overall": {...},
+      "dailyAverage": {...}
+    },
+    "finalizedAt": "2025-10-20T12:00:00.000Z",
+    "expiresAt": null,
+    ...
   },
   "message": "Meal plan finalized successfully"
 }
 ```
+*UI can display the finalized plan immediately*
 
 **Behavior:**
 - Validates all meal slots have recipes

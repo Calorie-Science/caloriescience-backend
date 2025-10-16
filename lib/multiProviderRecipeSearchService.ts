@@ -192,6 +192,7 @@ export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
 export class MultiProviderRecipeSearchService {
   private edamamService: EdamamService;
   private spoonacularApiKey: string;
+  private bonHappeteeService: any; // Lazy loaded
 
   constructor() {
     this.edamamService = new EdamamService();
@@ -199,6 +200,12 @@ export class MultiProviderRecipeSearchService {
     
     if (!this.spoonacularApiKey) {
       throw new Error('SPOONACULAR_API_KEY environment variable is required');
+    }
+    
+    // Lazy load Bon Happetee service (optional dependency)
+    if (process.env.BON_HAPPETEE_API_KEY) {
+      const { BonHappeteeService } = require('./bonHappeteeService');
+      this.bonHappeteeService = new BonHappeteeService();
     }
   }
 
@@ -826,10 +833,16 @@ export class MultiProviderRecipeSearchService {
    */
   async getRecipeDetails(recipeId: string): Promise<any> {
     try {
-      // Determine provider from recipe ID
-      const provider = recipeId.startsWith('recipe_') ? 'edamam' : 'spoonacular';
+      // Determine provider from recipe ID format
+      // Edamam: starts with 'recipe_'
+      // Spoonacular: numeric string
+      // Bon Happetee: UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
+      const isEdamam = recipeId.startsWith('recipe_');
       
-      if (provider === 'edamam') {
+      if (isUUID) {
+        return await this.getBonHappeteeRecipeDetails(recipeId);
+      } else if (isEdamam) {
         return await this.getEdamamRecipeDetails(recipeId);
       } else {
         return await this.getSpoonacularRecipeDetails(recipeId);
@@ -948,6 +961,49 @@ export class MultiProviderRecipeSearchService {
       };
     } catch (error) {
       console.error('❌ Error fetching Spoonacular recipe details:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get detailed recipe from Bon Happetee
+   */
+  private async getBonHappeteeRecipeDetails(foodItemId: string): Promise<any> {
+    try {
+      if (!this.bonHappeteeService) {
+        throw new Error('Bon Happetee service not initialized - API key missing');
+      }
+
+      const recipeData = await this.bonHappeteeService.getRecipeDetails(foodItemId);
+      const { NutritionMappingService } = require('./nutritionMappingService');
+      
+      // Transform Bon Happetee nutrition to standardized format
+      const nutrition = NutritionMappingService.transformBonHappeteeNutrition(recipeData.nutrients);
+
+      return {
+        id: foodItemId,
+        title: recipeData.title,
+        image: null, // Bon Happetee doesn't provide images
+        sourceUrl: null,
+        source: 'bonhappetee',
+        servings: 1, // Bon Happetee provides per-serving nutrition
+        readyInMinutes: (recipeData.prepTime || 0) + (recipeData.cookTime || 0),
+        nutrition: nutrition,
+        ingredients: [], // Bon Happetee doesn't provide ingredient breakdown
+        instructions: [],
+        cuisineType: recipeData.cuisineType,
+        mealType: recipeData.mealType,
+        healthLabels: recipeData.healthLabels,
+        allergens: recipeData.allergens,
+        servingType: recipeData.servingType,
+        measures: recipeData.measures,
+        basicUnitMeasure: recipeData.basicUnitMeasure,
+        caloriesCalculatedFor: recipeData.caloriesCalculatedFor,
+        foodGroup: recipeData.foodGroup,
+        disorderRisks: recipeData.disorderRisks
+      };
+    } catch (error) {
+      console.error('❌ Error fetching Bon Happetee recipe details:', error);
       throw error;
     }
   }
@@ -1337,7 +1393,7 @@ Return a JSON object where each key is an ingredient name and the value is an ar
 
       const data = await response.json();
 
-      // Return first ingredient's nutrition data
+      // Return first ingredient's nutrition data WITH FULL RAW DATA for micronutrients
       if (Array.isArray(data) && data.length > 0) {
         const ingredient = data[0];
         const nutrition = ingredient.nutrition;
@@ -1347,7 +1403,8 @@ Return a JSON object where each key is an ingredient name and the value is an ar
           protein: nutrition?.nutrients?.find((n: any) => n.name === 'Protein')?.amount || 0,
           carbs: nutrition?.nutrients?.find((n: any) => n.name === 'Carbohydrates')?.amount || 0,
           fat: nutrition?.nutrients?.find((n: any) => n.name === 'Fat')?.amount || 0,
-          fiber: nutrition?.nutrients?.find((n: any) => n.name === 'Fiber')?.amount || 0
+          fiber: nutrition?.nutrients?.find((n: any) => n.name === 'Fiber')?.amount || 0,
+          rawData: ingredient // CRITICAL: Include full data so transformSpoonacularIngredientNutrition can access nutrition.nutrients
         };
       }
 
