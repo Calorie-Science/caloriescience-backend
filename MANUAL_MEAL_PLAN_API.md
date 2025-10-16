@@ -441,7 +441,7 @@ Returns the **complete finalized plan** with nutrition (same structure as GET en
       }
     ],
     "nutrition": {
-      "dayWise": [
+      "byDay": [
         {
           "day": 1,
           "date": "2025-10-20",

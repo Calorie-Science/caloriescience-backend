@@ -92,28 +92,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // Fetch updated draft with complete nutrition (same structure as GET endpoint)
     const updatedDraft = await manualMealPlanService.getDraft(draftId);
-    const nutritionSummary = await manualMealPlanService.calculateDraftNutrition(draftId);
+    const formattedDraft = await manualMealPlanService.formatDraftResponse(updatedDraft);
 
     return res.status(200).json({
       success: true,
-      data: {
-        id: updatedDraft.id,
-        clientId: updatedDraft.client_id,
-        nutritionistId: updatedDraft.nutritionist_id,
-        status: updatedDraft.status,
-        creationMethod: updatedDraft.creation_method,
-        planName: updatedDraft.plan_name,
-        planDate: updatedDraft.plan_date,
-        endDate: updatedDraft.end_date,
-        durationDays: updatedDraft.plan_duration_days,
-        searchParams: updatedDraft.search_params,
-        suggestions: updatedDraft.suggestions,
-        nutrition: nutritionSummary,
-        createdAt: updatedDraft.created_at,
-        updatedAt: updatedDraft.updated_at,
-        expiresAt: updatedDraft.expires_at,
-        finalizedAt: updatedDraft.finalized_at
-      },
+      data: formattedDraft,
       message: 'Recipe added successfully'
     });
 

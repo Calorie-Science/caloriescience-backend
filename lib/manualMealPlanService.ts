@@ -44,6 +44,8 @@ export interface DayStructure {
       customizations: any;
       selectedRecipeId?: string;
       totalNutrition?: any;
+      mealTime?: string; // HH:MM format
+      targetCalories?: number;
     };
   };
 }
@@ -219,11 +221,13 @@ export class ManualMealPlanService {
       targetMealName = matchedMeal;
       console.log(`✅ Found meal (case-insensitive): "${params.mealName}" → "${targetMealName}"`);
     } else {
-      // Create new meal slot dynamically
+      // Create new meal slot dynamically (without target calories - user should use meal-slot API to set those)
       console.log(`➕ Creating new meal slot: "${params.mealName}"`);
       dayPlan.meals[params.mealName] = {
         recipes: [],
-        customizations: {}
+        customizations: {},
+        mealTime: undefined,
+        targetCalories: undefined
       };
       targetMealName = params.mealName;
     }
@@ -474,6 +478,57 @@ export class ManualMealPlanService {
   }
 
   /**
+   * Format draft response to match automated meal plan structure
+   */
+  async formatDraftResponse(draft: any): Promise<any> {
+    const nutritionSummary = await this.calculateDraftNutrition(draft.id);
+    
+    // Calculate completion stats (match automated meal plans)
+    const suggestions = draft.suggestions as any[];
+    let totalMeals = 0;
+    let selectedMeals = 0;
+    
+    for (const day of suggestions) {
+      const mealCount = Object.keys(day.meals || {}).length;
+      totalMeals += mealCount;
+      
+      for (const meal of Object.values(day.meals || {})) {
+        const mealData = meal as any;
+        if (mealData.recipes && mealData.recipes.length > 0) {
+          selectedMeals++;
+        }
+      }
+    }
+    
+    const completionPercentage = totalMeals > 0 ? Math.round((selectedMeals / totalMeals) * 100) : 0;
+    const isComplete = totalMeals > 0 && selectedMeals === totalMeals;
+
+    return {
+      id: draft.id,
+      clientId: draft.client_id,
+      nutritionistId: draft.nutritionist_id,
+      status: draft.status,
+      creationMethod: draft.creation_method,
+      planName: draft.plan_name,
+      planDate: draft.plan_date,
+      endDate: draft.end_date,
+      durationDays: draft.plan_duration_days,
+      totalDays: draft.plan_duration_days, // Match automated field name
+      totalMeals, // Match automated
+      selectedMeals, // Match automated
+      completionPercentage, // Match automated
+      isComplete, // Match automated
+      searchParams: draft.search_params,
+      suggestions: draft.suggestions,
+      nutrition: nutritionSummary,
+      createdAt: draft.created_at,
+      updatedAt: draft.updated_at,
+      expiresAt: draft.expires_at,
+      finalizedAt: draft.finalized_at
+    };
+  }
+
+  /**
    * Fetch recipe from API and cache it
    */
   private async fetchAndCacheRecipe(recipeId: string, provider: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
@@ -523,7 +578,7 @@ export class ManualMealPlanService {
       recipe_url: recipe.url || recipe.sourceUrl,
       recipe_image_url: recipe.image,
       servings: recipe.servings || 1,
-      ready_in_minutes: recipe.readyInMinutes,
+      total_time_minutes: recipe.readyInMinutes,
       total_calories: caloriesValue * (recipe.servings || 1),
       calories_per_serving: caloriesValue,
       protein_per_serving_g: proteinValue,
@@ -631,12 +686,14 @@ export class ManualMealPlanService {
         meals: {}
       };
 
-      // Create meal slots
+      // Create meal slots with target calories and meal time
       for (const slot of defaultMealSlots) {
         dayStructure.meals[slot.mealName] = {
           recipes: [],
           customizations: {},
-          selectedRecipeId: undefined
+          selectedRecipeId: undefined,
+          mealTime: slot.mealTime,
+          targetCalories: slot.targetCalories
         };
       }
 
@@ -745,8 +802,28 @@ export class ManualMealPlanService {
 
       // Calculate nutrition for each meal
       for (const [mealName, meal] of Object.entries(day.meals)) {
-        const mealTotal = this.calculateMealNutrition((meal as any).recipes);
-        dayNutrition.meals[mealName] = mealTotal;
+        const mealData = meal as any;
+        const mealTotal = this.calculateMealNutrition(mealData.recipes);
+        
+        // Include target comparison
+        const mealWithTarget: any = {
+          ...mealTotal,
+          targetCalories: mealData.targetCalories,
+          mealTime: mealData.mealTime
+        };
+
+        // Add calorie comparison if target exists
+        if (mealData.targetCalories && mealTotal) {
+          const actualCalories = mealTotal.calories?.quantity || 0;
+          mealWithTarget.calorieComparison = {
+            target: mealData.targetCalories,
+            actual: actualCalories,
+            difference: actualCalories - mealData.targetCalories,
+            percentageOfTarget: Math.round((actualCalories / mealData.targetCalories) * 100)
+          };
+        }
+
+        dayNutrition.meals[mealName] = mealWithTarget;
 
         // Add to day total
         if (mealTotal) {
@@ -760,7 +837,7 @@ export class ManualMealPlanService {
     }
 
     return {
-      dayWise: dayWiseNutrition,
+      byDay: dayWiseNutrition, // Match automated meal plan field name
       overall,
       dailyAverage: this.divideTotalByDays(overall, suggestions.length)
     };
@@ -845,6 +922,130 @@ export class ManualMealPlanService {
     }
 
     return avg;
+  }
+
+  /**
+   * Create a new meal slot with target calories
+   */
+  async createMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number }): Promise<void> {
+    console.log('➕ Creating meal slot:', params);
+
+    const { data: draft, error: draftError } = await supabase
+      .from('meal_plan_drafts')
+      .select('*')
+      .eq('id', params.draftId)
+      .single();
+
+    if (draftError || !draft) {
+      throw new Error('Draft not found');
+    }
+
+    const suggestions = draft.suggestions as DayStructure[];
+    const dayPlan = suggestions.find((d: DayStructure) => d.day === params.day);
+    
+    if (!dayPlan) {
+      throw new Error(`Day ${params.day} not found in draft`);
+    }
+
+    // Check if meal already exists (case-insensitive)
+    const existingMeal = Object.keys(dayPlan.meals).find(
+      key => key.toLowerCase() === params.mealName.toLowerCase()
+    );
+
+    if (existingMeal) {
+      throw new Error(`Meal slot "${existingMeal}" already exists for day ${params.day}`);
+    }
+
+    // Create new meal slot
+    dayPlan.meals[params.mealName] = {
+      recipes: [],
+      customizations: {},
+      mealTime: params.mealTime || undefined,
+      targetCalories: params.targetCalories || undefined
+    };
+
+    // Update the draft
+    const { error: updateError } = await supabase
+      .from('meal_plan_drafts')
+      .update({
+        suggestions: suggestions,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', params.draftId);
+
+    if (updateError) {
+      throw new Error(`Failed to update draft: ${updateError.message}`);
+    }
+
+    console.log(`✅ Created meal slot "${params.mealName}" on day ${params.day}`);
+  }
+
+  /**
+   * Update meal slot properties (mealTime, targetCalories)
+   */
+  async updateMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number }): Promise<void> {
+    console.log('✏️ Updating meal slot:', params);
+
+    const { data: draft, error: draftError } = await supabase
+      .from('meal_plan_drafts')
+      .select('*')
+      .eq('id', params.draftId)
+      .single();
+
+    if (draftError || !draft) {
+      throw new Error('Draft not found');
+    }
+
+    const suggestions = draft.suggestions as DayStructure[];
+    const dayPlan = suggestions.find((d: DayStructure) => d.day === params.day);
+    
+    if (!dayPlan) {
+      throw new Error(`Day ${params.day} not found in draft`);
+    }
+
+    // Find meal (case-insensitive)
+    const mealKey = Object.keys(dayPlan.meals).find(
+      key => key.toLowerCase() === params.mealName.toLowerCase()
+    );
+
+    if (!mealKey) {
+      throw new Error(`Meal slot "${params.mealName}" not found for day ${params.day}`);
+    }
+
+    // Update properties
+    if (params.mealTime !== undefined) {
+      dayPlan.meals[mealKey].mealTime = params.mealTime;
+    }
+    if (params.targetCalories !== undefined) {
+      dayPlan.meals[mealKey].targetCalories = params.targetCalories;
+    }
+
+    // Update the draft
+    const { error: updateError } = await supabase
+      .from('meal_plan_drafts')
+      .update({
+        suggestions: suggestions,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', params.draftId);
+
+    if (updateError) {
+      throw new Error(`Failed to update draft: ${updateError.message}`);
+    }
+
+    console.log(`✅ Updated meal slot "${mealKey}" on day ${params.day}`);
+  }
+
+  /**
+   * Delete a meal slot (same as remove-recipe with removeMealSlot: true)
+   */
+  async deleteMealSlot(params: { draftId: string; day: number; mealName: string }): Promise<void> {
+    return this.removeRecipe({
+      draftId: params.draftId,
+      day: params.day,
+      mealName: params.mealName,
+      removeMealSlot: true
+    });
   }
 }
 

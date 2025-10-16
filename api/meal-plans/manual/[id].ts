@@ -59,30 +59,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Calculate nutrition summary
-    const nutritionSummary = await manualMealPlanService.calculateDraftNutrition(draftId);
+    // Return formatted response (matches automated meal plan structure)
+    const formattedDraft = await manualMealPlanService.formatDraftResponse(draft);
 
-    // Return the complete draft with nutrition
     return res.status(200).json({
       success: true,
-      data: {
-        id: draft.id,
-        clientId: draft.client_id,
-        nutritionistId: draft.nutritionist_id,
-        status: draft.status,
-        creationMethod: draft.creation_method,
-        planName: draft.plan_name,
-        planDate: draft.plan_date,
-        endDate: draft.end_date,
-        durationDays: draft.plan_duration_days,
-        searchParams: draft.search_params,
-        suggestions: draft.suggestions,
-        nutrition: nutritionSummary, // Day-wise, overall, and daily average nutrition
-        createdAt: draft.created_at,
-        updatedAt: draft.updated_at,
-        expiresAt: draft.expires_at,
-        finalizedAt: draft.finalized_at
-      },
+      data: formattedDraft,
       message: 'Meal plan draft retrieved successfully'
     });
 
