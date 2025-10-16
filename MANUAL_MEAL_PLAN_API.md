@@ -7,9 +7,11 @@ The Manual Meal Plan API allows nutritionists to create custom meal plans by man
 ## Features
 
 - **Draft Workflow**: Create meal plans in draft mode, add/remove recipes, then finalize
+- **Multiple Recipes Per Meal**: Add multiple recipes to a single meal (e.g., pancakes + eggs + juice for breakfast)
 - **Meal Program Templates**: Optionally use existing meal programs as templates
 - **Recipe Flexibility**: Add recipes from Edamam or Spoonacular, fetched via API or from cache
 - **Ingredient Modifications**: Use the same customization system as auto-generated plans
+- **Nutrition Tracking**: Automatic day-wise and overall nutrition calculation with full micronutrients
 - **Expiration Management**: Drafts expire after 7 days; finalized plans never expire
 
 ## Architecture
@@ -101,7 +103,7 @@ Customizations are stored in the `suggestions` JSONB field:
 
 **Endpoint:** `POST /api/meal-plans/manual/add-recipe`
 
-**Description:** Add a recipe to a specific meal slot in the draft.
+**Description:** Add a recipe to a specific meal slot in the draft. **Supports multiple recipes per meal** - recipes are appended, not replaced.
 
 **Authentication:** Required (Nutritionist only)
 
@@ -158,8 +160,9 @@ Customizations are stored in the `suggestions` JSONB field:
 **Behavior:**
 - If `source: "api"`: Fetches recipe from provider API and caches it
 - If `source: "cached"`: Retrieves recipe from `cached_recipes` table
-- Replaces any existing recipe in the meal slot
-- Recalculates meal nutrition based on servings
+- **Appends recipe to meal** (does not replace existing recipes)
+- Recalculates meal nutrition by summing all recipes
+- Each meal can have multiple recipes (e.g., eggs + toast + juice for breakfast)
 
 **Validation:**
 - `draftId`: Must exist and belong to nutritionist
@@ -190,14 +193,18 @@ Customizations are stored in the `suggestions` JSONB field:
   "draftId": "manual-uuid",
   "day": 1,
   "mealName": "breakfast",
-  "removeMealSlot": false  // optional, default: false
+  "recipeId": "recipe-id",  // optional - removes specific recipe
+  "removeMealSlot": false   // optional, default: false
 }
 ```
 
 **Parameters:**
+- `recipeId` (optional)
+  - If provided: Removes only this specific recipe from the meal (useful when meal has multiple recipes)
+  - If not provided: Removes all recipes from the meal
 - `removeMealSlot` (optional, default: `false`)
-  - `false`: Clears the recipe but keeps the empty meal slot (requires a recipe before finalization)
-  - `true`: Removes the entire meal slot from the day structure (no recipe needed for this meal)
+  - `false`: Clears recipe(s) but keeps the empty meal slot (requires at least one recipe before finalization)
+  - `true`: Removes the entire meal slot from the day structure (no recipes needed for this meal)
 
 **Response:**
 ```json
@@ -209,17 +216,24 @@ Customizations are stored in the `suggestions` JSONB field:
 
 **Behavior:**
 
-**When `removeMealSlot: false` (default):**
-- Clears the recipe from the meal slot
-- Removes all customizations for that meal
-- Resets nutrition to undefined
-- **Slot remains and requires a recipe before finalization**
-- Use this when you want to replace the recipe
+**When `recipeId` is provided:**
+- Removes only the specified recipe from the meal
+- Other recipes in the meal remain
+- Recalculates total meal nutrition from remaining recipes
+- Use this when meal has multiple recipes and you want to remove one
 
-**When `removeMealSlot: true`:**
-- Completely removes the meal slot from the day structure
-- **Slot no longer requires a recipe**
-- Use this when the client doesn't need this meal (e.g., skip snack today)
+**When `recipeId` is NOT provided:**
+- **If `removeMealSlot: false` (default)**:
+  - Clears ALL recipes from the meal slot
+  - Removes all customizations
+  - Resets nutrition to undefined
+  - **Slot remains and requires at least one recipe before finalization**
+  - Use this when you want to replace all recipes
+  
+- **If `removeMealSlot: true`**:
+  - Completely removes the meal slot from the day structure
+  - **Slot no longer requires any recipes**
+  - Use this when the client doesn't need this meal (e.g., skip snack today)
 
 **Validation:**
 - `draftId`: Must exist and belong to nutritionist
@@ -407,14 +421,29 @@ Customizations are stored in the `suggestions` JSONB field:
         "date": "2025-10-20",
         "meals": {
           "breakfast": {
-            "recipes": [...],
+            "recipes": [...],  // Array of recipes (can have multiple)
             "customizations": {...},
             "selectedRecipeId": "recipe-id",
-            "totalNutrition": {...}
+            "totalNutrition": {...}  // Sum of all recipes in this meal
           }
         }
       }
     ],
+    "nutrition": {
+      "dayWise": [
+        {
+          "day": 1,
+          "date": "2025-10-20",
+          "meals": {
+            "breakfast": { "calories": {...}, "macros": {...}, "micros": {...} },
+            "lunch": {...}
+          },
+          "dayTotal": { "calories": {...}, "macros": {...}, "micros": {...} }
+        }
+      ],
+      "overall": { "calories": {...}, "macros": {...}, "micros": {...} },
+      "dailyAverage": { "calories": {...}, "macros": {...}, "micros": {...} }
+    },
     "createdAt": "2025-10-20T12:00:00.000Z",
     "updatedAt": "2025-10-20T12:30:00.000Z",
     "expiresAt": "2025-10-27T12:00:00.000Z",
@@ -681,4 +710,5 @@ expired (if not finalized within 7 days)
 - [ ] Nutrition target tracking per day/meal
 - [ ] Shopping list generation
 - [ ] Meal plan versioning
+
 

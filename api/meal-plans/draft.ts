@@ -1087,6 +1087,9 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     // Initialize recipeServings early so it's available throughout the function
     let recipeServings: number = recipe.servings || 1;
     
+    // Initialize nutrition variables at function level
+    let originalNutritionWithMicros: any = null;
+    
     // Initialize debug object at function level so it's always available
     const debugCacheLookup: any = {
       lookupKey: { source: customizations.source, recipeId: recipeId }
@@ -1320,7 +1323,6 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       const standardizationService = new (await import('../../lib/recipeResponseStandardizationService')).RecipeResponseStandardizationService();
       
       let originalRecipe: any = null;
-      let originalNutritionWithMicros: any = null;
       
       // Try cache first to get full nutrition
       const cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
@@ -1388,14 +1390,21 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           debugCacheLookup.nutritionSource = 'standardized.nutritionDetails';
         } else {
           // Fallback to recipe data from draft
+          // Handle both number format (automated) and object format (manual meal plans)
           debugCacheLookup.nutritionSource = 'draft recipe fallback';
+          const extractNumber = (value: any) => {
+            if (typeof value === 'number') return value;
+            if (value?.quantity) return value.quantity;
+            return 0;
+          };
+          
           originalNutritionWithMicros = {
-            calories: { quantity: recipe.calories || 0, unit: 'kcal' },
+            calories: { quantity: extractNumber(recipe.calories), unit: 'kcal' },
             macros: {
-              protein: { quantity: recipe.protein || 0, unit: 'g' },
-              carbs: { quantity: recipe.carbs || 0, unit: 'g' },
-              fat: { quantity: recipe.fat || 0, unit: 'g' },
-              fiber: { quantity: recipe.fiber || 0, unit: 'g' }
+              protein: { quantity: extractNumber(recipe.protein), unit: 'g' },
+              carbs: { quantity: extractNumber(recipe.carbs), unit: 'g' },
+              fat: { quantity: extractNumber(recipe.fat), unit: 'g' },
+              fiber: { quantity: extractNumber(recipe.fiber), unit: 'g' }
             },
             micros: { vitamins: {}, minerals: {} }
           };
@@ -2027,7 +2036,11 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     // Return exact same structure as GET /api/recipes/customized
     return res.status(200).json({
       success: true,
-      data: customizedRecipe,
+      data: {
+        ...customizedRecipe,
+        modifiedNutrition: customizations.customNutrition || null, // Full nutrition with micros
+        originalNutrition: originalNutritionWithMicros || null
+      },
       hasCustomizations: true,
       customizations: {
         modifications: customizations.modifications || [],

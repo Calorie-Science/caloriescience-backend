@@ -59,7 +59,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Return the complete draft
+    // Calculate nutrition summary
+    const nutritionSummary = await manualMealPlanService.calculateDraftNutrition(draftId);
+
+    // Return the complete draft with nutrition
     return res.status(200).json({
       success: true,
       data: {
@@ -74,6 +77,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         durationDays: draft.plan_duration_days,
         searchParams: draft.search_params,
         suggestions: draft.suggestions,
+        nutrition: nutritionSummary, // Day-wise, overall, and daily average nutrition
         createdAt: draft.created_at,
         updatedAt: draft.updated_at,
         expiresAt: draft.expires_at,

@@ -7,7 +7,8 @@ const removeRecipeSchema = Joi.object({
   draftId: Joi.string().required(),
   day: Joi.number().integer().min(1).required(),
   mealName: Joi.string().required(),
-  removeMealSlot: Joi.boolean().optional().default(false) // If true, removes entire meal slot; if false, just clears recipe
+  recipeId: Joi.string().optional(), // If provided, removes specific recipe; if not, removes all recipes
+  removeMealSlot: Joi.boolean().optional().default(false) // If true, removes entire meal slot; if false, just clears recipe(s)
 });
 
 /**
@@ -48,13 +49,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { draftId, day, mealName, removeMealSlot } = value;
+    const { draftId, day, mealName, recipeId, removeMealSlot } = value;
 
     console.log('🗑️ Removing recipe from manual meal plan:', {
       nutritionist: user.email,
       draftId,
       day,
       mealName,
+      recipeId,
       removeMealSlot
     });
 
@@ -79,6 +81,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       draftId,
       day,
       mealName,
+      recipeId,
       removeMealSlot
     });
 
