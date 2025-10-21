@@ -503,6 +503,67 @@ export class ManualMealPlanService {
     const completionPercentage = totalMeals > 0 ? Math.round((selectedMeals / totalMeals) * 100) : 0;
     const isComplete = totalMeals > 0 && selectedMeals === totalMeals;
 
+    // Extract meal slots from first day to add to searchParams (match automated structure)
+    const mealSlotsArray: any[] = [];
+    if (suggestions.length > 0) {
+      let mealOrder = 1;
+      for (const [mealName, mealData] of Object.entries(suggestions[0].meals)) {
+        const meal = mealData as any;
+        mealSlotsArray.push({
+          mealName,
+          mealTime: meal.mealTime || '00:00',
+          mealOrder: mealOrder++,
+          targetCalories: meal.targetCalories || 0
+          // Note: mealType NOT included for manual meal plans
+        });
+      }
+    }
+
+    // Fetch client nutrition requirements (same as automated meal plans)
+    const { data: nutritionReq } = await supabase
+      .from('client_nutrition_requirements')
+      .select('*')
+      .eq('client_id', draft.client_id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Fetch client goals (dietary preferences, allergies)
+    const { data: clientGoal } = await supabase
+      .from('client_goals')
+      .select('allergies, preferences, cuisine_types')
+      .eq('client_id', draft.client_id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Build searchParams with overrideMealProgram (match automated structure)
+    const searchParams = draft.search_params || {};
+    
+    const enrichedSearchParams = {
+      ...searchParams,
+      // Add fields to match automated meal plans
+      days: draft.plan_duration_days,
+      startDate: draft.plan_date,
+      clientGoals: searchParams.clientGoals || {
+        calories: nutritionReq?.eer_calories || 0,
+        protein: nutritionReq?.protein_grams || 0,
+        carbs: nutritionReq?.carbs_grams || 0,
+        fat: nutritionReq?.fat_grams || 0,
+        fiber: nutritionReq?.fiber_grams || 0
+      },
+      dietaryPreferences: searchParams.dietaryPreferences || {
+        allergies: clientGoal?.allergies || [],
+        cuisineTypes: clientGoal?.cuisine_types || [],
+        dietaryPreferences: clientGoal?.preferences || []
+      },
+      overrideMealProgram: {
+        meals: mealSlotsArray
+      }
+    };
+
     return {
       id: draft.id,
       clientId: draft.client_id,
@@ -518,9 +579,12 @@ export class ManualMealPlanService {
       selectedMeals, // Match automated
       completionPercentage, // Match automated
       isComplete, // Match automated
-      searchParams: draft.search_params,
+      searchParams: enrichedSearchParams, // Includes overrideMealProgram without mealType
       suggestions: draft.suggestions,
-      nutrition: nutritionSummary,
+      // Match automated: dayWiseNutrition and totalNutrition at top level, not nested in nutrition
+      dayWiseNutrition: nutritionSummary?.dayWiseNutrition,
+      totalNutrition: nutritionSummary?.overall, // Renamed from overall to totalNutrition
+      nutrition: nutritionSummary, // Keep for backward compatibility
       createdAt: draft.created_at,
       updatedAt: draft.updated_at,
       expiresAt: draft.expires_at,
@@ -781,7 +845,7 @@ export class ManualMealPlanService {
     }
 
     const suggestions = draft.suggestions as DayStructure[];
-    const dayWiseNutrition: any[] = [];
+    const dayWiseNutrition: any = {}; // Object with day1, day2, etc. keys (match automated)
     const overall: any = {
       calories: { unit: 'kcal', quantity: 0 },
       macros: {},
@@ -789,15 +853,30 @@ export class ManualMealPlanService {
     };
 
     for (const day of suggestions) {
+      const dayKey = `day${day.day}`; // Create day1, day2, etc. keys
+      
       const dayNutrition: any = {
         day: day.day,
         date: day.date,
-        meals: {},
-        dayTotal: {
-          calories: { unit: 'kcal', quantity: 0 },
-          macros: {},
+        mealsCount: Object.keys(day.meals).length, // Match automated field name
+        nutrition: { // Match automated: nest macros/micros under nutrition
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
+          totalFiber: 0,
+          macros: {
+            calories: { label: 'Calories', quantity: 0, unit: 'kcal' }
+          },
           micros: { vitamins: {}, minerals: {} }
-        }
+        },
+        meals: {} // Meal-level breakdown
+      };
+
+      const dayTotal: any = {
+        calories: { unit: 'kcal', quantity: 0 },
+        macros: {},
+        micros: { vitamins: {}, minerals: {} }
       };
 
       // Calculate nutrition for each meal
@@ -827,17 +906,30 @@ export class ManualMealPlanService {
 
         // Add to day total
         if (mealTotal) {
-          this.addNutritionToTotal(dayNutrition.dayTotal, mealTotal);
+          this.addNutritionToTotal(dayTotal, mealTotal);
         }
       }
 
+      // Set totals in the flat format (match automated)
+      dayNutrition.nutrition.totalCalories = dayTotal.calories.quantity;
+      dayNutrition.nutrition.totalProtein = dayTotal.macros.protein?.quantity || 0;
+      dayNutrition.nutrition.totalCarbs = dayTotal.macros.carbs?.quantity || 0;
+      dayNutrition.nutrition.totalFat = dayTotal.macros.fat?.quantity || 0;
+      dayNutrition.nutrition.totalFiber = dayTotal.macros.fiber?.quantity || 0;
+      
+      // Also store in object format
+      dayNutrition.nutrition.macros = dayTotal.macros;
+      dayNutrition.nutrition.micros = dayTotal.micros;
+      dayNutrition.nutrition.calories = dayTotal.calories;
+
       // Add day total to overall
-      this.addNutritionToTotal(overall, dayNutrition.dayTotal);
-      dayWiseNutrition.push(dayNutrition);
+      this.addNutritionToTotal(overall, dayTotal);
+      
+      dayWiseNutrition[dayKey] = dayNutrition; // Use day1, day2, etc. as keys
     }
 
     return {
-      byDay: dayWiseNutrition, // Match automated meal plan field name
+      dayWiseNutrition, // Match automated: object with day1, day2 keys
       overall,
       dailyAverage: this.divideTotalByDays(overall, suggestions.length)
     };
