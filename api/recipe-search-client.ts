@@ -4,6 +4,7 @@ import {
   ClientAwareSearchParams 
 } from '../lib/multiProviderRecipeSearchService';
 import { requireAuth } from '../lib/auth';
+import { enrichRecipesWithAllergenInfo } from '../lib/allergenChecker';
 
 const multiProviderService = new MultiProviderRecipeSearchService();
 
@@ -130,6 +131,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         user.id
       );
 
+      // Enrich recipes with allergen conflict information
+      const recipesWithAllergenInfo = enrichRecipesWithAllergenInfo(
+        results.recipes,
+        results.clientProfile.allergens || []
+      );
+
+      // Count recipes with allergen conflicts
+      const recipesWithConflicts = recipesWithAllergenInfo.filter(
+        r => r.allergenConflict?.hasConflict
+      );
+
       // Add info about removed filters (if any)
       const hasRemovedFilters = 
         results.appliedFilters.removedPreferences.length > 0 ||
@@ -137,10 +149,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       return res.status(200).json({
         success: true,
-        data: results,
+        data: {
+          ...results,
+          recipes: recipesWithAllergenInfo // Replace with enriched recipes
+        },
         metadata: {
           clientName: results.clientProfile.name,
           totalResults: results.totalResults,
+          recipesWithAllergenConflicts: recipesWithConflicts.length,
           appliedFilters: results.appliedFilters,
           info: hasRemovedFilters ? {
             message: 'Some client preferences/cuisines were not included in search',
@@ -148,7 +164,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             removedCuisineTypes: results.appliedFilters.removedCuisineTypes
           } : null
         },
-        message: `Found ${results.recipes.length} recipes from ${results.provider}`
+        message: `Found ${results.recipes.length} recipes from ${results.provider}${recipesWithConflicts.length > 0 ? ` (${recipesWithConflicts.length} with allergen warnings)` : ''}`
       });
 
     } catch (error) {

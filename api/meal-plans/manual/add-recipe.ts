@@ -1,6 +1,8 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../../lib/auth';
 import { manualMealPlanService } from '../../../lib/manualMealPlanService';
+import { checkAllergenConflicts } from '../../../lib/allergenChecker';
+import { supabase } from '../../../lib/supabase';
 import Joi from 'joi';
 
 const addRecipeSchema = Joi.object({
@@ -79,26 +81,50 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
+    // Fetch client's allergen preferences
+    const { data: clientGoal } = await supabase
+      .from('client_goals')
+      .select('allergies')
+      .eq('client_id', draft.client_id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
     // Add the recipe
-    await manualMealPlanService.addRecipe({
+    const addedRecipeInfo = await manualMealPlanService.addRecipeWithAllergenCheck({
       draftId,
       day,
       mealName,
       recipeId: recipe.id,
       provider: recipe.provider,
       source: recipe.source,
-      servings
+      servings,
+      clientAllergens: clientGoal?.allergies || []
     });
 
     // Fetch updated draft with complete nutrition (same structure as GET endpoint)
     const updatedDraft = await manualMealPlanService.getDraft(draftId);
     const formattedDraft = await manualMealPlanService.formatDraftResponse(updatedDraft);
 
-    return res.status(200).json({
+    // Prepare response with allergen warning if present
+    const response: any = {
       success: true,
       data: formattedDraft,
       message: 'Recipe added successfully'
-    });
+    };
+
+    // Add allergen conflict information if present
+    if (addedRecipeInfo.allergenConflict && addedRecipeInfo.allergenConflict.hasConflict) {
+      response.allergenWarning = {
+        hasConflict: true,
+        conflictingAllergens: addedRecipeInfo.allergenConflict.conflictingAllergens,
+        message: `⚠️ Warning: This recipe contains allergen(s) that conflict with client preferences: ${addedRecipeInfo.allergenConflict.conflictingAllergens.join(', ')}`
+      };
+      response.message = 'Recipe added successfully (with allergen warning)';
+    }
+
+    return res.status(200).json(response);
 
   } catch (error) {
     console.error('❌ Error adding recipe:', error);

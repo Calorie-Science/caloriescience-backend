@@ -45,9 +45,21 @@ export const VALID_PREFERENCES = [
 export type ValidPreference = typeof VALID_PREFERENCES[number];
 
 // Allergen aliases (normalize to canonical forms)
+// Includes both base allergen names and "-free" formats for flexibility
 export const ALLERGEN_ALIASES: Record<string, ValidAllergen> = {
+  // Peanuts
   'peanut': 'peanuts',
+  'peanut-free': 'peanuts',
+  'peanutfree': 'peanuts',
+  
+  // Tree nuts
   'nuts': 'tree nuts',
+  'tree nut': 'tree nuts',
+  'tree-nut': 'tree nuts',
+  'treenut': 'tree nuts',
+  'tree-nut-free': 'tree nuts',
+  'tree nut free': 'tree nuts',
+  'treenutfree': 'tree nuts',
   'almond': 'tree nuts',
   'almonds': 'tree nuts',
   'cashew': 'tree nuts',
@@ -56,15 +68,41 @@ export const ALLERGEN_ALIASES: Record<string, ValidAllergen> = {
   'walnuts': 'tree nuts',
   'pecan': 'tree nuts',
   'pecans': 'tree nuts',
+  
+  // Dairy
   'milk': 'dairy',
   'lactose': 'dairy',
   'cheese': 'dairy',
   'butter': 'dairy',
   'cream': 'dairy',
   'yogurt': 'dairy',
+  'dairy-free': 'dairy',
+  'dairyfree': 'dairy',
+  
+  // Eggs
   'egg': 'eggs',
+  'egg-free': 'eggs',
+  'eggfree': 'eggs',
+  
+  // Soy
   'soya': 'soy',
   'soybeans': 'soy',
+  'soy-free': 'soy',
+  'soyfree': 'soy',
+  
+  // Wheat
+  'wheat-free': 'wheat',
+  'wheatfree': 'wheat',
+  
+  // Gluten
+  'gluten-free': 'gluten',
+  'glutenfree': 'gluten',
+  
+  // Fish
+  'fish-free': 'fish',
+  'fishfree': 'fish',
+  
+  // Shellfish
   'shrimp': 'shellfish',
   'crab': 'shellfish',
   'lobster': 'shellfish',
@@ -74,7 +112,18 @@ export const ALLERGEN_ALIASES: Record<string, ValidAllergen> = {
   'clams': 'shellfish',
   'mussel': 'shellfish',
   'mussels': 'shellfish',
-  'sulfite': 'sulfites'
+  'shellfish-free': 'shellfish',
+  'shellfishfree': 'shellfish',
+  
+  // Sesame
+  'sesame-free': 'sesame',
+  'sesamefree': 'sesame',
+  'sesame seeds': 'sesame',
+  
+  // Sulfites
+  'sulfite': 'sulfites',
+  'sulfite-free': 'sulfites',
+  'sulfitefree': 'sulfites'
 };
 
 // Provider-specific preferences

@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchService';
+import { checkAllergenConflicts } from './allergenChecker';
+import type { ValidAllergen } from './allergenChecker';
 
 const recipeSearchService = new MultiProviderRecipeSearchService();
 
@@ -19,6 +21,10 @@ export interface AddRecipeParams {
   provider: 'edamam' | 'spoonacular' | 'bonhappetee';
   source: 'api' | 'cached';
   servings?: number;
+}
+
+export interface AddRecipeWithAllergenCheckParams extends AddRecipeParams {
+  clientAllergens: string[];
 }
 
 export interface RemoveRecipeParams {
@@ -169,6 +175,71 @@ export class ManualMealPlanService {
   }
 
   /**
+   * Add a recipe to a meal slot in the draft with allergen conflict checking
+   */
+  async addRecipeWithAllergenCheck(params: AddRecipeWithAllergenCheckParams): Promise<{
+    allergenConflict?: {
+      hasConflict: boolean;
+      conflictingAllergens: ValidAllergen[];
+      warning?: string;
+    };
+  }> {
+    console.log('🍽️ Adding recipe to draft with allergen check:', params);
+
+    // Fetch the draft
+    const { data: draft, error: draftError } = await supabase
+      .from('meal_plan_drafts')
+      .select('*')
+      .eq('id', params.draftId)
+      .single();
+
+    if (draftError || !draft) {
+      throw new Error('Draft not found');
+    }
+
+    // Validate day is within plan duration
+    if (params.day < 1 || params.day > draft.plan_duration_days) {
+      throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
+    }
+
+    // Fetch or get recipe from cache
+    let recipe: any;
+    if (params.source === 'cached') {
+      recipe = await this.getRecipeFromCache(params.recipeId, params.provider);
+    } else {
+      recipe = await this.fetchAndCacheRecipe(params.recipeId, params.provider);
+    }
+
+    if (!recipe) {
+      throw new Error('Recipe not found');
+    }
+
+    // Check for allergen conflicts
+    const allergenConflictResult = checkAllergenConflicts(
+      recipe.allergens || [],
+      recipe.health_labels || [],
+      params.clientAllergens
+    );
+
+    // Log allergen warning if present
+    if (allergenConflictResult.hasConflict) {
+      console.warn('⚠️ Allergen conflict detected:', {
+        recipeId: params.recipeId,
+        recipeName: recipe.recipe_name || recipe.title,
+        conflictingAllergens: allergenConflictResult.conflictingAllergens,
+        clientAllergens: params.clientAllergens
+      });
+    }
+
+    // Continue with adding the recipe (same logic as addRecipe)
+    await this.addRecipeInternal(params, draft, recipe);
+
+    return {
+      allergenConflict: allergenConflictResult.hasConflict ? allergenConflictResult : undefined
+    };
+  }
+
+  /**
    * Add a recipe to a meal slot in the draft
    */
   async addRecipe(params: AddRecipeParams): Promise<void> {
@@ -201,6 +272,15 @@ export class ManualMealPlanService {
     if (!recipe) {
       throw new Error('Recipe not found');
     }
+
+    // Add recipe using internal method
+    await this.addRecipeInternal(params, draft, recipe);
+  }
+
+  /**
+   * Internal method to add recipe to draft (shared by addRecipe and addRecipeWithAllergenCheck)
+   */
+  private async addRecipeInternal(params: AddRecipeParams, draft: any, recipe: any): Promise<void> {
 
     // Find the day in suggestions
     const suggestions = draft.suggestions as DayStructure[];
@@ -529,10 +609,10 @@ export class ManualMealPlanService {
       .limit(1)
       .single();
 
-    // Fetch client goals (dietary preferences, allergies)
+    // Fetch client goals (dietary preferences, allergies, and macro goals)
     const { data: clientGoal } = await supabase
       .from('client_goals')
-      .select('allergies, preferences, cuisine_types')
+      .select('allergies, preferences, cuisine_types, eer_goal_calories, protein_goal_min, protein_goal_max, carbs_goal_min, carbs_goal_max, fat_goal_min, fat_goal_max, fiber_goal_grams')
       .eq('client_id', draft.client_id)
       .eq('is_active', true)
       .order('created_at', { ascending: false })
@@ -548,11 +628,11 @@ export class ManualMealPlanService {
       days: draft.plan_duration_days,
       startDate: draft.plan_date,
       clientGoals: searchParams.clientGoals || {
-        calories: nutritionReq?.eer_calories || 0,
-        protein: nutritionReq?.protein_grams || 0,
-        carbs: nutritionReq?.carbs_grams || 0,
-        fat: nutritionReq?.fat_grams || 0,
-        fiber: nutritionReq?.fiber_grams || 0
+        calories: clientGoal?.eer_goal_calories || nutritionReq?.eer_calories || 0,
+        protein: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+        carbs: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+        fat: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+        fiber: clientGoal?.fiber_goal_grams || nutritionReq?.fiber_grams || 0
       },
       dietaryPreferences: searchParams.dietaryPreferences || {
         allergies: clientGoal?.allergies || [],
