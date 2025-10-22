@@ -40,6 +40,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       if (cachedRecipe) {
         console.log('✅ Found recipe in cache:', cachedRecipe.id);
         
+        // Check access permissions for custom recipes
+        if (cachedRecipe.provider === 'manual') {
+          const isOwner = cachedRecipe.createdByNutritionistId === user.id;
+          const isPublic = cachedRecipe.isPublic;
+          
+          if (!isOwner && !isPublic) {
+            return res.status(403).json({
+              error: 'Access denied',
+              message: 'You do not have permission to view this custom recipe'
+            });
+          }
+        }
+        
         // Standardize the cached recipe response
         const standardizedRecipe = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
         

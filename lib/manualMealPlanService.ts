@@ -379,7 +379,8 @@ export class ManualMealPlanService {
     
     // Calculate total meal nutrition by summing all recipes
     dayPlan.meals[targetMealName].totalNutrition = this.calculateMealNutrition(
-      dayPlan.meals[targetMealName].recipes
+      dayPlan.meals[targetMealName].recipes,
+      dayPlan.meals[targetMealName].customizations
     );
 
     // Update the draft
@@ -458,7 +459,7 @@ export class ManualMealPlanService {
       
       // Recalculate nutrition for remaining recipes
       meal.totalNutrition = meal.recipes.length > 0 
-        ? this.calculateMealNutrition(meal.recipes)
+        ? this.calculateMealNutrition(meal.recipes, meal.customizations)
         : undefined;
       
       // Remove customizations for the removed recipe
@@ -622,19 +623,21 @@ export class ManualMealPlanService {
     // Build searchParams with overrideMealProgram (match automated structure)
     const searchParams = draft.search_params || {};
     
+    // Always populate clientGoals and dietaryPreferences from database
+    // This ensures they're present even for finalized drafts
     const enrichedSearchParams = {
       ...searchParams,
       // Add fields to match automated meal plans
       days: draft.plan_duration_days,
       startDate: draft.plan_date,
-      clientGoals: searchParams.clientGoals || {
+      clientGoals: {
         calories: clientGoal?.eer_goal_calories || nutritionReq?.eer_calories || 0,
         protein: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
         carbs: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
         fat: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
         fiber: clientGoal?.fiber_goal_grams || nutritionReq?.fiber_grams || 0
       },
-      dietaryPreferences: searchParams.dietaryPreferences || {
+      dietaryPreferences: {
         allergies: clientGoal?.allergies || [],
         cuisineTypes: clientGoal?.cuisine_types || [],
         dietaryPreferences: clientGoal?.preferences || []
@@ -859,7 +862,7 @@ export class ManualMealPlanService {
   /**
    * Calculate total nutrition for a meal from multiple recipes
    */
-  private calculateMealNutrition(recipes: any[]): any {
+  private calculateMealNutrition(recipes: any[], customizations?: any): any {
     if (!recipes || recipes.length === 0) {
       return undefined;
     }
@@ -872,7 +875,13 @@ export class ManualMealPlanService {
     };
 
     for (const recipe of recipes) {
-      const nutrition = recipe.nutrition;
+      // Check if there are customizations for this recipe
+      const recipeCustomizations = customizations?.[recipe.id];
+      const hasCustomNutrition = recipeCustomizations?.customizationsApplied && recipeCustomizations?.customNutrition;
+      
+      // Use customized nutrition if available, otherwise use base recipe nutrition
+      const nutrition = hasCustomNutrition ? recipeCustomizations.customNutrition : recipe.nutrition;
+      
       if (!nutrition) continue;
 
       // Add calories (handle both formats)
@@ -962,7 +971,7 @@ export class ManualMealPlanService {
       // Calculate nutrition for each meal
       for (const [mealName, meal] of Object.entries(day.meals)) {
         const mealData = meal as any;
-        const mealTotal = this.calculateMealNutrition(mealData.recipes);
+        const mealTotal = this.calculateMealNutrition(mealData.recipes, mealData.customizations);
         
         // Include target comparison
         const mealWithTarget: any = {

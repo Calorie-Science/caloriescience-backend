@@ -2,9 +2,11 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { MealProgramService } from '../../lib/mealProgramService';
 import { ClientGoalsService } from '../../lib/clientGoalsService';
+import { AsyncMealPlanService } from '../../lib/asyncMealPlanService';
 
 const mealProgramService = new MealProgramService();
 const clientGoalsService = new ClientGoalsService();
+const asyncMealPlanService = new AsyncMealPlanService();
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   const user = (req as any).user;
@@ -156,11 +158,83 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         return res.status(200).json(updateResult);
       }
 
+      // Handle async-generate action for meal-plan type
+      if (type === 'meal-plan' && action === 'async-generate') {
+        console.log(`🤖 Starting async meal plan generation for client: ${clientId}`);
+
+        // Validate required fields
+        if (!clientId) {
+          return res.status(400).json({
+            error: 'Missing required field',
+            message: 'clientId is required'
+          });
+        }
+
+        // Get AI model from request (support both aiModel and aiProvider field names)
+        const aiModel = (req.body.aiModel || req.body.aiProvider || 'openai') as 'openai' | 'claude' | 'gemini';
+
+        // Validate AI model
+        if (!['openai', 'claude', 'gemini'].includes(aiModel)) {
+          return res.status(400).json({
+            error: 'Invalid AI model',
+            message: 'aiModel/aiProvider must be one of: openai, claude, gemini'
+          });
+        }
+
+        try {
+          // Get active client goals
+          const activeGoalResult = await clientGoalsService.getActiveClientGoal(clientId, user.id);
+
+          if (!activeGoalResult.success || !activeGoalResult.data) {
+            return res.status(400).json({
+              error: 'No active client goal found',
+              message: 'Please set client goals before generating meal plan'
+            });
+          }
+
+          // Start async generation
+          const result = await asyncMealPlanService.startGeneration(
+            clientId,
+            user.id,
+            activeGoalResult.data,
+            req.body.additionalText,
+            aiModel
+          );
+
+          if (!result.success) {
+            return res.status(500).json({
+              error: result.error || 'Failed to start meal plan generation'
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: 'Async meal plan generation started',
+            data: {
+              mealPlan: {
+                id: result.data?.id,
+                status: result.data?.status || 'pending',
+                clientId: result.data?.clientId,
+                nutritionistId: result.data?.nutritionistId,
+                aiModel: aiModel,
+                estimatedCompletionTime: aiModel === 'claude' || aiModel === 'gemini' ? 'immediate' : '2-3 minutes'
+              }
+            }
+          });
+        } catch (error) {
+          console.error('❌ Error starting async generation:', error);
+          return res.status(500).json({
+            error: 'Failed to start async meal plan generation',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+
       // Validate request type for meal-program
       if (type !== 'meal-program') {
         return res.status(400).json({
           error: 'Invalid request type',
-          message: 'Expected type: meal-program or client-goal'
+          message: 'Expected type: meal-program, meal-plan, or client-goal'
         });
       }
 

@@ -100,7 +100,7 @@ export interface UnifiedRecipeSummary {
   title: string;
   image: string;
   sourceUrl: string;
-  source: 'edamam' | 'spoonacular';
+  source: 'edamam' | 'spoonacular' | 'manual';
   readyInMinutes?: number;
   servings?: number;
   // Nutrition data (per serving)
@@ -114,6 +114,10 @@ export interface UnifiedRecipeSummary {
     unsupportedFilters: string[]; // Filters not supported by this recipe's provider
     message?: string;
   };
+  // Custom recipe metadata
+  isCustom?: boolean;
+  createdBy?: string;
+  isPublic?: boolean;
 }
 
 // Unified recipe interface for detailed view
@@ -132,6 +136,7 @@ export interface UnifiedRecipe extends UnifiedRecipeSummary {
   cuisineType: string[];
   dishType: string[];
   mealType: string[];
+  tags: string[]; // Computed field combining all categorizations
 }
 
 export interface UnifiedIngredient {
@@ -154,7 +159,8 @@ export interface UnifiedSearchParams {
   time?: string;
   excluded?: string[];
   maxResults?: number;
-  provider?: 'edamam' | 'spoonacular' | 'both';
+  provider?: 'edamam' | 'spoonacular' | 'both' | 'manual';
+  includeCustom?: boolean; // Include custom recipes in search (default: true)
 }
 
 export interface UnifiedSearchResponse {
@@ -213,35 +219,58 @@ export class MultiProviderRecipeSearchService {
    * Search recipes across multiple providers
    */
   async searchRecipes(params: UnifiedSearchParams, userId?: string): Promise<UnifiedSearchResponse> {
-    const { provider = 'both', maxResults = 20 } = params;
+    const { provider = 'both', maxResults = 20, includeCustom = true } = params;
     
     console.log('🔍 MultiProvider searchRecipes called with:', { provider, maxResults, params });
     
-    if (provider === 'edamam') {
-      return await this.searchEdamam(params, userId);
+    if (provider === 'manual') {
+      // Search only custom recipes
+      return await this.searchCustomRecipes(params, userId);
+    } else if (provider === 'edamam') {
+      const results = await this.searchEdamam(params, userId);
+      // Add custom recipes if requested
+      if (includeCustom && userId) {
+        const customResults = await this.searchCustomRecipes(params, userId);
+        results.recipes = [...customResults.recipes, ...results.recipes].slice(0, maxResults);
+        results.totalResults += customResults.totalResults;
+      }
+      return results;
     } else if (provider === 'spoonacular') {
       console.log('🍽️ Routing to Spoonacular search');
-      return await this.searchSpoonacular(params);
+      const results = await this.searchSpoonacular(params);
+      // Add custom recipes if requested
+      if (includeCustom && userId) {
+        const customResults = await this.searchCustomRecipes(params, userId);
+        results.recipes = [...customResults.recipes, ...results.recipes].slice(0, maxResults);
+        results.totalResults += customResults.totalResults;
+      }
+      return results;
     } else {
       // Search both providers and combine results
       console.log('🔄 Searching both providers');
-      const [edamamResults, spoonacularResults] = await Promise.allSettled([
-        this.searchEdamam({ ...params, maxResults: Math.ceil(maxResults / 2) }, userId),
-        this.searchSpoonacular({ ...params, maxResults: Math.ceil(maxResults / 2) })
-      ]);
+      const resultsPerProvider = includeCustom && userId ? Math.ceil(maxResults / 3) : Math.ceil(maxResults / 2);
+      
+      const promises: Promise<UnifiedSearchResponse>[] = [
+        this.searchEdamam({ ...params, maxResults: resultsPerProvider }, userId),
+        this.searchSpoonacular({ ...params, maxResults: resultsPerProvider })
+      ];
 
-      const recipes: UnifiedRecipe[] = [];
+      // Include custom recipes if requested
+      if (includeCustom && userId) {
+        promises.push(this.searchCustomRecipes({ ...params, maxResults: resultsPerProvider }, userId));
+      }
+
+      const results = await Promise.allSettled(promises);
+
+      const recipes: UnifiedRecipeSummary[] = [];
       let totalResults = 0;
 
-      if (edamamResults.status === 'fulfilled') {
-        recipes.push(...edamamResults.value.recipes);
-        totalResults += edamamResults.value.totalResults;
-      }
-
-      if (spoonacularResults.status === 'fulfilled') {
-        recipes.push(...spoonacularResults.value.recipes);
-        totalResults += spoonacularResults.value.totalResults;
-      }
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          recipes.push(...result.value.recipes);
+          totalResults += result.value.totalResults;
+        }
+      });
 
       // Shuffle and limit results
       const shuffledRecipes = this.shuffleArray(recipes).slice(0, maxResults);
@@ -249,7 +278,7 @@ export class MultiProviderRecipeSearchService {
       return {
         recipes: shuffledRecipes,
         totalResults,
-        provider: 'both',
+        provider: includeCustom && userId ? 'both+custom' : 'both',
         searchParams: params
       };
     }
@@ -322,6 +351,120 @@ export class MultiProviderRecipeSearchService {
         recipes: [],
         totalResults: 0,
         provider: 'spoonacular',
+        searchParams: params
+      };
+    }
+  }
+
+  /**
+   * Search custom recipes created by nutritionists
+   */
+  private async searchCustomRecipes(params: UnifiedSearchParams, userId?: string): Promise<UnifiedSearchResponse> {
+    if (!userId) {
+      return {
+        recipes: [],
+        totalResults: 0,
+        provider: 'manual',
+        searchParams: params
+      };
+    }
+
+    try {
+      const maxResults = params.maxResults || 20;
+
+      // Build query for custom recipes
+      let query = supabase
+        .from('cached_recipes')
+        .select('*', { count: 'exact' })
+        .eq('provider', 'manual')
+        .eq('cache_status', 'active');
+
+      // Access filter: own private recipes + public recipes
+      query = query.or(`created_by_nutritionist_id.eq.${userId},is_public.eq.true`);
+
+      // Search filter
+      if (params.query) {
+        query = query.ilike('recipe_name', `%${params.query}%`);
+      }
+
+      // Health labels filter
+      if (params.health && params.health.length > 0) {
+        query = query.contains('health_labels', params.health);
+      }
+
+      // Cuisine types filter
+      if (params.cuisineType && params.cuisineType.length > 0) {
+        query = query.overlaps('cuisine_types', params.cuisineType);
+      }
+
+      // Meal types filter
+      if (params.mealType && params.mealType.length > 0) {
+        query = query.overlaps('meal_types', params.mealType);
+      }
+
+      // Dish types filter
+      if (params.dishType && params.dishType.length > 0) {
+        query = query.overlaps('dish_types', params.dishType);
+      }
+
+      // Calories filter
+      if (params.calories) {
+        const caloriesMatch = params.calories.match(/(\d+)-(\d+)/);
+        if (caloriesMatch) {
+          const [, min, max] = caloriesMatch;
+          query = query.gte('calories_per_serving', parseInt(min));
+          query = query.lte('calories_per_serving', parseInt(max));
+        }
+      }
+
+      // Limit results
+      query = query.limit(maxResults);
+
+      // Order by creation date (newest first)
+      query = query.order('created_at', { ascending: false });
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        console.error('Error searching custom recipes:', error);
+        return {
+          recipes: [],
+          totalResults: 0,
+          provider: 'manual',
+          searchParams: params
+        };
+      }
+
+      const recipes: UnifiedRecipeSummary[] = (data || []).map(recipe => ({
+        id: recipe.id,
+        title: recipe.recipe_name,
+        image: recipe.recipe_image_url || '',
+        sourceUrl: '',
+        source: 'manual' as const,
+        readyInMinutes: recipe.total_time_minutes || undefined,
+        servings: recipe.servings || undefined,
+        calories: recipe.calories_per_serving || undefined,
+        protein: recipe.protein_per_serving_g || undefined,
+        carbs: recipe.carbs_per_serving_g || undefined,
+        fat: recipe.fat_per_serving_g || undefined,
+        fiber: recipe.fiber_per_serving_g || undefined,
+        isCustom: true,
+        createdBy: recipe.created_by_nutritionist_id,
+        isPublic: recipe.is_public
+      }));
+
+      return {
+        recipes,
+        totalResults: count || 0,
+        provider: 'manual',
+        searchParams: params
+      };
+    } catch (error) {
+      console.error('❌ Error searching custom recipes:', error);
+      return {
+        recipes: [],
+        totalResults: 0,
+        provider: 'manual',
         searchParams: params
       };
     }
@@ -628,7 +771,14 @@ export class MultiProviderRecipeSearchService {
       dietLabels: recipe.dietLabels || [],
       cuisineType: recipe.cuisineType || [],
       dishType: recipe.dishType || [],
-      mealType: recipe.mealType || []
+      mealType: recipe.mealType || [],
+      tags: [
+        ...(recipe.cuisineType || []),
+        ...(recipe.dishType || []),
+        ...(recipe.mealType || []),
+        ...(recipe.healthLabels || []),
+        ...(recipe.dietLabels || [])
+      ]
     };
   }
 
@@ -687,7 +837,14 @@ export class MultiProviderRecipeSearchService {
       dietLabels: recipe.diets || [],
       cuisineType: recipe.cuisines || [],
       dishType: recipe.dishTypes || [],
-      mealType: recipe.occasions || []
+      mealType: recipe.occasions || [],
+      tags: [
+        ...(recipe.cuisines || []),
+        ...(recipe.dishTypes || []),
+        ...(recipe.occasions || []),
+        ...this.extractHealthLabels(recipe),
+        ...(recipe.diets || [])
+      ]
     };
   }
 
@@ -805,7 +962,14 @@ export class MultiProviderRecipeSearchService {
       dietLabels: recipe.dietLabels || [],
       cuisineType: recipe.cuisineType || [],
       dishType: recipe.dishType || [],
-      mealType: recipe.mealType || []
+      mealType: recipe.mealType || [],
+      tags: [
+        ...(recipe.cuisineType || []),
+        ...(recipe.dishType || []),
+        ...(recipe.mealType || []),
+        ...(recipe.healthLabels || []),
+        ...(recipe.dietLabels || [])
+      ]
     };
   }
 

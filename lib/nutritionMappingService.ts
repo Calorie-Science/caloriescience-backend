@@ -297,6 +297,10 @@ export class NutritionMappingService {
       return nutrition;
     }
 
+    // Track if we have Net Carbohydrates for fiber calculation fallback
+    let netCarbs: number | null = null;
+    let totalCarbs: number | null = null;
+
     for (const nutrient of spoonacularData.nutrients) {
       const mapping = this.SPOONACULAR_NUTRIENT_MAP[nutrient.name];
       if (mapping) {
@@ -307,15 +311,35 @@ export class NutritionMappingService {
           nutrition.calories = { quantity: value, unit: unit };
         } else if (mapping.category === 'macros') {
           nutrition.macros[mapping.key as keyof typeof nutrition.macros] = { quantity: value, unit: unit };
+          
+          // Track carbs for fiber calculation
+          if (mapping.key === 'carbs') {
+            totalCarbs = value;
+          }
         } else if (mapping.category === 'vitamins') {
           nutrition.micros.vitamins[mapping.key as keyof typeof nutrition.micros.vitamins] = { quantity: value, unit: unit };
         } else if (mapping.category === 'minerals') {
           nutrition.micros.minerals[mapping.key as keyof typeof nutrition.micros.minerals] = { quantity: value, unit: unit };
         }
       }
+      
+      // Track Net Carbohydrates (not in our standard map but useful for fiber calculation)
+      if (nutrient.name === 'Net Carbohydrates') {
+        netCarbs = Math.round(nutrient.amount * 100) / 100;
+      }
     }
 
-    console.log(`✅ Transformed Spoonacular nutrition: ${nutrition.calories.quantity} kcal`);
+    // Fallback: Calculate fiber from Carbs - Net Carbs if fiber is missing/0
+    if ((!nutrition.macros.fiber || nutrition.macros.fiber.quantity === 0) && 
+        totalCarbs !== null && 
+        netCarbs !== null && 
+        totalCarbs > netCarbs) {
+      const calculatedFiber = Math.round((totalCarbs - netCarbs) * 100) / 100;
+      nutrition.macros.fiber = { quantity: calculatedFiber, unit: 'g' };
+      console.log(`🔧 Calculated fiber from Carbs (${totalCarbs}g) - Net Carbs (${netCarbs}g) = ${calculatedFiber}g`);
+    }
+
+    console.log(`✅ Transformed Spoonacular nutrition: ${nutrition.calories.quantity} kcal, fiber: ${nutrition.macros.fiber?.quantity || 0}g`);
 
     return nutrition;
   }

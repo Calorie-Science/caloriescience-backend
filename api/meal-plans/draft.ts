@@ -1084,6 +1084,20 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       });
     }
     
+    // Block customizations for Bon Appetit recipes
+    const recipeSource = customizations.source || recipe.source;
+    if (recipeSource === 'bonhappetee') {
+      return res.status(400).json({
+        error: 'Customization not supported',
+        message: 'Recipe customizations are not available for Bon Appetit recipes. Bon Appetit recipes come with fixed ingredients and nutrition information.',
+        recipe: {
+          id: recipeId,
+          title: recipe.title,
+          source: 'bonhappetee'
+        }
+      });
+    }
+    
     // Initialize recipeServings early so it's available throughout the function
     let recipeServings: number = recipe.servings || 1;
     

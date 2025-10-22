@@ -3,6 +3,7 @@ import { requireAuth } from '../../../lib/auth';
 import { MealPlanDraftService } from '../../../lib/mealPlanDraftService';
 import { RecipeCacheService } from '../../../lib/recipeCacheService';
 import { RecipeResponseStandardizationService } from '../../../lib/recipeResponseStandardizationService';
+import { supabase } from '../../../lib/supabase';
 
 const draftService = new MealPlanDraftService();
 const cacheService = new RecipeCacheService();
@@ -56,6 +57,50 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     console.log(`📋 Fetching detailed nutrition for draft: ${id}`);
+
+    // For manual meal plans, enrich searchParams with clientGoals and dietaryPreferences
+    if (draft.searchParams && (draft.searchParams as any).creation_method === 'manual') {
+      console.log(`🔧 Enriching searchParams for manual meal plan`);
+      
+      // Fetch client nutrition requirements
+      const { data: nutritionReq } = await supabase
+        .from('client_nutrition_requirements')
+        .select('*')
+        .eq('client_id', draft.clientId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      // Fetch client goals (dietary preferences, allergies, and macro goals)
+      const { data: clientGoal } = await supabase
+        .from('client_goals')
+        .select('allergies, preferences, cuisine_types, eer_goal_calories, protein_goal_min, protein_goal_max, carbs_goal_min, carbs_goal_max, fat_goal_min, fat_goal_max, fiber_goal_grams')
+        .eq('client_id', draft.clientId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      // Always populate clientGoals and dietaryPreferences from database
+      draft.searchParams = {
+        ...draft.searchParams,
+        clientGoals: {
+          calories: clientGoal?.eer_goal_calories || nutritionReq?.eer_calories || 0,
+          protein: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+          carbs: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+          fat: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+          fiber: clientGoal?.fiber_goal_grams || nutritionReq?.fiber_grams || 0
+        },
+        dietaryPreferences: {
+          allergies: clientGoal?.allergies || [],
+          cuisineTypes: clientGoal?.cuisine_types || [],
+          dietaryPreferences: clientGoal?.preferences || []
+        }
+      };
+      
+      console.log(`✅ Enriched searchParams with clientGoals:`, draft.searchParams.clientGoals);
+    }
 
     // Process each day with detailed nutrition
     const detailedSuggestions = await Promise.all(

@@ -29,7 +29,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         time,
         excluded,
         maxResults = '20',
-        provider = 'both'
+        provider = 'both',
+        includeCustom = 'true'
       } = req.query;
 
       // Validate maxResults
@@ -42,11 +43,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       // Validate provider
-      const validProviders = ['edamam', 'spoonacular', 'both'];
+      const validProviders = ['edamam', 'spoonacular', 'both', 'manual'];
       if (!validProviders.includes(provider as string)) {
         return res.status(400).json({
           error: 'Invalid provider parameter',
-          message: 'provider must be one of: edamam, spoonacular, both'
+          message: 'provider must be one of: edamam, spoonacular, both, manual'
         });
       }
 
@@ -62,7 +63,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         time: time as string,
         excluded: excluded ? (Array.isArray(excluded) ? excluded as string[] : [excluded as string]) : undefined,
         maxResults: maxResultsNum,
-        provider: provider as 'edamam' | 'spoonacular' | 'both'
+        provider: provider as 'edamam' | 'spoonacular' | 'both' | 'manual',
+        includeCustom: includeCustom === 'true'
       };
 
       // Remove undefined values

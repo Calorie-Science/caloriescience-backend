@@ -43,6 +43,57 @@ export function extractAllergensFromHealthLabels(healthLabels: string[]): Import
 }
 
 /**
+ * Ingredient keywords that indicate specific allergens
+ */
+const ALLERGEN_INGREDIENT_KEYWORDS: Record<ImportedValidAllergen, string[]> = {
+  'dairy': ['milk', 'cheese', 'paneer', 'butter', 'cream', 'yogurt', 'ghee', 'curd', 'whey', 'casein', 'lactose'],
+  'eggs': ['egg', 'eggs', 'mayonnaise'],
+  'peanuts': ['peanut', 'peanuts'],
+  'tree nuts': ['almond', 'almonds', 'cashew', 'cashews', 'walnut', 'walnuts', 'pecan', 'pecans', 'hazelnut', 'macadamia', 'pistachio'],
+  'soy': ['soy', 'tofu', 'edamame', 'miso', 'tempeh'],
+  'wheat': ['wheat', 'flour', 'bread', 'pasta'],
+  'gluten': ['wheat', 'barley', 'rye', 'flour', 'bread'],
+  'fish': ['fish', 'salmon', 'tuna', 'cod', 'tilapia'],
+  'shellfish': ['shrimp', 'crab', 'lobster', 'oyster', 'clam', 'mussel'],
+  'sesame': ['sesame', 'tahini'],
+  'sulfites': ['sulfite', 'sulfites']
+};
+
+/**
+ * Check if recipe ingredients contain allergen keywords
+ */
+function checkIngredientsForAllergens(
+  ingredients: Array<{ name?: string; food?: string; [key: string]: any }> | null | undefined,
+  clientAllergens: Set<ImportedValidAllergen>
+): Set<ImportedValidAllergen> {
+  const foundAllergens = new Set<ImportedValidAllergen>();
+  
+  if (!ingredients || ingredients.length === 0) {
+    return foundAllergens;
+  }
+  
+  // Get all ingredient names
+  const ingredientNames = ingredients
+    .map(ing => (ing.name || ing.food || '').toLowerCase())
+    .filter(name => name.length > 0);
+  
+  // Check each client allergen
+  for (const allergen of clientAllergens) {
+    const keywords = ALLERGEN_INGREDIENT_KEYWORDS[allergen] || [];
+    
+    // Check if any keyword appears in any ingredient
+    for (const keyword of keywords) {
+      if (ingredientNames.some(name => name.includes(keyword))) {
+        foundAllergens.add(allergen);
+        break; // Found this allergen, no need to check other keywords
+      }
+    }
+  }
+  
+  return foundAllergens;
+}
+
+/**
  * Normalize client allergen input - handles both "dairy" and "dairy-free" formats
  * Converts "-free" format to base allergen name
  */
@@ -84,12 +135,14 @@ export function normalizeRecipeAllergens(recipeAllergens: string[]): ImportedVal
  * @param recipeAllergens - Array of allergens present in the recipe
  * @param recipeHealthLabels - Health labels from the recipe (e.g., "peanut-free", "dairy-free")
  * @param clientAllergens - Array of allergens the client is allergic to
+ * @param recipeIngredients - Optional array of recipe ingredients to scan for allergen keywords
  * @returns Object with hasConflict flag and array of conflicting allergens
  */
 export function checkAllergenConflicts(
   recipeAllergens: string[] | null | undefined,
   recipeHealthLabels: string[] | null | undefined,
-  clientAllergens: string[] | null | undefined
+  clientAllergens: string[] | null | undefined,
+  recipeIngredients?: Array<{ name?: string; food?: string; [key: string]: any }> | null
 ): {
   hasConflict: boolean;
   conflictingAllergens: ImportedValidAllergen[];
@@ -134,17 +187,37 @@ export function checkAllergenConflicts(
   }
 
   // Also check health labels for additional allergen information
+  // If recipe has health labels (showing it's been labeled) but is missing the "-free" label, flag it
   if (recipeHealthLabels && recipeHealthLabels.length > 0) {
     const healthLabelsLower = recipeHealthLabels.map(label => label.toLowerCase());
     
-    // Check each client allergen
-    for (const clientAllergen of Array.from(normalizedClientAllergens)) {
-      // Map client allergen to the expected "-free" health label
-      const expectedFreeLabel = getFreeLabelForAllergen(clientAllergen);
-      
-      // If the recipe does NOT have the "-free" label, it might contain the allergen
-      // However, we should be conservative and only flag if we have explicit evidence
-      // For now, only add if we found explicit allergen info above
+    // Count how many "-free" labels this recipe has (indicates it's been properly labeled)
+    const freeLabelsCount = healthLabelsLower.filter(label => label.endsWith('-free')).length;
+    
+    // Only check health labels if recipe has been properly labeled (has at least 2 "-free" labels)
+    // This avoids false positives on recipes with incomplete labeling
+    if (freeLabelsCount >= 2) {
+      // Check each client allergen
+      for (const clientAllergen of Array.from(normalizedClientAllergens)) {
+        // Map client allergen to the expected "-free" health label
+        const expectedFreeLabel = getFreeLabelForAllergen(clientAllergen);
+        
+        // If the recipe does NOT have the "-free" label, it contains the allergen
+        // This catches cases like paneer (dairy) where recipe doesn't explicitly list "dairy" 
+        // in allergens array but also doesn't have "Dairy-Free" in healthLabels
+        if (expectedFreeLabel && !healthLabelsLower.includes(expectedFreeLabel.toLowerCase())) {
+          conflictingAllergens.add(clientAllergen);
+        }
+      }
+    }
+  }
+
+  // NEW: Also check recipe ingredients for allergen keywords (e.g., "paneer" for dairy)
+  // This catches recipes that don't have proper healthLabels but clearly contain allergens
+  if (recipeIngredients && recipeIngredients.length > 0) {
+    const ingredientAllergens = checkIngredientsForAllergens(recipeIngredients, normalizedClientAllergens);
+    for (const allergen of ingredientAllergens) {
+      conflictingAllergens.add(allergen);
     }
   }
 
