@@ -540,8 +540,68 @@ export class RecipeResponseStandardizationService {
       updated_at: dbRecipe.updated_at || dbRecipe.updatedAt || ''
     };
     
-    // Use the standardization service to ensure uniform structure
+    // For manual provider, return directly to avoid recursion
+    // For other providers, use their specific standardization
+    if (recipeForStandardization.provider === 'manual') {
+      return this.buildStandardizedResponse(recipeForStandardization);
+    }
+    
     return this.standardizeRecipeResponse(recipeForStandardization);
+  }
+
+  /**
+   * Build standardized response from normalized data
+   */
+  private buildStandardizedResponse(recipe: any): StandardizedRecipeResponse {
+    return {
+      id: recipe.id,
+      provider: recipe.provider,
+      externalRecipeId: recipe.external_recipe_id,
+      externalRecipeUri: recipe.external_recipe_uri,
+      recipeName: recipe.recipe_name,
+      recipeSource: recipe.recipe_source,
+      recipeUrl: recipe.recipe_url,
+      recipeImageUrl: recipe.recipe_image_url,
+      cuisineTypes: recipe.cuisine_types,
+      mealTypes: recipe.meal_types,
+      dishTypes: recipe.dish_types,
+      healthLabels: recipe.health_labels,
+      dietLabels: recipe.diet_labels,
+      servings: recipe.servings,
+      prepTimeMinutes: recipe.prep_time_minutes,
+      cookTimeMinutes: recipe.cook_time_minutes,
+      totalTimeMinutes: recipe.total_time_minutes,
+      caloriesPerServing: recipe.calories_per_serving?.toString() || '0',
+      proteinPerServingG: recipe.protein_per_serving_g?.toString() || '0',
+      carbsPerServingG: recipe.carbs_per_serving_g?.toString() || '0',
+      fatPerServingG: recipe.fat_per_serving_g?.toString() || '0',
+      fiberPerServingG: recipe.fiber_per_serving_g?.toString() || '0',
+      sugarPerServingG: recipe.total_sugar_g?.toString() || null,
+      sodiumPerServingMg: recipe.total_sodium_mg?.toString() || null,
+      totalCalories: recipe.total_calories?.toString() || null,
+      totalProteinG: recipe.total_protein_g?.toString() || null,
+      totalCarbsG: recipe.total_carbs_g?.toString() || null,
+      totalFatG: recipe.total_fat_g?.toString() || null,
+      totalFiberG: recipe.total_fiber_g?.toString() || null,
+      totalSugarG: recipe.total_sugar_g?.toString() || null,
+      totalSodiumMg: recipe.total_sodium_mg?.toString() || null,
+      totalWeightG: recipe.total_weight_g?.toString() || null,
+      ingredients: recipe.ingredients || [],
+      ingredientLines: recipe.ingredient_lines || [],
+      cookingInstructions: recipe.cooking_instructions || [],
+      nutritionDetails: this.parseNutritionDetails(recipe.nutrition_details),
+      originalApiResponse: recipe.original_api_response,
+      cacheStatus: recipe.cache_status,
+      apiFetchCount: recipe.api_fetch_count,
+      lastApiFetchAt: recipe.last_api_fetch_at,
+      lastAccessedAt: recipe.last_accessed_at,
+      hasCompleteNutrition: recipe.has_complete_nutrition,
+      hasDetailedIngredients: recipe.has_detailed_ingredients,
+      hasCookingInstructions: recipe.has_cooking_instructions,
+      dataQualityScore: recipe.data_quality_score,
+      createdAt: recipe.created_at,
+      updatedAt: recipe.updated_at
+    };
   }
   
   /**
@@ -559,6 +619,9 @@ export class RecipeResponseStandardizationService {
       return this.standardizeEdamamResponse(recipe);
     } else if (recipe.provider === 'spoonacular') {
       return this.standardizeSpoonacularResponse(recipe);
+    } else if (recipe.provider === 'manual') {
+      // Manual recipes are already in database format, return directly without recursion
+      return this.buildStandardizedResponse(recipe);
     } else {
       throw new Error(`Unknown provider: ${recipe.provider}`);
     }

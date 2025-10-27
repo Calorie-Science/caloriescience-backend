@@ -3,7 +3,7 @@ import { RecipeResponseStandardizationService, StandardizedRecipeResponse } from
 
 export interface CachedRecipe {
   id: string;
-  provider: 'edamam' | 'spoonacular';
+  provider: 'edamam' | 'spoonacular' | 'manual';
   externalRecipeId: string;
   externalRecipeUri?: string;
   recipeName: string;
@@ -47,6 +47,9 @@ export interface CachedRecipe {
   dataQualityScore?: number;
   createdAt?: string;
   updatedAt?: string;
+  // Manual recipe specific fields
+  createdByNutritionistId?: string;
+  isPublic?: boolean;
 }
 
 export interface RecipeSearchCacheParams {
@@ -75,6 +78,62 @@ export class RecipeCacheService {
   
   constructor() {
     this.standardizationService = new RecipeResponseStandardizationService();
+  }
+
+  /**
+   * Transform database record to CachedRecipe format
+   */
+  private transformDbRecordToCachedRecipe(data: any): CachedRecipe {
+    return {
+      id: data.id,
+      provider: data.provider,
+      externalRecipeId: data.external_recipe_id,
+      externalRecipeUri: data.external_recipe_uri,
+      recipeName: data.recipe_name,
+      recipeSource: data.recipe_source,
+      recipeUrl: data.recipe_url,
+      recipeImageUrl: data.recipe_image_url,
+      cuisineTypes: data.cuisine_types,
+      mealTypes: data.meal_types,
+      dishTypes: data.dish_types,
+      healthLabels: data.health_labels,
+      dietLabels: data.diet_labels,
+      servings: data.servings,
+      prepTimeMinutes: data.prep_time_minutes,
+      cookTimeMinutes: data.cook_time_minutes,
+      totalTimeMinutes: data.total_time_minutes,
+      totalCalories: data.total_calories,
+      totalProteinG: data.total_protein_g,
+      totalCarbsG: data.total_carbs_g,
+      totalFatG: data.total_fat_g,
+      totalFiberG: data.total_fiber_g,
+      totalSugarG: data.total_sugar_g,
+      totalSodiumMg: data.total_sodium_mg,
+      totalWeightG: data.total_weight_g,
+      caloriesPerServing: data.calories_per_serving,
+      proteinPerServingG: data.protein_per_serving_g,
+      carbsPerServingG: data.carbs_per_serving_g,
+      fatPerServingG: data.fat_per_serving_g,
+      fiberPerServingG: data.fiber_per_serving_g,
+      ingredients: data.ingredients,
+      ingredientLines: data.ingredient_lines,
+      cookingInstructions: data.cooking_instructions,
+      nutritionDetails: data.nutrition_details,
+      originalApiResponse: data.original_api_response,
+      cacheStatus: data.cache_status,
+      apiFetchCount: data.api_fetch_count,
+      lastApiFetchAt: data.last_api_fetch_at,
+      lastAccessedAt: data.last_accessed_at,
+      hasCompleteNutrition: data.has_complete_nutrition,
+      hasDetailedIngredients: data.has_detailed_ingredients,
+      hasCookingInstructions: data.has_cooking_instructions,
+      dataQualityScore: data.data_quality_score,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      // Manual recipe specific fields
+      createdByNutritionistId: data.created_by_nutritionist_id,
+      isPublic: data.is_public
+    };
   }
   
   /**
@@ -242,7 +301,27 @@ export class RecipeCacheService {
    */
   async getRecipeById(recipeId: string): Promise<CachedRecipe | null> {
     try {
-      // Determine provider from recipe ID
+      // Check if this is a UUID (manual/custom recipe) - UUIDs contain hyphens
+      if (recipeId.includes('-')) {
+        console.log(`🔍 Getting custom recipe by UUID: ${recipeId}`);
+        const { data, error } = await supabase
+          .from('cached_recipes')
+          .select('*')
+          .eq('id', recipeId)
+          .or('cache_status.eq.active,cache_status.is.null')
+          .single();
+        
+        if (error) {
+          console.error('Error fetching recipe by UUID:', error);
+          return null;
+        }
+        
+        // Return raw data with snake_case fields
+        // The standardization service expects snake_case
+        return data as any;
+      }
+      
+      // Determine provider from recipe ID (Edamam or Spoonacular)
       const provider = recipeId.startsWith('recipe_') ? 'edamam' : 'spoonacular';
       
       // Extract external ID from recipe ID

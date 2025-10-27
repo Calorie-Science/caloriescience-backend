@@ -42,8 +42,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         
         // Check access permissions for custom recipes
         if (cachedRecipe.provider === 'manual') {
-          const isOwner = cachedRecipe.createdByNutritionistId === user.id;
-          const isPublic = cachedRecipe.isPublic;
+          // Handle both snake_case and camelCase field names
+          const createdBy = (cachedRecipe as any).created_by_nutritionist_id || (cachedRecipe as any).createdByNutritionistId;
+          const isPublic = (cachedRecipe as any).is_public !== undefined ? (cachedRecipe as any).is_public : (cachedRecipe as any).isPublic;
+          
+          const isOwner = createdBy === user.id;
           
           if (!isOwner && !isPublic) {
             return res.status(403).json({
