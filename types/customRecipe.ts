@@ -85,57 +85,74 @@ export interface UpdateCustomRecipeInput extends Partial<CreateCustomRecipeInput
   id: string;
 }
 
+/**
+ * Custom Recipe Output format - matches UnifiedRecipeSummary for consistency
+ * across all recipe APIs
+ */
 export interface CustomRecipeOutput {
+  // Standard UnifiedRecipeSummary fields
   id: string;
-  provider: 'manual';
-  externalRecipeId: string;
-  recipeName: string;
-  recipeDescription?: string;
-  recipeImageUrl?: string;
+  title: string;
+  image: string;
+  sourceUrl: string;
+  source: 'manual';
+  readyInMinutes?: number;
+  servings?: number;
   
-  // Classification
-  cuisineTypes?: string[];
-  mealTypes?: string[];
-  dishTypes?: string[];
+  // Nutrition data (per serving) - standard format
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
+  
+  // Metadata for filtering - standard format
   healthLabels?: string[];
   dietLabels?: string[];
+  cuisineType?: string[];
+  dishType?: string[];
+  mealType?: string[];
   allergens?: string[];
   
-  // Servings & Time
-  servings: number;
+  // Ingredients for allergen checking
+  ingredients?: Array<{
+    name?: string;
+    food?: string;
+    quantity?: number;
+    unit?: string;
+    original?: string;
+    nutrition?: any;
+    [key: string]: any;
+  }>;
+  
+  // Custom recipe metadata
+  isCustom?: boolean;
+  createdBy?: string;
+  isPublic?: boolean;
+  
+  // Additional fields for detailed view (backward compatible)
+  description?: string;
   prepTimeMinutes?: number;
   cookTimeMinutes?: number;
   totalTimeMinutes?: number;
-  
-  // Nutrition
-  totalCalories?: number;
-  totalProteinG?: number;
-  totalCarbsG?: number;
-  totalFatG?: number;
-  totalFiberG?: number;
-  totalSugarG?: number;
-  totalSodiumMg?: number;
-  
-  caloriesPerServing?: number;
-  proteinPerServingG?: number;
-  carbsPerServingG?: number;
-  fatPerServingG?: number;
-  fiberPerServingG?: number;
-  
-  // Recipe details
-  ingredients: any[];
   ingredientLines?: string[];
-  cookingInstructions?: string[];
+  instructions?: string[];
+  customNotes?: string;
   nutritionDetails?: any;
   
-  // Custom recipe specific
-  createdByNutritionistId: string;
-  isPublic: boolean;
-  customNotes?: string;
+  // Total nutrition (for detailed calculations)
+  totalCalories?: number;
+  totalProtein?: number;
+  totalCarbs?: number;
+  totalFat?: number;
+  totalFiber?: number;
+  totalSugar?: number;
+  totalSodium?: number;
+  totalWeight?: number;
   
   // Timestamps
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CustomRecipeFilter {

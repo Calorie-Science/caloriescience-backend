@@ -349,7 +349,14 @@ export class CustomRecipeService {
     let totalSodiumMg = 0;
     let totalWeightG = 0;
 
-    const detailedNutrition: any = {};
+    // Initialize detailed nutrition in standardized format
+    const detailedNutrition: any = {
+      macros: {},
+      micros: {
+        vitamins: {},
+        minerals: {}
+      }
+    };
 
     // Sum up nutrition from all ingredients
     for (const ingredient of ingredients) {
@@ -370,37 +377,35 @@ export class CustomRecipeService {
         totalSodiumMg += macros.sodium || 0;
         totalWeightG += nutrition.weight || 0;
 
-        // Accumulate extended macros (if available)
+        // Accumulate extended macros (if available) - store in standardized format
         if (nutrition.macros) {
           ['cholesterol', 'saturatedFat', 'transFat', 'monounsaturatedFat', 'polyunsaturatedFat'].forEach(macro => {
             if (nutrition.macros[macro] !== undefined) {
-              if (!detailedNutrition[macro]) {
-                detailedNutrition[macro] = 0;
+              if (!detailedNutrition.macros[macro]) {
+                detailedNutrition.macros[macro] = 0;
               }
-              detailedNutrition[macro] += nutrition.macros[macro];
+              detailedNutrition.macros[macro] += nutrition.macros[macro];
             }
           });
         }
 
-        // Accumulate vitamins (if available)
+        // Accumulate vitamins (if available) - store in nested format
         if (nutrition.micros?.vitamins) {
           Object.keys(nutrition.micros.vitamins).forEach(vitamin => {
-            const key = `vitamins_${vitamin}`;
-            if (!detailedNutrition[key]) {
-              detailedNutrition[key] = 0;
+            if (!detailedNutrition.micros.vitamins[vitamin]) {
+              detailedNutrition.micros.vitamins[vitamin] = 0;
             }
-            detailedNutrition[key] += nutrition.micros.vitamins[vitamin] || 0;
+            detailedNutrition.micros.vitamins[vitamin] += nutrition.micros.vitamins[vitamin] || 0;
           });
         }
         
-        // Accumulate minerals (if available)
+        // Accumulate minerals (if available) - store in nested format
         if (nutrition.micros?.minerals) {
           Object.keys(nutrition.micros.minerals).forEach(mineral => {
-            const key = `minerals_${mineral}`;
-            if (!detailedNutrition[key]) {
-              detailedNutrition[key] = 0;
+            if (!detailedNutrition.micros.minerals[mineral]) {
+              detailedNutrition.micros.minerals[mineral] = 0;
             }
-            detailedNutrition[key] += nutrition.micros.minerals[mineral] || 0;
+            detailedNutrition.micros.minerals[mineral] += nutrition.micros.minerals[mineral] || 0;
           });
         }
       }
@@ -412,6 +417,49 @@ export class CustomRecipeService {
     const carbsPerServingG = servings > 0 ? totalCarbsG / servings : 0;
     const fatPerServingG = servings > 0 ? totalFatG / servings : 0;
     const fiberPerServingG = servings > 0 ? totalFiberG / servings : 0;
+    const sugarPerServingG = servings > 0 ? totalSugarG / servings : 0;
+    const sodiumPerServingMg = servings > 0 ? totalSodiumMg / servings : 0;
+
+    // Add main macros to detailed nutrition with per-serving values in standardized format
+    detailedNutrition.macros.protein = { quantity: Math.round(proteinPerServingG * 10) / 10, unit: 'g' };
+    detailedNutrition.macros.carbs = { quantity: Math.round(carbsPerServingG * 10) / 10, unit: 'g' };
+    detailedNutrition.macros.fat = { quantity: Math.round(fatPerServingG * 10) / 10, unit: 'g' };
+    detailedNutrition.macros.fiber = { quantity: Math.round(fiberPerServingG * 10) / 10, unit: 'g' };
+    detailedNutrition.macros.sugar = { quantity: Math.round(sugarPerServingG * 10) / 10, unit: 'g' };
+    detailedNutrition.macros.sodium = { quantity: Math.round(sodiumPerServingMg * 10) / 10, unit: 'mg' };
+    
+    // Convert extended macros to standardized format
+    Object.keys(detailedNutrition.macros).forEach(key => {
+      if (!['protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium'].includes(key)) {
+        const value = detailedNutrition.macros[key];
+        if (typeof value === 'number') {
+          const perServing = servings > 0 ? value / servings : 0;
+          const unit = key === 'cholesterol' ? 'mg' : 'g';
+          detailedNutrition.macros[key] = { quantity: Math.round(perServing * 10) / 10, unit };
+        }
+      }
+    });
+
+    // Convert vitamins to standardized format
+    Object.keys(detailedNutrition.micros.vitamins).forEach(key => {
+      const value = detailedNutrition.micros.vitamins[key];
+      if (typeof value === 'number') {
+        const perServing = servings > 0 ? value / servings : 0;
+        detailedNutrition.micros.vitamins[key] = { quantity: Math.round(perServing * 100) / 100, unit: this.getVitaminUnit(key) };
+      }
+    });
+
+    // Convert minerals to standardized format
+    Object.keys(detailedNutrition.micros.minerals).forEach(key => {
+      const value = detailedNutrition.micros.minerals[key];
+      if (typeof value === 'number') {
+        const perServing = servings > 0 ? value / servings : 0;
+        detailedNutrition.micros.minerals[key] = { quantity: Math.round(perServing * 100) / 100, unit: 'mg' };
+      }
+    });
+    
+    // Add calories at top level in standardized format
+    detailedNutrition.calories = { quantity: Math.round(caloriesPerServing * 10) / 10, unit: 'kcal' };
 
     return {
       totalCalories: Math.round(totalCalories * 100) / 100,
@@ -484,55 +532,194 @@ export class CustomRecipeService {
   }
 
   /**
-   * Map database record to output format
+   * Map database record to output format (UnifiedRecipeSummary format)
    */
   private mapToOutput(data: any): CustomRecipeOutput {
     return {
+      // Standard UnifiedRecipeSummary fields
       id: data.id,
-      provider: 'manual',
-      externalRecipeId: data.external_recipe_id,
-      recipeName: data.recipe_name,
-      recipeDescription: data.recipe_description,
-      recipeImageUrl: data.recipe_image_url,
+      title: data.recipe_name,
+      image: data.recipe_image_url || '',
+      sourceUrl: '',
+      source: 'manual',
+      readyInMinutes: data.total_time_minutes || undefined,
+      servings: data.servings,
       
-      cuisineTypes: data.cuisine_types || [],
-      mealTypes: data.meal_types || [],
-      dishTypes: data.dish_types || [],
+      // Nutrition data (per serving)
+      calories: data.calories_per_serving,
+      protein: data.protein_per_serving_g,
+      carbs: data.carbs_per_serving_g,
+      fat: data.fat_per_serving_g,
+      fiber: data.fiber_per_serving_g,
+      
+      // Metadata for filtering
       healthLabels: data.health_labels || [],
       dietLabels: data.diet_labels || [],
+      cuisineType: data.cuisine_types || [],
+      dishType: data.dish_types || [],
+      mealType: data.meal_types || [],
       allergens: data.allergens || [],
       
-      servings: data.servings,
+      // Ingredients (formatted for allergen checking)
+      ingredients: (data.ingredients || []).map((ing: any) => ({
+        name: ing.name,
+        food: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        original: `${ing.quantity} ${ing.unit} ${ing.name}`,
+        nutrition: ing.nutrition
+      })),
+      
+      // Custom recipe metadata
+      isCustom: true,
+      createdBy: data.created_by_nutritionist_id,
+      isPublic: data.is_public,
+      
+      // Additional fields for detailed view (backward compatible)
+      description: data.recipe_description,
       prepTimeMinutes: data.prep_time_minutes,
       cookTimeMinutes: data.cook_time_minutes,
       totalTimeMinutes: data.total_time_minutes,
-      
-      totalCalories: data.total_calories,
-      totalProteinG: data.total_protein_g,
-      totalCarbsG: data.total_carbs_g,
-      totalFatG: data.total_fat_g,
-      totalFiberG: data.total_fiber_g,
-      totalSugarG: data.total_sugar_g,
-      totalSodiumMg: data.total_sodium_mg,
-      
-      caloriesPerServing: data.calories_per_serving,
-      proteinPerServingG: data.protein_per_serving_g,
-      carbsPerServingG: data.carbs_per_serving_g,
-      fatPerServingG: data.fat_per_serving_g,
-      fiberPerServingG: data.fiber_per_serving_g,
-      
-      ingredients: data.ingredients || [],
       ingredientLines: data.ingredient_lines || [],
-      cookingInstructions: data.cooking_instructions || [],
-      nutritionDetails: data.nutrition_details,
-      
-      createdByNutritionistId: data.created_by_nutritionist_id,
-      isPublic: data.is_public,
+      instructions: data.cooking_instructions || [],
       customNotes: data.custom_notes,
+      nutritionDetails: this.standardizeNutritionDetails(data.nutrition_details, data),
       
+      // Total nutrition (for detailed calculations)
+      totalCalories: data.total_calories,
+      totalProtein: data.total_protein_g,
+      totalCarbs: data.total_carbs_g,
+      totalFat: data.total_fat_g,
+      totalFiber: data.total_fiber_g,
+      totalSugar: data.total_sugar_g,
+      totalSodium: data.total_sodium_mg,
+      totalWeight: data.total_weight_g,
+      
+      // Timestamps
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
+  }
+
+  /**
+   * Standardize nutrition details to match format used by other recipes
+   * Handles both old flat format and new nested format
+   */
+  private standardizeNutritionDetails(nutritionDetails: any, recipeData: any): any {
+    if (!nutritionDetails || Object.keys(nutritionDetails).length === 0) {
+      nutritionDetails = {};
+    }
+
+    // Initialize standardized structure
+    const standardized: any = {
+      calories: { quantity: recipeData.calories_per_serving || 0, unit: 'kcal' },
+      macros: {},
+      micros: {
+        vitamins: {},
+        minerals: {}
+      }
+    };
+
+    // Check if already in new format (has macros.protein as object with quantity/unit)
+    if (nutritionDetails.macros && typeof nutritionDetails.macros.protein === 'object' && nutritionDetails.macros.protein.quantity !== undefined) {
+      // Already in standardized format
+      return nutritionDetails;
+    }
+
+    // Check if in new format but without quantity/unit objects
+    if (nutritionDetails.macros && typeof nutritionDetails.macros.protein === 'number') {
+      // New nested format but without quantity/unit objects - convert
+      const macros = nutritionDetails.macros || {};
+      standardized.macros = {
+        protein: { quantity: macros.protein || recipeData.protein_per_serving_g || 0, unit: 'g' },
+        carbs: { quantity: macros.carbs || recipeData.carbs_per_serving_g || 0, unit: 'g' },
+        fat: { quantity: macros.fat || recipeData.fat_per_serving_g || 0, unit: 'g' },
+        fiber: { quantity: macros.fiber || recipeData.fiber_per_serving_g || 0, unit: 'g' },
+        sugar: { quantity: macros.sugar || 0, unit: 'g' },
+        sodium: { quantity: macros.sodium || 0, unit: 'mg' }
+      };
+
+      // Add extended macros if present
+      if (macros.cholesterol !== undefined) standardized.macros.cholesterol = { quantity: macros.cholesterol, unit: 'mg' };
+      if (macros.saturatedFat !== undefined) standardized.macros.saturatedFat = { quantity: macros.saturatedFat, unit: 'g' };
+      if (macros.transFat !== undefined) standardized.macros.transFat = { quantity: macros.transFat, unit: 'g' };
+      if (macros.monounsaturatedFat !== undefined) standardized.macros.monounsaturatedFat = { quantity: macros.monounsaturatedFat, unit: 'g' };
+      if (macros.polyunsaturatedFat !== undefined) standardized.macros.polyunsaturatedFat = { quantity: macros.polyunsaturatedFat, unit: 'g' };
+
+      // Convert micros
+      if (nutritionDetails.micros) {
+        const vitamins = nutritionDetails.micros.vitamins || {};
+        const minerals = nutritionDetails.micros.minerals || {};
+
+        Object.keys(vitamins).forEach(key => {
+          standardized.micros.vitamins[key] = { quantity: vitamins[key], unit: this.getVitaminUnit(key) };
+        });
+
+        Object.keys(minerals).forEach(key => {
+          standardized.micros.minerals[key] = { quantity: minerals[key], unit: 'mg' };
+        });
+      }
+
+      return standardized;
+    }
+
+    // Old flat format (e.g., "minerals_iron": 5.2) - convert to standardized format
+    standardized.macros = {
+      protein: { quantity: recipeData.protein_per_serving_g || 0, unit: 'g' },
+      carbs: { quantity: recipeData.carbs_per_serving_g || 0, unit: 'g' },
+      fat: { quantity: recipeData.fat_per_serving_g || 0, unit: 'g' },
+      fiber: { quantity: recipeData.fiber_per_serving_g || 0, unit: 'g' },
+      sugar: { quantity: 0, unit: 'g' },
+      sodium: { quantity: 0, unit: 'mg' }
+    };
+
+    // Extract flat format data
+    Object.keys(nutritionDetails).forEach(key => {
+      const value = nutritionDetails[key];
+      
+      // Extended macros (flat format)
+      if (key === 'cholesterol') standardized.macros.cholesterol = { quantity: value, unit: 'mg' };
+      else if (key === 'saturatedFat') standardized.macros.saturatedFat = { quantity: value, unit: 'g' };
+      else if (key === 'transFat') standardized.macros.transFat = { quantity: value, unit: 'g' };
+      else if (key === 'monounsaturatedFat') standardized.macros.monounsaturatedFat = { quantity: value, unit: 'g' };
+      else if (key === 'polyunsaturatedFat') standardized.macros.polyunsaturatedFat = { quantity: value, unit: 'g' };
+      
+      // Vitamins (flat format: "vitamins_vitaminA" -> vitaminA)
+      else if (key.startsWith('vitamins_')) {
+        const vitaminKey = key.replace('vitamins_', '');
+        standardized.micros.vitamins[vitaminKey] = { quantity: value, unit: this.getVitaminUnit(vitaminKey) };
+      }
+      
+      // Minerals (flat format: "minerals_iron" -> iron)
+      else if (key.startsWith('minerals_')) {
+        const mineralKey = key.replace('minerals_', '');
+        standardized.micros.minerals[mineralKey] = { quantity: value, unit: 'mg' };
+      }
+    });
+
+    return standardized;
+  }
+
+  /**
+   * Get the appropriate unit for a vitamin
+   */
+  private getVitaminUnit(vitaminKey: string): string {
+    const units: { [key: string]: string } = {
+      vitaminA: 'IU',
+      vitaminC: 'mg',
+      vitaminD: 'µg',
+      vitaminE: 'mg',
+      vitaminK: 'µg',
+      thiamin: 'mg',
+      riboflavin: 'mg',
+      niacin: 'mg',
+      vitaminB6: 'mg',
+      folate: 'µg',
+      vitaminB12: 'µg',
+      biotin: 'µg',
+      pantothenicAcid: 'mg'
+    };
+    return units[vitaminKey] || 'mg';
   }
 }
 
