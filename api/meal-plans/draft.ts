@@ -1233,6 +1233,20 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             console.log(`  🔄 Replacing existing modification for "${targetIngredient}"`);
             const oldMod = mergedMods[existingModIndex] as any;
             
+            // SPECIAL CASE: OMIT on previous ADD = complete cancellation (back to base recipe)
+            if (newMod.type === 'omit' && oldMod.type === 'add') {
+              console.log(`  🎯 OMIT on ADD detected - cancelling both modifications (back to base recipe)`);
+              debugSmartMerge.deletedDueToNoChange = true;
+              debugSmartMerge.operations.push({
+                action: 'CANCEL_OUT',
+                reason: 'OMIT_CANCELS_ADD',
+                ingredient: targetIngredient,
+                details: `ADD ${oldMod.newIngredient} then OMIT ${newMod.originalIngredient} = no net change`
+              });
+              mergedMods.splice(existingModIndex, 1);
+              continue; // Skip to next modification
+            }
+            
             // Update the modification to reflect cumulative change from BASE recipe
             const updatedMod = {
               ...newMod,
@@ -1330,6 +1344,13 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     if (autoCalculateNutrition && !customizations.customNutrition) {
       console.log('🤖 Auto-calculating nutrition WITH MICRONUTRIENTS...');
 
+      // Check if this is a simple ingredient (from simpleIngredientService)
+      const isSimpleIngredient = (recipe as any).isSimpleIngredient === true || 
+                                  (recipe as any).isIngredient === true || 
+                                  recipeId.startsWith('ingredient_');
+      
+      console.log(`🔍 Recipe type check: isSimpleIngredient=${isSimpleIngredient}, recipeId=${recipeId}`);
+
       // Get the ORIGINAL unmodified recipe from cache/API with FULL NUTRITION DATA
       console.log('🔍 Getting original recipe with complete nutrition from cache/API...');
       const cacheService = new (await import('../../lib/recipeCacheService')).RecipeCacheService();
@@ -1337,12 +1358,85 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       const standardizationService = new (await import('../../lib/recipeResponseStandardizationService')).RecipeResponseStandardizationService();
       
       let originalRecipe: any = null;
+      let cachedRecipe: any = null; // Declare here for use in debug logging later
       
-      // Try cache first to get full nutrition
-      const cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
-      debugCacheLookup.found = !!cachedRecipe;
-      debugCacheLookup.cachedRecipeServings = cachedRecipe?.servings;
-      debugCacheLookup.cachedRecipeServingsType = typeof cachedRecipe?.servings;
+      // For simple ingredients, skip cache/API lookup and use recipe data directly
+      if (isSimpleIngredient) {
+        console.log('✅ Simple ingredient detected - using recipe data directly (no external API fetch)');
+        originalRecipe = recipe;
+        
+        // Update recipe servings for simple ingredients (always 1)
+        recipeServings = recipe.servings || 1;
+        
+        // Look up original amounts from recipe ingredients
+        for (const mod of customizations.modifications) {
+          if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+            console.log(`🔍 Looking up original amount for simple ingredient: ${mod.originalIngredient} (${mod.type})`);
+            
+            const targetName = mod.originalIngredient.toLowerCase();
+            const recipeIngredients = recipe.ingredients || [];
+            const originalIng = recipeIngredients.find((ing: any) => {
+              const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
+              return ingName.includes(targetName) || targetName.includes(ingName);
+            });
+            
+            if (originalIng) {
+              (mod as any).originalAmount = originalIng.amount || 1;
+              (mod as any).originalUnit = originalIng.unit || '';
+              console.log(`  ✅ Found original: ${originalIng.amount} ${originalIng.unit} ${originalIng.name}`);
+            } else {
+              console.warn(`  ⚠️ Could not find "${mod.originalIngredient}" in simple ingredient recipe`);
+              // Use defaults
+              if (mod.type === 'replace') {
+                (mod as any).originalAmount = (mod as any).amount || 1;
+                (mod as any).originalUnit = (mod as any).unit || '';
+              } else {
+                (mod as any).originalAmount = 1;
+                (mod as any).originalUnit = '';
+              }
+            }
+          }
+        }
+        
+        // Get nutrition from recipe data (already in correct format for simple ingredients)
+        const extractNumber = (value: any) => {
+          if (typeof value === 'number') return value;
+          if (value?.quantity !== undefined) return value.quantity;
+          return 0;
+        };
+        
+        // Check if recipe has nutrition object or flat values
+        const recipeAny = recipe as any;
+        if (recipeAny.nutrition && typeof recipeAny.nutrition === 'object') {
+          originalNutritionWithMicros = recipeAny.nutrition;
+        } else {
+          // Build nutrition object from flat values
+          originalNutritionWithMicros = {
+            calories: { quantity: extractNumber(recipe.calories), unit: 'kcal' },
+            macros: {
+              protein: { quantity: extractNumber(recipe.protein), unit: 'g' },
+              carbs: { quantity: extractNumber(recipe.carbs), unit: 'g' },
+              fat: { quantity: extractNumber(recipe.fat), unit: 'g' },
+              fiber: { quantity: extractNumber(recipe.fiber), unit: 'g' },
+              sugar: { quantity: extractNumber(recipeAny.sugar || recipeAny.nutrition?.macros?.sugar), unit: 'g' },
+              sodium: { quantity: extractNumber(recipeAny.sodium || recipeAny.nutrition?.macros?.sodium), unit: 'mg' }
+            },
+            micros: recipeAny.nutrition?.micros || { vitamins: {}, minerals: {} }
+          };
+        }
+        
+        console.log('✅ Using nutrition from simple ingredient:', {
+          calories: originalNutritionWithMicros.calories?.quantity,
+          protein: originalNutritionWithMicros.macros?.protein?.quantity,
+          vitaminsCount: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
+          mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
+        });
+      } else {
+        // Normal recipe - try cache first to get full nutrition
+        cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
+        debugCacheLookup.found = !!cachedRecipe;
+        debugCacheLookup.cachedRecipeServings = cachedRecipe?.servings;
+        debugCacheLookup.cachedRecipeServingsType = typeof cachedRecipe?.servings;
       
       if (cachedRecipe) {
         const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
@@ -1537,6 +1631,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           };
         }
       }
+      } // End of else block for normal recipes (not simple ingredients)
 
       if (!originalRecipe || !originalNutritionWithMicros) {
         console.warn('⚠️ Could not get original recipe, using simplified nutrition from draft');
@@ -1851,17 +1946,27 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         }
         
         if (mod.type === 'add' && mod.newIngredient) {
-          // Fetch ingredient image if not provided
-          const ingredientImage = (mod as any).image || await getIngredientImage(mod.newIngredient);
-          
-          customizedRecipe.ingredients.push({
-            name: mod.newIngredient,
-            amount: (mod as any).amount || null,
-            unit: (mod as any).unit || null,
-            image: ingredientImage,
-            original: `${(mod as any).amount || ''} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim()
+          // Check if this ingredient already exists in the list (to prevent duplicates)
+          const existingIngredient = customizedRecipe.ingredients.find((ing: any) => {
+            const ingName = (ing.name || ing.food || '').toLowerCase();
+            return ingName === mod.newIngredient.toLowerCase();
           });
-          console.log(`  ➕ Added "${mod.newIngredient}" with image: ${ingredientImage ? '✅' : '❌'}`);
+          
+          if (existingIngredient) {
+            console.log(`  ⚠️ Ingredient "${mod.newIngredient}" already exists in list - skipping duplicate ADD`);
+          } else {
+            // Fetch ingredient image if not provided
+            const ingredientImage = (mod as any).image || await getIngredientImage(mod.newIngredient);
+            
+            customizedRecipe.ingredients.push({
+              name: mod.newIngredient,
+              amount: (mod as any).amount || null,
+              unit: (mod as any).unit || null,
+              image: ingredientImage,
+              original: `${(mod as any).amount || ''} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim()
+            });
+            console.log(`  ➕ Added "${mod.newIngredient}" with image: ${ingredientImage ? '✅' : '❌'}`);
+          }
         }
         else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
           let replaced = false;

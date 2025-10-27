@@ -633,11 +633,13 @@ export class MultiProviderRecipeSearchService {
       const maxResults = params.maxResults || 20;
 
       // Build query for custom recipes
+      // Combine filters with AND logic at top level
       let query = supabase
         .from('cached_recipes')
         .select('*', { count: 'exact' })
         .eq('provider', 'manual')
-        .eq('cache_status', 'active');
+        // Include active OR null cache_status (for backward compatibility with older recipes)
+        .in('cache_status', ['active', null] as any);
 
       // Access filter: own private recipes + public recipes
       query = query.or(`created_by_nutritionist_id.eq.${userId},is_public.eq.true`);
@@ -648,24 +650,20 @@ export class MultiProviderRecipeSearchService {
       }
 
       // Health labels filter
+      // Skip for custom recipes - let allergen checker handle it later
+      // Custom recipes with empty health_labels would be excluded by .contains()
       if (params.health && params.health.length > 0) {
-        query = query.contains('health_labels', params.health);
+        // Don't apply health labels filter - will be checked via allergen checker instead
+        console.log(`  ℹ️ Health labels filter "${params.health}" NOT applied in DB query (allows custom recipes without labels)`);
+        // query = query.contains('health_labels', params.health); // Commented out
       }
 
       // Cuisine types filter
-      if (params.cuisineType && params.cuisineType.length > 0) {
-        query = query.overlaps('cuisine_types', params.cuisineType);
-      }
-
-      // Meal types filter
-      if (params.mealType && params.mealType.length > 0) {
-        query = query.overlaps('meal_types', params.mealType);
-      }
-
-      // Dish types filter
-      if (params.dishType && params.dishType.length > 0) {
-        query = query.overlaps('dish_types', params.dishType);
-      }
+      // NOTE: We skip cuisine/meal/dish type filters in the DB query for custom recipes
+      // because empty arrays would be excluded. Instead, we'll post-filter in JavaScript
+      const applyCuisineFilter = params.cuisineType && params.cuisineType.length > 0;
+      const applyMealTypeFilter = params.mealType && params.mealType.length > 0;
+      const applyDishTypeFilter = params.dishType && params.dishType.length > 0;
 
       // Calories filter
       if (params.calories) {
@@ -722,9 +720,43 @@ export class MultiProviderRecipeSearchService {
         isPublic: recipe.is_public
       }));
 
+      // Post-filter by cuisine/meal/dish types (to include recipes with empty tags)
+      let filteredRecipes = recipes;
+      
+      if (applyCuisineFilter) {
+        const beforeFilter = filteredRecipes.length;
+        filteredRecipes = filteredRecipes.filter(recipe => {
+          // Include if: has matching cuisine OR has no cuisine types set
+          const hasCuisineTypes = recipe.cuisineType && recipe.cuisineType.length > 0;
+          if (!hasCuisineTypes) return true; // Include recipes without cuisine tags
+          return recipe.cuisineType.some(c => params.cuisineType!.includes(c));
+        });
+        console.log(`  🍽️ Cuisine filter: ${beforeFilter} → ${filteredRecipes.length} recipes (included ${beforeFilter - filteredRecipes.length} without cuisine tags)`);
+      }
+      
+      if (applyMealTypeFilter) {
+        const beforeFilter = filteredRecipes.length;
+        filteredRecipes = filteredRecipes.filter(recipe => {
+          const hasMealTypes = recipe.mealType && recipe.mealType.length > 0;
+          if (!hasMealTypes) return true; // Include recipes without meal tags
+          return recipe.mealType.some(m => params.mealType!.includes(m));
+        });
+        console.log(`  🍽️ Meal type filter: ${beforeFilter} → ${filteredRecipes.length} recipes`);
+      }
+      
+      if (applyDishTypeFilter) {
+        const beforeFilter = filteredRecipes.length;
+        filteredRecipes = filteredRecipes.filter(recipe => {
+          const hasDishTypes = recipe.dishType && recipe.dishType.length > 0;
+          if (!hasDishTypes) return true; // Include recipes without dish tags
+          return recipe.dishType.some(d => params.dishType!.includes(d));
+        });
+        console.log(`  🍽️ Dish type filter: ${beforeFilter} → ${filteredRecipes.length} recipes`);
+      }
+
       return {
-        recipes,
-        totalResults: count || 0,
+        recipes: filteredRecipes,
+        totalResults: filteredRecipes.length,
         provider: 'manual',
         searchParams: params
       };
@@ -1333,6 +1365,13 @@ export class MultiProviderRecipeSearchService {
    */
   async getRecipeDetails(recipeId: string): Promise<any> {
     try {
+      // Check if this is a simple ingredient (from simpleIngredientService)
+      // These are locally generated and should not be fetched from external APIs
+      if (recipeId.startsWith('ingredient_')) {
+        console.log(`⚠️ Attempted to fetch simple ingredient ${recipeId} from external API - returning null`);
+        return null;
+      }
+      
       // Determine provider from recipe ID format
       // Edamam: starts with 'recipe_'
       // Spoonacular: numeric string
@@ -2055,7 +2094,9 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       // DO NOT apply dietary preferences as filters
       diet: undefined,
       // Only use cuisine types as filter
-      cuisineType: uxCuisineTypes
+      cuisineType: uxCuisineTypes,
+      // Ensure includeCustom is passed through
+      includeCustom: params.includeCustom !== false // Default true
     };
 
     console.log(`🔍 Final search params (allergens + cuisine only):`, enhancedParams);
@@ -2063,6 +2104,36 @@ Return a JSON object where each key is an ingredient name and the value is an ar
 
     // 6. Perform standard search (APIs will filter out allergens at metadata level)
     let results = await this.searchRecipes(enhancedParams, userId);
+    
+    console.log(`📊 After searchRecipes: ${results.recipes.length} recipes, custom count: ${results.recipes.filter(r => r.source === 'manual').length}`);
+
+    // 6.1 Ensure manual/custom recipes are explicitly included (defensive)
+    // This avoids any edge cases where provider logic or strict filters skip custom results
+    const manualInjectionDebug: any = { attempted: false, found: 0, injected: 0 };
+    
+    if (enhancedParams.includeCustom !== false && userId) {
+      manualInjectionDebug.attempted = true;
+      try {
+        const manualResults = await this.searchCustomRecipes({
+          ...enhancedParams,
+          provider: 'manual'
+        }, userId);
+
+        manualInjectionDebug.found = manualResults?.recipes?.length || 0;
+
+        // Prepend manual recipes to guarantee visibility
+        if (manualResults?.recipes?.length) {
+          const existingIds = new Set(results.recipes.map(r => r.id));
+          const uniques = manualResults.recipes.filter(r => !existingIds.has(r.id));
+          manualInjectionDebug.injected = uniques.length;
+          results.recipes = [...uniques, ...results.recipes];
+          results.totalResults = results.recipes.length;
+        }
+      } catch (e) {
+        manualInjectionDebug.error = e instanceof Error ? e.message : String(e);
+        console.log('⚠️ Failed to inject manual recipes into client search:', e);
+      }
+    }
 
     // 7. Post-filter for name-only search
     if (searchType === 'name' && searchQuery) {
@@ -2085,7 +2156,17 @@ Return a JSON object where each key is an ingredient name and the value is an ar
     
     // Filter out recipes where ingredients contain allergens
     const filteredRecipes = results.recipes.filter(recipe => {
-      // Check allergens in actual ingredients
+      // SKIP allergen checking for custom recipes with no health labels (not yet categorized)
+      // They should appear and let nutritionist decide
+      const isUncategorizedCustom = recipe.source === 'manual' && 
+                                      (!recipe.healthLabels || recipe.healthLabels.length === 0);
+      
+      if (isUncategorizedCustom) {
+        console.log(`✅ Including uncategorized custom recipe: "${recipe.title}"`);
+        return true; // Always include custom recipes without labels
+      }
+      
+      // Check allergens in actual ingredients for all other recipes
       const conflictCheck = checkAllergenConflicts(
         recipe.allergens || [],
         recipe.healthLabels || [],
@@ -2101,6 +2182,7 @@ Return a JSON object where each key is an ingredient name and the value is an ar
     });
     
     console.log(`🧹 Ingredient-level filter: ${recipesBeforeIngredientFilter} → ${filteredRecipes.length} recipes`);
+    console.log(`📊 Final custom recipes count: ${filteredRecipes.filter(r => r.source === 'manual').length}`);
     results.recipes = filteredRecipes;
     results.totalResults = filteredRecipes.length;
 
@@ -2122,6 +2204,18 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         removedPreferences: [], // No longer relevant
         removedCuisineTypes: removedCuisineTypes,
         ingredientLevelFiltering: true // Flag to indicate ingredient checking was done
+      },
+      _debug: {
+        afterSearchRecipes: results.recipes.length,
+        customAfterSearch: results.recipes.filter(r => r.source === 'manual').length,
+        manualInjection: manualInjectionDebug,
+        afterNameFilter: searchType === 'name' ? results.recipes.length : 'N/A',
+        beforeAllergenFilter: recipesBeforeIngredientFilter,
+        afterAllergenFilter: filteredRecipes.length,
+        finalCustomCount: filteredRecipes.filter(r => r.source === 'manual').length,
+        includeCustomParam: enhancedParams.includeCustom,
+        searchQuery: searchQuery,
+        userId: userId
       }
     };
   }

@@ -101,7 +101,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         provider: (provider as any) || 'both',
         // UX provides the actual preferences and cuisineTypes they want
         diet: parseCsvParam(diet),
-        cuisineType: parseCsvParam(cuisineType)
+        cuisineType: parseCsvParam(cuisineType),
+        includeCustom: true // Include custom recipes in search results
       };
 
       // Add ingredients for ingredient search
@@ -149,8 +150,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         totalResults += ingredientRecipes.length;
       }
 
-      // Combine recipes and ingredient-based recipes
-      const allRecipes = [...results.recipes, ...ingredientRecipes];
+      // Combine recipes and ingredient-based recipes (INGREDIENTS FIRST for better UX)
+      const allRecipes = [...ingredientRecipes, ...results.recipes];
 
       // Enrich recipes with allergen conflict information
       const recipesWithAllergenInfo = enrichRecipesWithAllergenInfo(

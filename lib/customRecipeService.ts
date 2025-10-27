@@ -269,7 +269,8 @@ export class CustomRecipeService {
       .from('cached_recipes')
       .select('*', { count: 'exact' })
       .eq('provider', 'manual')
-      .eq('cache_status', 'active');
+      // Include active OR null cache_status (backward compatibility)
+      .in('cache_status', ['active', null] as any);
 
     // Access filter: own private recipes + public recipes
     if (includePublic) {
@@ -357,42 +358,51 @@ export class CustomRecipeService {
         // Accumulate calories
         totalCalories += nutrition.calories || 0;
         
+        // Support both flat and nested format
+        const macros = nutrition.macros || nutrition; // Fallback to root if no macros object
+        
         // Accumulate macros
-        totalProteinG += nutrition.macros.protein || 0;
-        totalCarbsG += nutrition.macros.carbs || 0;
-        totalFatG += nutrition.macros.fat || 0;
-        totalFiberG += nutrition.macros.fiber || 0;
-        totalSugarG += nutrition.macros.sugar || 0;
-        totalSodiumMg += nutrition.macros.sodium || 0;
+        totalProteinG += macros.protein || 0;
+        totalCarbsG += macros.carbs || 0;
+        totalFatG += macros.fat || 0;
+        totalFiberG += macros.fiber || 0;
+        totalSugarG += macros.sugar || 0;
+        totalSodiumMg += macros.sodium || 0;
         totalWeightG += nutrition.weight || 0;
 
-        // Accumulate extended macros
-        ['cholesterol', 'saturatedFat', 'transFat', 'monounsaturatedFat', 'polyunsaturatedFat'].forEach(macro => {
-          if (nutrition.macros[macro] !== undefined) {
-            if (!detailedNutrition[macro]) {
-              detailedNutrition[macro] = 0;
+        // Accumulate extended macros (if available)
+        if (nutrition.macros) {
+          ['cholesterol', 'saturatedFat', 'transFat', 'monounsaturatedFat', 'polyunsaturatedFat'].forEach(macro => {
+            if (nutrition.macros[macro] !== undefined) {
+              if (!detailedNutrition[macro]) {
+                detailedNutrition[macro] = 0;
+              }
+              detailedNutrition[macro] += nutrition.macros[macro];
             }
-            detailedNutrition[macro] += nutrition.macros[macro];
-          }
-        });
+          });
+        }
 
-        // Accumulate vitamins
-        Object.keys(nutrition.micros.vitamins).forEach(vitamin => {
-          const key = `vitamins_${vitamin}`;
-          if (!detailedNutrition[key]) {
-            detailedNutrition[key] = 0;
-          }
-          detailedNutrition[key] += nutrition.micros.vitamins[vitamin] || 0;
-        });
+        // Accumulate vitamins (if available)
+        if (nutrition.micros?.vitamins) {
+          Object.keys(nutrition.micros.vitamins).forEach(vitamin => {
+            const key = `vitamins_${vitamin}`;
+            if (!detailedNutrition[key]) {
+              detailedNutrition[key] = 0;
+            }
+            detailedNutrition[key] += nutrition.micros.vitamins[vitamin] || 0;
+          });
+        }
         
-        // Accumulate minerals
-        Object.keys(nutrition.micros.minerals).forEach(mineral => {
-          const key = `minerals_${mineral}`;
-          if (!detailedNutrition[key]) {
-            detailedNutrition[key] = 0;
-          }
-          detailedNutrition[key] += nutrition.micros.minerals[mineral] || 0;
-        });
+        // Accumulate minerals (if available)
+        if (nutrition.micros?.minerals) {
+          Object.keys(nutrition.micros.minerals).forEach(mineral => {
+            const key = `minerals_${mineral}`;
+            if (!detailedNutrition[key]) {
+              detailedNutrition[key] = 0;
+            }
+            detailedNutrition[key] += nutrition.micros.minerals[mineral] || 0;
+          });
+        }
       }
     }
 

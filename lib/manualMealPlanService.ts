@@ -215,22 +215,21 @@ export class ManualMealPlanService {
       }
     } else if (params.provider === 'manual') {
       // Get custom/manual recipe from cache
-      if (params.source === 'cached') {
-        // Manual recipes are stored with provider='manual' in cached_recipes
-        const { data: manualRecipe, error } = await supabase
-          .from('cached_recipes')
-          .select('*')
-          .eq('id', params.recipeId)
-          .eq('provider', 'manual')
-          .single();
-        
-        if (error || !manualRecipe) {
-          throw new Error('Manual recipe not found');
-        }
-        recipe = manualRecipe;
-      } else {
-        throw new Error('Manual recipes must use source: "cached"');
+      // Auto-correct source to 'cached' for manual recipes (always in DB)
+      console.log(`📝 Manual recipe detected - fetching from cached_recipes table`);
+      
+      // Manual recipes are stored with provider='manual' in cached_recipes
+      const { data: manualRecipe, error } = await supabase
+        .from('cached_recipes')
+        .select('*')
+        .eq('id', params.recipeId)
+        .eq('provider', 'manual')
+        .single();
+      
+      if (error || !manualRecipe) {
+        throw new Error('Manual recipe not found');
       }
+      recipe = manualRecipe;
     } else {
       // Fetch or get recipe from cache (for regular recipes)
       if (params.source === 'cached') {
@@ -303,22 +302,21 @@ export class ManualMealPlanService {
       }
     } else if (params.provider === 'manual') {
       // Get custom/manual recipe from cache
-      if (params.source === 'cached') {
-        // Manual recipes are stored with provider='manual' in cached_recipes
-        const { data: manualRecipe, error } = await supabase
-          .from('cached_recipes')
-          .select('*')
-          .eq('id', params.recipeId)
-          .eq('provider', 'manual')
-          .single();
-        
-        if (error || !manualRecipe) {
-          throw new Error('Manual recipe not found');
-        }
-        recipe = manualRecipe;
-      } else {
-        throw new Error('Manual recipes must use source: "cached"');
+      // Auto-correct source to 'cached' for manual recipes (always in DB)
+      console.log(`📝 Manual recipe detected - fetching from cached_recipes table`);
+      
+      // Manual recipes are stored with provider='manual' in cached_recipes
+      const { data: manualRecipe, error } = await supabase
+        .from('cached_recipes')
+        .select('*')
+        .eq('id', params.recipeId)
+        .eq('provider', 'manual')
+        .single();
+      
+      if (error || !manualRecipe) {
+        throw new Error('Manual recipe not found');
       }
+      recipe = manualRecipe;
     } else {
       // Fetch or get recipe from cache (for regular recipes)
       if (params.source === 'cached') {
@@ -390,6 +388,9 @@ export class ManualMealPlanService {
     const fat = fullNutrition?.macros?.fat?.quantity || parseFloat(recipe.fat_per_serving_g) || 0;
     const fiber = fullNutrition?.macros?.fiber?.quantity || parseFloat(recipe.fiber_per_serving_g) || 0;
 
+    // Check if this is a simple ingredient
+    const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
+    
     // Convert recipe to the format used in meal plans (matching automated meal plan format)
     const recipeForPlan = {
       id: recipe.external_recipe_id || recipe.id,
@@ -422,7 +423,10 @@ export class ManualMealPlanService {
       allergens: recipe.allergens || [],
       cuisineTypes: recipe.cuisine_types || [],
       isSelected: true,
-      selectedAt: new Date().toISOString()
+      selectedAt: new Date().toISOString(),
+      // Add flags for simple ingredients
+      isSimpleIngredient: isSimpleIngredient,
+      isIngredient: isSimpleIngredient
     };
 
     // Add recipe to the meal (append to existing recipes)

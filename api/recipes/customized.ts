@@ -112,7 +112,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     
     if (isSimpleIngredient) {
       // Handle simple ingredient recipes - return with customization support
-      return await handleIngredientRecipe(validatedRecipeId, recipe, res);
+      // Pass meal object to access customizations
+      return await handleIngredientRecipe(validatedRecipeId, recipe, meal, res);
+    }
+
+    // Check if this is a manual/custom recipe
+    const isManualRecipe = recipe.source === 'manual' || validatedRecipeId.startsWith('manual_');
+    
+    if (isManualRecipe) {
+      // Handle manual/custom recipes - return with customization support
+      return await handleManualRecipe(validatedRecipeId, recipe, meal, res);
     }
 
     // Step 3: Get base recipe from cache or API (using same structure as recipe details API)
@@ -888,7 +897,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
  * Handle simple ingredient recipes (banana, apple, etc.)
  * Now marked as Spoonacular so they can use portion/unit modification
  */
-async function handleIngredientRecipe(recipeId: string, recipe: any, res: VercelResponse): Promise<VercelResponse> {
+async function handleIngredientRecipe(recipeId: string, recipe: any, meal: any, res: VercelResponse): Promise<VercelResponse> {
   // Extract ingredient name from ID (format: ingredient_banana)
   const ingredientName = recipeId.replace(/^ingredient_/, '').replace(/_/g, ' ');
   
@@ -905,6 +914,48 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, res: Vercel
   }
 
   const ingredientRecipe = ingredients[0];
+  
+  // Get customizations from meal (not recipe)
+  const customizations = meal.customizations?.[recipeId] || null;
+  
+  console.log(`🔍 Customizations for ${recipeId}:`, customizations ? JSON.stringify(customizations, null, 2) : 'None');
+
+  // Build modified ingredients list by applying modifications
+  let modifiedIngredients = [...ingredientRecipe.ingredients];
+  
+  if (customizations?.modifications && customizations.modifications.length > 0) {
+    for (const mod of customizations.modifications) {
+      if (mod.type === 'add' && mod.newIngredient) {
+        // Add new ingredient
+        modifiedIngredients.push({
+          name: mod.newIngredient,
+          amount: (mod as any).amount || 1,
+          unit: (mod as any).unit || '',
+          original: `${(mod as any).amount || 1} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim(),
+          nutrition: {} // Will be calculated
+        });
+      } else if (mod.type === 'replace' && mod.originalIngredient && mod.newIngredient) {
+        // Replace ingredient
+        const index = modifiedIngredients.findIndex(ing => 
+          ing.name.toLowerCase() === mod.originalIngredient.toLowerCase()
+        );
+        if (index >= 0) {
+          modifiedIngredients[index] = {
+            name: mod.newIngredient,
+            amount: (mod as any).amount || 1,
+            unit: (mod as any).unit || '',
+            original: `${(mod as any).amount || 1} ${(mod as any).unit || ''} ${mod.newIngredient}`.trim(),
+            nutrition: {}
+          };
+        }
+      } else if (mod.type === 'omit' && mod.originalIngredient) {
+        // Remove ingredient
+        modifiedIngredients = modifiedIngredients.filter(ing => 
+          ing.name.toLowerCase() !== mod.originalIngredient.toLowerCase()
+        );
+      }
+    }
+  }
 
   // Return ingredient recipe in customized format (as Spoonacular for compatibility)
   return res.status(200).json({
@@ -918,11 +969,12 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, res: Vercel
       source: 'spoonacular', // Marked as spoonacular for customization compatibility
       sourceUrl: null,
       
-      // Nutrition
-      nutrition: ingredientRecipe.nutrition,
+      // Nutrition - use customized if available, otherwise original
+      nutrition: customizations?.customNutrition || ingredientRecipe.nutrition,
       
-      // Ingredients - Spoonacular format with full nutrition
-      ingredients: ingredientRecipe.ingredients,
+      // Ingredients - show modified list if customizations exist, otherwise original
+      ingredients: modifiedIngredients,
+      originalIngredients: ingredientRecipe.ingredients, // Keep original for reference
       
       // Instructions
       instructions: ingredientRecipe.instructions,
@@ -935,16 +987,71 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, res: Vercel
       dishType: ingredientRecipe.dishType,
       mealType: ingredientRecipe.mealType,
       
-      // Customization info
-      currentCustomizations: recipe.customizations?.[recipeId] || null,
+      // Customization info - NOW FROM MEAL
+      currentCustomizations: customizations,
       currentServings: recipe.servings || 1,
+      modifications: customizations?.modifications || [],
+      customizationsApplied: customizations?.customizationsApplied || false,
       
       // Special flags
       isIngredient: true,
       isSimpleIngredient: true,
       canCustomize: true, // Can modify portion size and unit
       
-      message: 'Simple ingredient - you can modify the portion size and unit'
+      message: customizations ? 'Simple ingredient with customizations' : 'Simple ingredient - you can modify the portion size and unit'
+    }
+  });
+}
+
+/**
+ * Handle manual/custom recipes
+ */
+async function handleManualRecipe(recipeId: string, recipe: any, meal: any, res: VercelResponse): Promise<VercelResponse> {
+  console.log(`✅ Handling manual/custom recipe: ${recipeId}`);
+  
+  // Get customizations from meal (not recipe)
+  const customizations = meal.customizations?.[recipeId] || null;
+  
+  // Return manual recipe in customized format
+  return res.status(200).json({
+    success: true,
+    data: {
+      recipeId: recipe.id,
+      title: recipe.title,
+      image: recipe.image,
+      servings: recipe.servings || 1,
+      readyInMinutes: recipe.readyInMinutes || 0,
+      source: 'manual',
+      sourceUrl: recipe.sourceUrl,
+      
+      // Nutrition - use customized if available, otherwise original
+      nutrition: customizations?.customNutrition || recipe.nutrition,
+      
+      // Ingredients
+      ingredients: recipe.ingredients || [],
+      
+      // Instructions
+      instructions: recipe.instructions || [],
+      
+      // Metadata
+      healthLabels: recipe.healthLabels || [],
+      dietLabels: recipe.dietLabels || [],
+      allergens: recipe.allergens || [],
+      cuisineType: recipe.cuisineTypes || [],
+      dishType: recipe.dishTypes || [],
+      mealType: recipe.mealTypes || [],
+      
+      // Customization info
+      currentCustomizations: customizations,
+      currentServings: recipe.servings || 1,
+      modifications: customizations?.modifications || [],
+      customizationsApplied: customizations?.customizationsApplied || false,
+      
+      // Special flags
+      isCustom: true,
+      canCustomize: true,
+      
+      message: customizations ? 'Manual recipe with customizations' : 'Manual recipe - you can customize ingredients'
     }
   });
 }

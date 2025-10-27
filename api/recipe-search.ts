@@ -3,6 +3,7 @@ import { MultiProviderRecipeSearchService, UnifiedSearchParams } from '../lib/mu
 import { requireAuth } from '../lib/auth';
 import { checkAllergenConflicts } from '../lib/allergenChecker';
 import { supabase } from '../lib/supabase';
+import { simpleIngredientService } from '../lib/simpleIngredientService';
 
 const multiProviderService = new MultiProviderRecipeSearchService();
 
@@ -147,6 +148,28 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Search recipes directly from APIs (no caching)
       const results = await multiProviderService.searchRecipes(searchParams, user.id);
 
+      // Always search for 1-2 matching simple ingredients (fruits, vegetables, proteins, etc.)
+      // These should appear FIRST before complex recipes for better UX
+      let ingredientRecipes: any[] = [];
+      
+      if (searchParams.query && searchParams.query.trim().length >= 2) {
+        console.log(`🔍 Searching simple ingredients for: "${searchParams.query}"`);
+        
+        // Extract allergens from health labels if provided (e.g., "dairy-free" → "dairy")
+        const allergenFilters = searchParams.health
+          ?.filter(h => h.endsWith('-free'))
+          .map(h => h.replace('-free', ''));
+        
+        // Search simple ingredients with allergen filtering (async)
+        ingredientRecipes = await simpleIngredientService.searchIngredientsAsRecipes(
+          searchParams.query,
+          2, // Fetch up to 2 matching ingredients
+          allergenFilters && allergenFilters.length > 0 ? allergenFilters : undefined
+        );
+        
+        console.log(`✅ Found ${ingredientRecipes.length} matching simple ingredients`);
+      }
+
       // Optional: Apply ingredient-level allergen filtering if health filters provided
       let filteredRecipes = results.recipes;
       let filteringApplied = false;
@@ -182,12 +205,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       }
 
+      // Combine simple ingredients with filtered recipes (INGREDIENTS FIRST for better UX)
+      const allRecipes = [...ingredientRecipes, ...filteredRecipes];
+      
       // Get recipe usage in drafts
-      const recipeIds = filteredRecipes.map(r => r.id);
+      const recipeIds = allRecipes.map(r => r.id);
       const usageMap = await getRecipeUsageInDrafts(user.id, recipeIds);
       
       // Enrich recipes with usage metadata
-      const enrichedRecipes = filteredRecipes.map(recipe => ({
+      const enrichedRecipes = allRecipes.map(recipe => ({
         ...recipe,
         usageMetadata: usageMap.has(recipe.id) ? {
           usedInDrafts: usageMap.get(recipe.id)!.draftIds,
@@ -200,14 +226,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         data: {
           ...results,
           recipes: enrichedRecipes,
-          totalResults: filteredRecipes.length
+          totalResults: allRecipes.length
         },
         metadata: {
           ingredientLevelFiltering: filteringApplied,
           originalCount: results.recipes.length,
-          filteredCount: filteredRecipes.length
+          filteredCount: filteredRecipes.length,
+          ingredientRecipesCount: ingredientRecipes.length,
+          totalCount: allRecipes.length
         },
-        message: `Found ${filteredRecipes.length} recipes from ${results.provider}`
+        message: `Found ${allRecipes.length} results from ${results.provider}${ingredientRecipes.length > 0 ? ` (${ingredientRecipes.length} ingredients, ${filteredRecipes.length} recipes)` : ''}`
       });
 
     } catch (error) {

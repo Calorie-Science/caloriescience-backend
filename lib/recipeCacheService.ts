@@ -99,7 +99,8 @@ export class RecipeCacheService {
       let supabaseQuery = supabase
         .from('cached_recipes')
         .select('*', { count: 'exact' })
-        .eq('cache_status', 'active')
+        // Include active OR null (backward compatibility)
+        .in('cache_status', ['active', null] as any)
         .order('last_accessed_at', { ascending: false });
 
       // Provider filter
@@ -215,7 +216,8 @@ export class RecipeCacheService {
         .select('*')
         .eq('provider', provider)
         .eq('external_recipe_id', externalId)
-        .eq('cache_status', 'active')
+        // Include active OR null (backward compatibility)
+        .in('cache_status', ['active', null] as any)
         .single();
 
       if (error || !recipe) {

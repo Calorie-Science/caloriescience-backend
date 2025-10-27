@@ -281,7 +281,11 @@ export function checkAllergenConflicts(
 
   // Also check health labels for additional allergen information
   // If recipe has health labels (showing it's been labeled) but is missing the "-free" label, flag it
-  if (recipeHealthLabels && recipeHealthLabels.length > 0) {
+  // SKIP this check for custom/manual recipes with empty health labels (not yet fully labeled)
+  const isCustomRecipe = recipeHealthLabels === null || 
+                          (Array.isArray(recipeHealthLabels) && recipeHealthLabels.length === 0);
+  
+  if (recipeHealthLabels && recipeHealthLabels.length > 0 && !isCustomRecipe) {
     const healthLabelsLower = recipeHealthLabels.map(label => label.toLowerCase());
     
     // Count how many "-free" labels this recipe has (indicates it's been properly labeled)
