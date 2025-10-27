@@ -354,23 +354,44 @@ export class CustomRecipeService {
     for (const ingredient of ingredients) {
       const nutrition = ingredient.nutritionData;
       if (nutrition) {
+        // Accumulate calories
         totalCalories += nutrition.calories || 0;
-        totalProteinG += nutrition.protein || 0;
-        totalCarbsG += nutrition.carbs || 0;
-        totalFatG += nutrition.fat || 0;
-        totalFiberG += nutrition.fiber || 0;
-        totalSugarG += nutrition.sugar || 0;
-        totalSodiumMg += nutrition.sodium || 0;
+        
+        // Accumulate macros
+        totalProteinG += nutrition.macros.protein || 0;
+        totalCarbsG += nutrition.macros.carbs || 0;
+        totalFatG += nutrition.macros.fat || 0;
+        totalFiberG += nutrition.macros.fiber || 0;
+        totalSugarG += nutrition.macros.sugar || 0;
+        totalSodiumMg += nutrition.macros.sodium || 0;
         totalWeightG += nutrition.weight || 0;
 
-        // Accumulate detailed nutrition
-        Object.keys(nutrition).forEach(key => {
-          if (!['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'weight'].includes(key)) {
-            if (!detailedNutrition[key]) {
-              detailedNutrition[key] = 0;
+        // Accumulate extended macros
+        ['cholesterol', 'saturatedFat', 'transFat', 'monounsaturatedFat', 'polyunsaturatedFat'].forEach(macro => {
+          if (nutrition.macros[macro] !== undefined) {
+            if (!detailedNutrition[macro]) {
+              detailedNutrition[macro] = 0;
             }
-            detailedNutrition[key] += nutrition[key] || 0;
+            detailedNutrition[macro] += nutrition.macros[macro];
           }
+        });
+
+        // Accumulate vitamins
+        Object.keys(nutrition.micros.vitamins).forEach(vitamin => {
+          const key = `vitamins_${vitamin}`;
+          if (!detailedNutrition[key]) {
+            detailedNutrition[key] = 0;
+          }
+          detailedNutrition[key] += nutrition.micros.vitamins[vitamin] || 0;
+        });
+        
+        // Accumulate minerals
+        Object.keys(nutrition.micros.minerals).forEach(mineral => {
+          const key = `minerals_${mineral}`;
+          if (!detailedNutrition[key]) {
+            detailedNutrition[key] = 0;
+          }
+          detailedNutrition[key] += nutrition.micros.minerals[mineral] || 0;
         });
       }
     }

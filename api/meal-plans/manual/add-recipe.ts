@@ -11,7 +11,7 @@ const addRecipeSchema = Joi.object({
   mealName: Joi.string().required(),
   recipe: Joi.object({
     id: Joi.string().required(),
-    provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee').required(),
+    provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee', 'manual').required(),
     source: Joi.string().valid('api', 'cached').required()
   }).required(),
   servings: Joi.number().min(0.1).max(20).optional()

@@ -124,6 +124,13 @@ export class BonHappeteeService {
       }
 
       const data = await response.json();
+      
+      // Handle paginated response structure: { results, page, pages, items: [...] }
+      if (data && data.items && Array.isArray(data.items)) {
+        return data.items;
+      }
+      
+      // Fallback: if it's a direct array
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.error('❌ Bon Happetee search error:', error);
@@ -237,6 +244,44 @@ export class BonHappeteeService {
     } catch (error) {
       console.warn('⚠️ Error fetching disorder info (non-critical):', error);
       return null;
+    }
+  }
+
+  /**
+   * Get ingredients breakdown for a food item
+   * Returns array of ingredients with names and proportions
+   */
+  async getIngredients(foodItemId: string): Promise<any[]> {
+    try {
+      const url = `${this.baseUrl}/ingredients?food_item_id=${foodItemId}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'x-api-key': this.apiKey
+        },
+        redirect: 'follow'
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ No ingredients data for food ${foodItemId}`);
+        return [];
+      }
+
+      const data = await response.json();
+      
+      // Bon Appetit returns an object with an ingredients array
+      // Structure: { food_unique_id, food_name, ingredients: [...] }
+      if (data && data.ingredients && Array.isArray(data.ingredients)) {
+        return data.ingredients;
+      }
+      
+      // If ingredients is null (single ingredient food like "goat cheese"), return empty
+      return [];
+    } catch (error) {
+      console.warn('⚠️ Error fetching ingredients (non-critical):', error);
+      return [];
     }
   }
 

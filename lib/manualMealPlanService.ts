@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchService';
 import { checkAllergenConflicts } from './allergenChecker';
 import type { ValidAllergen } from './allergenChecker';
+import { simpleIngredientService } from './simpleIngredientService';
 
 const recipeSearchService = new MultiProviderRecipeSearchService();
 
@@ -18,7 +19,7 @@ export interface AddRecipeParams {
   day: number;
   mealName: string;
   recipeId: string;
-  provider: 'edamam' | 'spoonacular' | 'bonhappetee';
+  provider: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual';
   source: 'api' | 'cached';
   servings?: number;
 }
@@ -202,16 +203,45 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Fetch or get recipe from cache
+    // Handle simple ingredient recipes (ID starts with ingredient_)
     let recipe: any;
-    if (params.source === 'cached') {
-      recipe = await this.getRecipeFromCache(params.recipeId, params.provider);
+    const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
+    
+    if (isSimpleIngredient) {
+      // Get simple ingredient recipe from ingredient service
+      recipe = await this.getIngredientRecipe(params.recipeId);
+      if (!recipe) {
+        throw new Error('Ingredient not found');
+      }
+    } else if (params.provider === 'manual') {
+      // Get custom/manual recipe from cache
+      if (params.source === 'cached') {
+        // Manual recipes are stored with provider='manual' in cached_recipes
+        const { data: manualRecipe, error } = await supabase
+          .from('cached_recipes')
+          .select('*')
+          .eq('id', params.recipeId)
+          .eq('provider', 'manual')
+          .single();
+        
+        if (error || !manualRecipe) {
+          throw new Error('Manual recipe not found');
+        }
+        recipe = manualRecipe;
+      } else {
+        throw new Error('Manual recipes must use source: "cached"');
+      }
     } else {
-      recipe = await this.fetchAndCacheRecipe(params.recipeId, params.provider);
-    }
+      // Fetch or get recipe from cache (for regular recipes)
+      if (params.source === 'cached') {
+        recipe = await this.getRecipeFromCache(params.recipeId, params.provider);
+      } else {
+        recipe = await this.fetchAndCacheRecipe(params.recipeId, params.provider);
+      }
 
-    if (!recipe) {
-      throw new Error('Recipe not found');
+      if (!recipe) {
+        throw new Error('Recipe not found');
+      }
     }
 
     // Check for allergen conflicts
@@ -261,16 +291,45 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Fetch or get recipe from cache
+    // Handle simple ingredient recipes (ID starts with ingredient_)
     let recipe: any;
-    if (params.source === 'cached') {
-      recipe = await this.getRecipeFromCache(params.recipeId, params.provider);
+    const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
+    
+    if (isSimpleIngredient) {
+      // Get simple ingredient recipe from ingredient service
+      recipe = await this.getIngredientRecipe(params.recipeId);
+      if (!recipe) {
+        throw new Error('Ingredient not found');
+      }
+    } else if (params.provider === 'manual') {
+      // Get custom/manual recipe from cache
+      if (params.source === 'cached') {
+        // Manual recipes are stored with provider='manual' in cached_recipes
+        const { data: manualRecipe, error } = await supabase
+          .from('cached_recipes')
+          .select('*')
+          .eq('id', params.recipeId)
+          .eq('provider', 'manual')
+          .single();
+        
+        if (error || !manualRecipe) {
+          throw new Error('Manual recipe not found');
+        }
+        recipe = manualRecipe;
+      } else {
+        throw new Error('Manual recipes must use source: "cached"');
+      }
     } else {
-      recipe = await this.fetchAndCacheRecipe(params.recipeId, params.provider);
-    }
+      // Fetch or get recipe from cache (for regular recipes)
+      if (params.source === 'cached') {
+        recipe = await this.getRecipeFromCache(params.recipeId, params.provider);
+      } else {
+        recipe = await this.fetchAndCacheRecipe(params.recipeId, params.provider);
+      }
 
-    if (!recipe) {
-      throw new Error('Recipe not found');
+      if (!recipe) {
+        throw new Error('Recipe not found');
+      }
     }
 
     // Add recipe using internal method
@@ -795,6 +854,43 @@ export class ManualMealPlanService {
       throw new Error('Cached recipe not found');
     }
 
+    // Extract health labels from originalApiResponse if missing (especially for Spoonacular)
+    if ((!recipe.health_labels || recipe.health_labels.length === 0) && provider === 'spoonacular') {
+      const originalResponse = recipe.original_api_response;
+      
+      // Check if originalApiResponse has data
+      const hasOriginalResponseData = originalResponse && typeof originalResponse === 'object' && Object.keys(originalResponse).length > 0;
+      
+      if (hasOriginalResponseData) {
+        // Spoonacular stores health info as boolean flags (glutenFree, dairyFree, etc.)
+        const extractedLabels: string[] = [];
+        if (originalResponse.glutenFree) extractedLabels.push('gluten-free');
+        if (originalResponse.dairyFree) extractedLabels.push('dairy-free');
+        if (originalResponse.vegetarian) extractedLabels.push('vegetarian');
+        if (originalResponse.vegan) extractedLabels.push('vegan');
+        if (originalResponse.ketogenic) extractedLabels.push('ketogenic');
+        if (originalResponse.lowFodmap) extractedLabels.push('low-fodmap');
+        if (originalResponse.whole30) extractedLabels.push('whole30');
+        
+        if (extractedLabels.length > 0) {
+          recipe.health_labels = extractedLabels;
+          console.log(`  ✅ Extracted ${extractedLabels.length} health labels from cached originalApiResponse:`, extractedLabels);
+        }
+      } else {
+        // originalApiResponse is empty, fetch fresh data from API
+        console.log('  ⚠️ originalApiResponse is empty, fetching fresh health labels from Spoonacular API...');
+        try {
+          const freshRecipeDetails = await recipeSearchService.getRecipeDetails(recipe.external_recipe_id);
+          if (freshRecipeDetails && freshRecipeDetails.healthLabels) {
+            recipe.health_labels = freshRecipeDetails.healthLabels;
+            console.log(`  ✅ Fetched ${recipe.health_labels.length} health labels from fresh API call:`, recipe.health_labels);
+          }
+        } catch (error) {
+          console.error('  ❌ Failed to fetch fresh health labels:', error);
+        }
+      }
+    }
+
     // Update last accessed timestamp
     await supabase
       .from('cached_recipes')
@@ -1228,6 +1324,52 @@ export class ManualMealPlanService {
       removeMealSlot: true
     });
   }
+
+  /**
+   * Get ingredient recipe from simple ingredient service
+   */
+  private async getIngredientRecipe(ingredientId: string): Promise<any> {
+    // Extract ingredient name from ID (format: ingredient_banana, ingredient_chicken_breast)
+    const ingredientName = ingredientId.replace(/^ingredient_/, '').replace(/_/g, ' ');
+    
+    console.log(`🔍 Getting ingredient recipe for: ${ingredientName}`);
+    
+    // Search for this specific ingredient (now async)
+    const results = await simpleIngredientService.searchIngredientsAsRecipes(ingredientName, 1);
+    
+    if (results.length === 0) {
+      console.log(`❌ Ingredient not found: ${ingredientName}`);
+      return null;
+    }
+
+    const ingredientRecipe = results[0];
+    
+    // Convert to cached recipe format for compatibility
+    return {
+      id: ingredientRecipe.id,
+      external_recipe_id: ingredientRecipe.id,
+      recipe_name: ingredientRecipe.title,
+      recipe_image_url: ingredientRecipe.image,
+      recipe_url: null,
+      servings: ingredientRecipe.servings,
+      ready_in_minutes: 0,
+      calories_per_serving: ingredientRecipe.calories,
+      protein_per_serving_g: ingredientRecipe.protein,
+      carbs_per_serving_g: ingredientRecipe.carbs,
+      fat_per_serving_g: ingredientRecipe.fat,
+      fiber_per_serving_g: ingredientRecipe.fiber,
+      nutrition_details: ingredientRecipe.nutrition,
+      ingredients: ingredientRecipe.ingredients,
+      instructions: ingredientRecipe.instructions,
+      health_labels: ingredientRecipe.healthLabels,
+      diet_labels: ingredientRecipe.dietLabels,
+      allergens: ingredientRecipe.allergens,
+      cuisine_types: ingredientRecipe.cuisineType,
+      meal_types: ingredientRecipe.mealType,
+      dish_types: ingredientRecipe.dishType
+    };
+  }
+
 }
 
 export const manualMealPlanService = new ManualMealPlanService();

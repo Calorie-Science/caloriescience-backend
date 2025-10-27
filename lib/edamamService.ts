@@ -574,8 +574,16 @@ export class EdamamService {
         return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
 
-      // Get Autocomplete API credentials with automatic rotation (uses same keys as nutrition)
-      const autocompleteKeys = await this.getApiKeyWithRotation('autocomplete');
+      // Get Autocomplete API credentials - try autocomplete first, fallback to nutrition keys
+      let autocompleteKeys;
+      try {
+        autocompleteKeys = await this.getApiKeyWithRotation('autocomplete');
+      } catch (error) {
+        console.log('⚠️ Autocomplete keys not found, using nutrition keys as fallback');
+        // Fallback to nutrition keys (they work for autocomplete too)
+        autocompleteKeys = await this.getApiKeyWithRotation('nutrition');
+      }
+      
       const url = 'https://api.edamam.com/auto-complete';
       const params = new URLSearchParams({
         app_id: autocompleteKeys.appId,

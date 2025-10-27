@@ -95,6 +95,28 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
         }
         
+        // Check if healthLabels are empty and extract from originalApiResponse (especially for Spoonacular)
+        if ((!standardizedRecipe.healthLabels || standardizedRecipe.healthLabels.length === 0) && 
+            cachedRecipe.provider === 'spoonacular' && 
+            standardizedRecipe.originalApiResponse) {
+          console.log('⚠️ healthLabels empty for Spoonacular recipe, extracting from originalApiResponse');
+          const originalResponse = standardizedRecipe.originalApiResponse;
+          const extractedLabels: string[] = [];
+          
+          if (originalResponse.glutenFree) extractedLabels.push('gluten-free');
+          if (originalResponse.dairyFree) extractedLabels.push('dairy-free');
+          if (originalResponse.vegetarian) extractedLabels.push('vegetarian');
+          if (originalResponse.vegan) extractedLabels.push('vegan');
+          if (originalResponse.ketogenic) extractedLabels.push('ketogenic');
+          if (originalResponse.lowFodmap) extractedLabels.push('low-fodmap');
+          if (originalResponse.whole30) extractedLabels.push('whole30');
+          
+          if (extractedLabels.length > 0) {
+            standardizedRecipe.healthLabels = extractedLabels;
+            console.log(`  ✅ Extracted ${extractedLabels.length} health labels:`, extractedLabels);
+          }
+        }
+        
         return res.status(200).json({
           success: true,
           data: standardizedRecipe,

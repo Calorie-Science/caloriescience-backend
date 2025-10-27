@@ -208,7 +208,7 @@ export class RecipeCacheService {
   /**
    * Get a specific recipe by provider and external ID
    */
-  async getRecipeByExternalId(provider: 'edamam' | 'spoonacular', externalId: string): Promise<CachedRecipe | null> {
+  async getRecipeByExternalId(provider: 'edamam' | 'spoonacular' | 'manual' | 'bonhappetee', externalId: string): Promise<CachedRecipe | null> {
     try {
       const { data: recipe, error } = await supabase
         .from('cached_recipes')

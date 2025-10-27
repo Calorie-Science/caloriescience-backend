@@ -100,7 +100,7 @@ export interface UnifiedRecipeSummary {
   title: string;
   image: string;
   sourceUrl: string;
-  source: 'edamam' | 'spoonacular' | 'manual';
+  source: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual';
   readyInMinutes?: number;
   servings?: number;
   // Nutrition data (per serving)
@@ -109,6 +109,15 @@ export interface UnifiedRecipeSummary {
   carbs?: number;
   fat?: number;
   fiber?: number;
+  // Metadata for filtering
+  healthLabels?: string[];
+  dietLabels?: string[];
+  cuisineType?: string[];
+  dishType?: string[];
+  mealType?: string[];
+  allergens?: string[];
+  // Ingredients for allergen checking
+  ingredients?: Array<{ name?: string; food?: string; [key: string]: any }>;
   // Filter compatibility warnings
   filterWarnings?: {
     unsupportedFilters: string[]; // Filters not supported by this recipe's provider
@@ -159,7 +168,7 @@ export interface UnifiedSearchParams {
   time?: string;
   excluded?: string[];
   maxResults?: number;
-  provider?: 'edamam' | 'spoonacular' | 'both' | 'manual';
+  provider?: 'edamam' | 'spoonacular' | 'bonhappetee' | 'both' | 'all' | 'manual';
   includeCustom?: boolean; // Include custom recipes in search (default: true)
 }
 
@@ -188,10 +197,11 @@ export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
   };
   appliedFilters: {
     allergenFilters: string[]; // Always applied from client (cannot be overridden)
-    uxPreferences: string[]; // What UX sent
+    uxPreferences: string[]; // What UX sent (no longer used as filter)
     uxCuisineTypes: string[]; // What UX sent
     removedPreferences: string[]; // Client preferences NOT in UX request
     removedCuisineTypes: string[]; // Client cuisine types NOT in UX request
+    ingredientLevelFiltering?: boolean; // Flag indicating ingredient-level allergen checking was performed
   };
 }
 
@@ -219,7 +229,7 @@ export class MultiProviderRecipeSearchService {
    * Search recipes across multiple providers
    */
   async searchRecipes(params: UnifiedSearchParams, userId?: string): Promise<UnifiedSearchResponse> {
-    const { provider = 'both', maxResults = 20, includeCustom = true } = params;
+    const { provider = 'all', maxResults = 20, includeCustom = true } = params;
     
     console.log('🔍 MultiProvider searchRecipes called with:', { provider, maxResults, params });
     
@@ -245,9 +255,19 @@ export class MultiProviderRecipeSearchService {
         results.totalResults += customResults.totalResults;
       }
       return results;
-    } else {
-      // Search both providers and combine results
-      console.log('🔄 Searching both providers');
+    } else if (provider === 'bonhappetee') {
+      console.log('🍛 Routing to Bon Happetee search');
+      const results = await this.searchBonHappetee(params);
+      // Add custom recipes if requested
+      if (includeCustom && userId) {
+        const customResults = await this.searchCustomRecipes(params, userId);
+        results.recipes = [...customResults.recipes, ...results.recipes].slice(0, maxResults);
+        results.totalResults += customResults.totalResults;
+      }
+      return results;
+    } else if (provider === 'both') {
+      // Search Edamam and Spoonacular (legacy compatibility)
+      console.log('🔄 Searching both providers (Edamam + Spoonacular)');
       const resultsPerProvider = includeCustom && userId ? Math.ceil(maxResults / 3) : Math.ceil(maxResults / 2);
       
       const promises: Promise<UnifiedSearchResponse>[] = [
@@ -279,6 +299,43 @@ export class MultiProviderRecipeSearchService {
         recipes: shuffledRecipes,
         totalResults,
         provider: includeCustom && userId ? 'both+custom' : 'both',
+        searchParams: params
+      };
+    } else {
+      // Search ALL providers (Edamam + Spoonacular + Bon Happetee)
+      console.log('🌍 Searching all providers (Edamam + Spoonacular + Bon Happetee)');
+      const resultsPerProvider = includeCustom && userId ? Math.ceil(maxResults / 4) : Math.ceil(maxResults / 3);
+      
+      const promises: Promise<UnifiedSearchResponse>[] = [
+        this.searchEdamam({ ...params, maxResults: resultsPerProvider }, userId),
+        this.searchSpoonacular({ ...params, maxResults: resultsPerProvider }),
+        this.searchBonHappetee({ ...params, maxResults: resultsPerProvider })
+      ];
+
+      // Include custom recipes if requested
+      if (includeCustom && userId) {
+        promises.push(this.searchCustomRecipes({ ...params, maxResults: resultsPerProvider }, userId));
+      }
+
+      const results = await Promise.allSettled(promises);
+
+      const recipes: UnifiedRecipeSummary[] = [];
+      let totalResults = 0;
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          recipes.push(...result.value.recipes);
+          totalResults += result.value.totalResults;
+        }
+      });
+
+      // Shuffle and limit results
+      const shuffledRecipes = this.shuffleArray(recipes).slice(0, maxResults);
+
+      return {
+        recipes: shuffledRecipes,
+        totalResults,
+        provider: includeCustom && userId ? 'all+custom' : 'all',
         searchParams: params
       };
     }
@@ -333,14 +390,20 @@ export class MultiProviderRecipeSearchService {
       const spoonacularParams: SpoonacularSearchParams = this.convertToSpoonacularParams(params);
       const response = await this.searchSpoonacularAPI(spoonacularParams);
       
-      // Convert to lightweight summaries (no detailed fetching)
+      // Convert to summaries
       const recipes: UnifiedRecipeSummary[] = response.results
         .slice(0, params.maxResults || 20)
         .map(recipe => this.convertSpoonacularToSummary(recipe));
 
       console.log(`✅ Spoonacular search completed: ${recipes.length} recipes found`);
+      
+      // Enrich with ingredients for allergen filtering
+      console.log(`🔍 Fetching ingredients for ${recipes.length} Spoonacular recipes...`);
+      const enrichedRecipes = await this.enrichSpoonacularWithIngredients(recipes);
+      console.log(`✅ Enriched ${enrichedRecipes.length} recipes with ingredient data`);
+
       return {
-        recipes,
+        recipes: enrichedRecipes,
         totalResults: response.totalResults,
         provider: 'spoonacular',
         searchParams: params
@@ -353,6 +416,203 @@ export class MultiProviderRecipeSearchService {
         provider: 'spoonacular',
         searchParams: params
       };
+    }
+  }
+
+  /**
+   * Enrich Spoonacular search results with ingredients from details API
+   * This is needed for ingredient-level allergen filtering
+   */
+  private async enrichSpoonacularWithIngredients(recipes: UnifiedRecipeSummary[]): Promise<UnifiedRecipeSummary[]> {
+    try {
+      // Fetch details for all recipes in parallel (with rate limiting)
+      const enrichPromises = recipes.map(async (recipe) => {
+        try {
+          // Try to get from cache first
+          const { data: cached } = await supabase
+            .from('cached_recipes')
+            .select('ingredients, health_labels, allergens')
+            .eq('provider', 'spoonacular')
+            .eq('external_recipe_id', recipe.id)
+            .eq('cache_status', 'active')
+            .single();
+          
+          if (cached && cached.ingredients && cached.ingredients.length > 0) {
+            console.log(`  📦 Using cached ingredients for ${recipe.title}`);
+            return {
+              ...recipe,
+              ingredients: cached.ingredients,
+              healthLabels: cached.health_labels || recipe.healthLabels,
+              allergens: cached.allergens || recipe.allergens
+            };
+          }
+          
+          // Fetch from API if not in cache
+          console.log(`  🌐 Fetching ingredients from API for ${recipe.title}`);
+          const detailsUrl = `https://api.spoonacular.com/recipes/${recipe.id}/information?apiKey=${this.spoonacularApiKey}`;
+          const detailsResponse = await fetch(detailsUrl);
+          
+          if (!detailsResponse.ok) {
+            console.warn(`  ⚠️ Failed to fetch details for recipe ${recipe.id}`);
+            return recipe; // Return original without ingredients
+          }
+          
+          const details = await detailsResponse.json();
+          
+          // Extract ingredients
+          const ingredients = details.extendedIngredients?.map((ing: any) => ({
+            name: ing.name,
+            food: ing.name,
+            amount: ing.amount,
+            unit: ing.unit,
+            original: ing.original
+          })) || [];
+          
+          return {
+            ...recipe,
+            ingredients
+          };
+          
+        } catch (error) {
+          console.error(`  ❌ Error enriching recipe ${recipe.id}:`, error);
+          return recipe; // Return original on error
+        }
+      });
+      
+      // Wait for all enrichments (with timeout)
+      const enriched = await Promise.all(enrichPromises);
+      return enriched;
+      
+    } catch (error) {
+      console.error('❌ Error enriching Spoonacular recipes:', error);
+      return recipes; // Return original recipes on error
+    }
+  }
+
+  /**
+   * Search Bon Happetee (Indian food database)
+   */
+  private async searchBonHappetee(params: UnifiedSearchParams): Promise<UnifiedSearchResponse> {
+    console.log('🍛 Starting Bon Happetee search with params:', params);
+    
+    if (!this.bonHappeteeService) {
+      console.warn('⚠️ Bon Happetee service not available');
+      return {
+        recipes: [],
+        totalResults: 0,
+        provider: 'bonhappetee',
+        searchParams: params
+      };
+    }
+
+    try {
+      // Bon Happetee only supports simple text search
+      const query = params.query || '';
+      if (!query) {
+        return {
+          recipes: [],
+          totalResults: 0,
+          provider: 'bonhappetee',
+          searchParams: params
+        };
+      }
+
+      const results = await this.bonHappeteeService.searchRecipes(query);
+      
+      // Convert to unified format
+      const recipes: UnifiedRecipeSummary[] = results
+        .slice(0, params.maxResults || 20)
+        .map(result => this.convertBonHappeteeToUnified(result) as UnifiedRecipeSummary);
+
+      console.log(`✅ Bon Happetee search completed: ${recipes.length} recipes found`);
+      
+      // Enrich with ingredients and allergen data for filtering
+      console.log(`🔍 Fetching ingredients & allergens for ${recipes.length} Bon Happetee recipes...`);
+      const enrichedRecipes = await this.enrichBonHappeteeWithIngredientsAndAllergens(recipes);
+      console.log(`✅ Enriched ${enrichedRecipes.length} recipes with ingredient & allergen data`);
+      
+      return {
+        recipes: enrichedRecipes,
+        totalResults: results.length,
+        provider: 'bonhappetee',
+        searchParams: params
+      };
+    } catch (error) {
+      console.error('❌ Bon Happetee search error:', error);
+      return {
+        recipes: [],
+        totalResults: 0,
+        provider: 'bonhappetee',
+        searchParams: params
+      };
+    }
+  }
+
+  /**
+   * Enrich Bon Appetit search results with ingredients and allergen data
+   * Uses /ingredients and /disorder endpoints
+   */
+  private async enrichBonHappeteeWithIngredientsAndAllergens(recipes: UnifiedRecipeSummary[]): Promise<UnifiedRecipeSummary[]> {
+    try {
+      const enrichPromises = recipes.map(async (recipe) => {
+        try {
+          // Try to get from cache first
+          const { data: cached } = await supabase
+            .from('cached_recipes')
+            .select('ingredients, allergens, health_labels')
+            .eq('provider', 'bonhappetee')
+            .eq('external_recipe_id', recipe.id)
+            .eq('cache_status', 'active')
+            .single();
+          
+          if (cached && cached.ingredients && cached.ingredients.length > 0) {
+            console.log(`  📦 Using cached data for ${recipe.title}`);
+            return {
+              ...recipe,
+              ingredients: cached.ingredients,
+              allergens: cached.allergens || [],
+              healthLabels: cached.health_labels || recipe.healthLabels
+            };
+          }
+          
+          // Fetch ingredients and allergens from API
+          console.log(`  🌐 Fetching ingredients & allergens from API for ${recipe.title}`);
+          const [ingredientsData, disorderData] = await Promise.all([
+            this.bonHappeteeService.getIngredients(recipe.id),
+            this.bonHappeteeService.getRecipeDetails(recipe.id)
+          ]);
+          
+          // Transform ingredients to our format
+          const ingredients = (ingredientsData || []).map((ing: any) => ({
+            name: ing.ingredient_name || ing.food_name || '',
+            food: ing.ingredient_name || ing.food_name || '',
+            amount: ing.quantity || 0,
+            unit: ing.unit || ''
+          }));
+          
+          // Extract allergens from disorder data
+          const allergens = disorderData?.allergens || [];
+          const healthLabels = disorderData?.healthLabels || [];
+          
+          return {
+            ...recipe,
+            ingredients,
+            allergens,
+            healthLabels
+          };
+          
+        } catch (error) {
+          console.error(`  ❌ Error enriching Bon Happetee recipe ${recipe.id}:`, error);
+          return recipe; // Return original on error
+        }
+      });
+      
+      const enriched = await Promise.all(enrichPromises);
+      return enriched;
+      
+    } catch (error) {
+      console.error('❌ Error enriching Bon Happetee recipes:', error);
+      return recipes;
     }
   }
 
@@ -448,6 +708,15 @@ export class MultiProviderRecipeSearchService {
         carbs: recipe.carbs_per_serving_g || undefined,
         fat: recipe.fat_per_serving_g || undefined,
         fiber: recipe.fiber_per_serving_g || undefined,
+        // Add complete metadata for filtering
+        healthLabels: recipe.health_labels || [],
+        dietLabels: recipe.diet_labels || [],
+        cuisineType: recipe.cuisine_types || [],
+        dishType: recipe.dish_types || [],
+        mealType: recipe.meal_types || [],
+        allergens: recipe.allergens || [],
+        // Add ingredients for allergen checking
+        ingredients: recipe.ingredients || [],
         isCustom: true,
         createdBy: recipe.created_by_nutritionist_id,
         isPublic: recipe.is_public
@@ -740,7 +1009,22 @@ export class MultiProviderRecipeSearchService {
       protein: proteinPerServing,
       carbs: carbsPerServing,
       fat: fatPerServing,
-      fiber: fiberPerServing
+      fiber: fiberPerServing,
+      // Add complete metadata for filtering
+      healthLabels: recipe.healthLabels || [],
+      dietLabels: recipe.dietLabels || [],
+      cuisineType: recipe.cuisineType || [],
+      dishType: recipe.dishType || [],
+      mealType: recipe.mealType || [],
+      allergens: null, // Edamam doesn't provide explicit allergens
+      // Add ingredients for allergen checking
+      ingredients: recipe.ingredients?.map(ing => ({
+        name: ing.food,
+        food: ing.food,
+        quantity: ing.quantity,
+        measure: ing.measure,
+        weight: ing.weight
+      })) || []
     };
   }
 
@@ -789,6 +1073,16 @@ export class MultiProviderRecipeSearchService {
     // Extract nutrition data from Spoonacular recipe (now available with addRecipeNutrition=true)
     const nutrition = this.extractNutritionFromSpoonacular(recipe);
     
+    // Extract health labels from boolean flags
+    const healthLabels: string[] = [];
+    if (recipe.glutenFree) healthLabels.push('gluten-free');
+    if (recipe.dairyFree) healthLabels.push('dairy-free');
+    if (recipe.vegan) healthLabels.push('vegan');
+    if (recipe.vegetarian) healthLabels.push('vegetarian');
+    if (recipe.ketogenic) healthLabels.push('ketogenic');
+    if (recipe.lowFodmap) healthLabels.push('low-fodmap');
+    if (recipe.whole30) healthLabels.push('whole30');
+    
     return {
       id: recipe.id.toString(),
       title: recipe.title,
@@ -801,7 +1095,22 @@ export class MultiProviderRecipeSearchService {
       protein: nutrition.protein,
       carbs: nutrition.carbs,
       fat: nutrition.fat,
-      fiber: nutrition.fiber
+      fiber: nutrition.fiber,
+      // Add complete metadata for filtering
+      healthLabels: healthLabels,
+      dietLabels: recipe.diets || [],
+      cuisineType: recipe.cuisines || [],
+      dishType: recipe.dishTypes || [],
+      mealType: recipe.dishTypes || [], // Spoonacular uses dishTypes for meal types too
+      allergens: null, // Spoonacular doesn't provide explicit allergens
+      // Add ingredients for allergen checking
+      ingredients: recipe.extendedIngredients?.map(ing => ({
+        name: ing.name,
+        food: ing.name,
+        amount: ing.amount,
+        unit: ing.unit,
+        original: ing.original
+      })) || []
     };
   }
 
@@ -845,6 +1154,33 @@ export class MultiProviderRecipeSearchService {
         ...this.extractHealthLabels(recipe),
         ...(recipe.diets || [])
       ]
+    };
+  }
+
+  /**
+   * Convert Bon Happetee search result to unified format
+   */
+  private convertBonHappeteeToUnified(result: any): UnifiedRecipe {
+    return {
+      id: result.food_unique_id,
+      title: result.common_names || result.food_name,
+      image: null, // Bon Happetee doesn't provide images in search
+      servings: 1,
+      readyInMinutes: 0,
+      calories: result.nutrients?.calories || 0,
+      protein: result.nutrients?.protein || 0,
+      carbs: result.nutrients?.carbs || 0,
+      fat: result.nutrients?.fats || 0,
+      fiber: 0, // Not available in search results
+      sourceUrl: null,
+      source: 'bonhappetee',
+      ingredients: [],
+      healthLabels: [], // Not available in search, only in details
+      dietLabels: [],
+      cuisineType: [],
+      dishType: [],
+      mealType: [],
+      tags: [result.food_name, result.serving_type]
     };
   }
 
@@ -1091,6 +1427,9 @@ export class MultiProviderRecipeSearchService {
 
       const recipe = await response.json();
 
+      // Extract health labels from Spoonacular boolean flags
+      const healthLabels = this.extractHealthLabels(recipe);
+
       return {
         id: recipeId,
         title: recipe.title,
@@ -1119,7 +1458,7 @@ export class MultiProviderRecipeSearchService {
         cuisines: recipe.cuisines || [],
         dishTypes: recipe.dishTypes || [],
         diets: recipe.diets || [],
-        healthLabels: recipe.healthLabels || [],
+        healthLabels: healthLabels,
         cautions: recipe.cautions || [],
         tags: recipe.tags || []
       };
@@ -1704,23 +2043,25 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       console.log(`🔍 Broad search mode: ${searchQuery}`);
     }
 
-    // 5. Build enhanced search params
+    // 5. Build enhanced search params - ONLY allergens and cuisine types as filters
     const enhancedParams: UnifiedSearchParams = {
       ...params,
       query: searchQuery,
-      // Always add allergen filters to health filters
+      // Only add allergen filters to health filters (NO dietary preferences)
       health: [
         ...(params.health || []),
         ...allergenFiltersFromClient
       ],
-      // Use UX-provided preferences and cuisine types (already in params.diet and params.cuisineType)
-      diet: uxPreferences,
+      // DO NOT apply dietary preferences as filters
+      diet: undefined,
+      // Only use cuisine types as filter
       cuisineType: uxCuisineTypes
     };
 
-    console.log(`🔍 Final search params:`, enhancedParams);
+    console.log(`🔍 Final search params (allergens + cuisine only):`, enhancedParams);
+    console.log(`❌ Dietary preferences NOT used as filters:`, uxPreferences);
 
-    // 6. Perform standard search (APIs will filter out allergens)
+    // 6. Perform standard search (APIs will filter out allergens at metadata level)
     let results = await this.searchRecipes(enhancedParams, userId);
 
     // 7. Post-filter for name-only search
@@ -1736,42 +2077,51 @@ Return a JSON object where each key is an ingredient name and the value is an ar
       results.totalResults = results.recipes.length;
     }
 
-    // 8. Add filter compatibility warnings to each recipe
-    const recipesWithWarnings = results.recipes.map(recipe => {
-      // Check for unsupported preferences
-      const unsupportedPrefs = this.getUnsupportedPreferences(
-        uxPreferences,
-        recipe.source
+    // 8. INGREDIENT-LEVEL ALLERGEN CHECKING - Double-check all ingredients
+    console.log(`🔍 Performing ingredient-level allergen checking...`);
+    const { checkAllergenConflicts } = await import('./allergenChecker');
+    
+    const recipesBeforeIngredientFilter = results.recipes.length;
+    
+    // Filter out recipes where ingredients contain allergens
+    const filteredRecipes = results.recipes.filter(recipe => {
+      // Check allergens in actual ingredients
+      const conflictCheck = checkAllergenConflicts(
+        recipe.allergens || [],
+        recipe.healthLabels || [],
+        clientAllergies,
+        recipe.ingredients // Pass ingredients for keyword checking
       );
       
-      const filterWarnings = unsupportedPrefs.length > 0 ? {
-        unsupportedFilters: unsupportedPrefs,
-        message: `This ${recipe.source} recipe may not respect: ${unsupportedPrefs.join(', ')}`
-      } : undefined;
+      if (conflictCheck.hasConflict) {
+        console.log(`❌ Filtered out "${recipe.title}" - ingredient conflicts:`, conflictCheck.conflictingAllergens);
+      }
       
-      return {
-        ...recipe,
-        filterWarnings
-      };
+      return !conflictCheck.hasConflict; // Keep only recipes without conflicts
     });
+    
+    console.log(`🧹 Ingredient-level filter: ${recipesBeforeIngredientFilter} → ${filteredRecipes.length} recipes`);
+    results.recipes = filteredRecipes;
+    results.totalResults = filteredRecipes.length;
 
     // 9. Return with metadata
     return {
       ...results,
-      recipes: recipesWithWarnings,
+      recipes: filteredRecipes, // Use ingredient-filtered recipes
       clientProfile: {
         id: client.id,
         name: clientFullName,
         allergies: clientAllergies,
-        preferences: clientPreferences,
+        preferences: clientPreferences, // Still return for reference, just not used as filter
         cuisineTypes: clientCuisineTypes
       },
       appliedFilters: {
         allergenFilters: allergenFiltersFromClient,
-        uxPreferences: uxPreferences,
+        uxPreferences: [], // No longer applying dietary preferences
         uxCuisineTypes: uxCuisineTypes,
-        removedPreferences: removedPreferences,
-        removedCuisineTypes: removedCuisineTypes
+        removedPreferences: [], // No longer relevant
+        removedCuisineTypes: removedCuisineTypes,
+        ingredientLevelFiltering: true // Flag to indicate ingredient checking was done
       }
     };
   }
@@ -1948,7 +2298,19 @@ Return a JSON object where each key is an ingredient name and the value is an ar
     const uniqueFilters = new Set<string>();
 
     for (const allergen of allergies) {
-      const normalized = allergen.toLowerCase().trim();
+      let normalized = allergen.toLowerCase().trim();
+      
+      // If allergen already ends with "-free", it's the health label itself
+      if (normalized.endsWith('-free')) {
+        if (!uniqueFilters.has(normalized)) {
+          filters.push(normalized);
+          uniqueFilters.add(normalized);
+          console.log(`✅ Using health label directly: "${allergen}"`);
+        }
+        continue;
+      }
+      
+      // Otherwise map the base allergen to health label
       const filter = mapping[normalized];
 
       if (filter && !uniqueFilters.has(filter)) {

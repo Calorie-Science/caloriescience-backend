@@ -3,6 +3,7 @@ import { requireAuth } from '../../lib/auth';
 import { MealPlanDraftService } from '../../lib/mealPlanDraftService';
 import { RecipeCacheService } from '../../lib/recipeCacheService';
 import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
+import { simpleIngredientService } from '../../lib/simpleIngredientService';
 import Joi from 'joi';
 
 const draftService = new MealPlanDraftService();
@@ -106,6 +107,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
+    // Check if this is a simple ingredient recipe
+    const isSimpleIngredient = validatedRecipeId.startsWith('ingredient_') || recipe.isSimpleIngredient;
+    
+    if (isSimpleIngredient) {
+      // Handle simple ingredient recipes - return with customization support
+      return await handleIngredientRecipe(validatedRecipeId, recipe, res);
+    }
+
     // Step 3: Get base recipe from cache or API (using same structure as recipe details API)
     let baseRecipe: any;
     let fromCache = false;
@@ -198,6 +207,44 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       }
       
+      // Extract health labels from originalApiResponse if missing (especially for Spoonacular)
+      let healthLabels = cached.health_labels || cached.healthLabels || [];
+      if ((!healthLabels || healthLabels.length === 0) && source === 'spoonacular') {
+        const originalResponse = cached.original_api_response || cached.originalApiResponse;
+        
+        // Check if originalApiResponse has data and extract labels
+        const hasOriginalResponseData = originalResponse && Object.keys(originalResponse).length > 0;
+        
+        if (hasOriginalResponseData) {
+          // Spoonacular stores health info as boolean flags (glutenFree, dairyFree, etc.)
+          const extractedLabels: string[] = [];
+          if (originalResponse.glutenFree) extractedLabels.push('gluten-free');
+          if (originalResponse.dairyFree) extractedLabels.push('dairy-free');
+          if (originalResponse.vegetarian) extractedLabels.push('vegetarian');
+          if (originalResponse.vegan) extractedLabels.push('vegan');
+          if (originalResponse.ketogenic) extractedLabels.push('ketogenic');
+          if (originalResponse.lowFodmap) extractedLabels.push('low-fodmap');
+          if (originalResponse.whole30) extractedLabels.push('whole30');
+          
+          if (extractedLabels.length > 0) {
+            healthLabels = extractedLabels;
+            console.log(`  ✅ Extracted ${extractedLabels.length} health labels from cached originalApiResponse:`, extractedLabels);
+          }
+        } else {
+          // originalApiResponse is empty, fetch fresh data from API
+          console.log('  ⚠️ originalApiResponse is empty, fetching fresh health labels from Spoonacular API...');
+          try {
+            const freshRecipeDetails = await multiProviderService.getRecipeDetails(validatedRecipeId);
+            if (freshRecipeDetails && freshRecipeDetails.healthLabels) {
+              healthLabels = freshRecipeDetails.healthLabels;
+              console.log(`  ✅ Fetched ${healthLabels.length} health labels from fresh API call:`, healthLabels);
+            }
+          } catch (error) {
+            console.error('  ❌ Failed to fetch fresh health labels:', error);
+          }
+        }
+      }
+      
       baseRecipe = {
         id: cached.id,
         provider: cached.provider,
@@ -210,7 +257,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         cuisineTypes: cached.cuisine_types || cached.cuisineTypes || [],
         mealTypes: cached.meal_types || cached.mealTypes || [],
         dishTypes: cached.dish_types || cached.dishTypes || [],
-        healthLabels: cached.health_labels || cached.healthLabels || [],
+        healthLabels: healthLabels,
         dietLabels: cached.diet_labels || cached.dietLabels || [],
         servings: cached.servings,
         prepTimeMinutes: cached.prep_time_minutes || cached.prepTimeMinutes,
@@ -835,6 +882,71 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
+}
+
+/**
+ * Handle simple ingredient recipes (banana, apple, etc.)
+ * Now marked as Spoonacular so they can use portion/unit modification
+ */
+async function handleIngredientRecipe(recipeId: string, recipe: any, res: VercelResponse): Promise<VercelResponse> {
+  // Extract ingredient name from ID (format: ingredient_banana)
+  const ingredientName = recipeId.replace(/^ingredient_/, '').replace(/_/g, ' ');
+  
+  console.log(`✅ Handling simple ingredient recipe: ${ingredientName}`);
+  
+  // Get ingredient recipe from simple ingredient service (now async)
+  const ingredients = await simpleIngredientService.searchIngredientsAsRecipes(ingredientName, 1);
+  
+  if (ingredients.length === 0) {
+    return res.status(404).json({
+      error: 'Ingredient not found',
+      message: `Ingredient ${ingredientName} not found in database`
+    });
+  }
+
+  const ingredientRecipe = ingredients[0];
+
+  // Return ingredient recipe in customized format (as Spoonacular for compatibility)
+  return res.status(200).json({
+    success: true,
+    data: {
+      recipeId: ingredientRecipe.id,
+      title: ingredientRecipe.title,
+      image: ingredientRecipe.image,
+      servings: ingredientRecipe.servings,
+      readyInMinutes: 0,
+      source: 'spoonacular', // Marked as spoonacular for customization compatibility
+      sourceUrl: null,
+      
+      // Nutrition
+      nutrition: ingredientRecipe.nutrition,
+      
+      // Ingredients - Spoonacular format with full nutrition
+      ingredients: ingredientRecipe.ingredients,
+      
+      // Instructions
+      instructions: ingredientRecipe.instructions,
+      
+      // Metadata
+      healthLabels: ingredientRecipe.healthLabels,
+      dietLabels: ingredientRecipe.dietLabels,
+      allergens: ingredientRecipe.allergens,
+      cuisineType: ingredientRecipe.cuisineType,
+      dishType: ingredientRecipe.dishType,
+      mealType: ingredientRecipe.mealType,
+      
+      // Customization info
+      currentCustomizations: recipe.customizations?.[recipeId] || null,
+      currentServings: recipe.servings || 1,
+      
+      // Special flags
+      isIngredient: true,
+      isSimpleIngredient: true,
+      canCustomize: true, // Can modify portion size and unit
+      
+      message: 'Simple ingredient - you can modify the portion size and unit'
+    }
+  });
 }
 
 export default requireAuth(handler);

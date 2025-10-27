@@ -5,6 +5,7 @@ import {
 } from '../lib/multiProviderRecipeSearchService';
 import { requireAuth } from '../lib/auth';
 import { enrichRecipesWithAllergenInfo } from '../lib/allergenChecker';
+import { simpleIngredientService } from '../lib/simpleIngredientService';
 
 const multiProviderService = new MultiProviderRecipeSearchService();
 
@@ -131,10 +132,30 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         user.id
       );
 
+      // Always search for 1-2 matching ingredients to mix with recipes (for simple foods like fruits, vegetables)
+      let ingredientRecipes: any[] = [];
+      let totalResults = results.totalResults;
+      
+      if (query && searchType !== 'ingredient') {
+        const clientAllergens = results.clientProfile.allergies || []; // Fixed: allergies not allergens!
+        
+        // Use simple ingredient service with allergen filtering (now async)
+        ingredientRecipes = await simpleIngredientService.searchIngredientsAsRecipes(
+          query as string,
+          2, // Always fetch 2 ingredients
+          clientAllergens.length > 0 ? clientAllergens : undefined // Only pass if not empty
+        );
+        
+        totalResults += ingredientRecipes.length;
+      }
+
+      // Combine recipes and ingredient-based recipes
+      const allRecipes = [...results.recipes, ...ingredientRecipes];
+
       // Enrich recipes with allergen conflict information
       const recipesWithAllergenInfo = enrichRecipesWithAllergenInfo(
-        results.recipes,
-        results.clientProfile.allergens || []
+        allRecipes,
+        results.clientProfile.allergies || [] // Fixed: allergies not allergens!
       );
 
       // Count recipes with allergen conflicts
@@ -151,11 +172,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         success: true,
         data: {
           ...results,
-          recipes: recipesWithAllergenInfo // Replace with enriched recipes
+          recipes: recipesWithAllergenInfo, // Replace with enriched recipes
+          totalResults: totalResults,
+          ingredientRecipesCount: ingredientRecipes.length
         },
         metadata: {
           clientName: results.clientProfile.name,
-          totalResults: results.totalResults,
+          totalResults: totalResults,
+          recipeResults: results.recipes.length,
+          ingredientResults: ingredientRecipes.length,
           recipesWithAllergenConflicts: recipesWithConflicts.length,
           appliedFilters: results.appliedFilters,
           info: hasRemovedFilters ? {
@@ -164,7 +189,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             removedCuisineTypes: results.appliedFilters.removedCuisineTypes
           } : null
         },
-        message: `Found ${results.recipes.length} recipes from ${results.provider}${recipesWithConflicts.length > 0 ? ` (${recipesWithConflicts.length} with allergen warnings)` : ''}`
+        debug: {
+          clientProfile: results.clientProfile,
+          clientAllergensPassedToFilter: results.clientProfile.allergies || [], // Fixed: allergies not allergens!
+          ingredientRecipesBeforeEnrichment: ingredientRecipes.map(i => ({
+            id: i.id,
+            title: i.title,
+            allergens: i.allergens,
+            healthLabels: i.healthLabels
+          }))
+        },
+        message: `Found ${recipesWithAllergenInfo.length} results (${results.recipes.length} recipes${ingredientRecipes.length > 0 ? `, ${ingredientRecipes.length} ingredients` : ''})${recipesWithConflicts.length > 0 ? ` (${recipesWithConflicts.length} with allergen warnings)` : ''}`
       });
 
     } catch (error) {

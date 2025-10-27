@@ -834,7 +834,7 @@ async function handleDeselectRecipe(req: VercelRequest, res: VercelResponse, use
 async function calculateNutritionForModifications(
   originalRecipeNutrition: any,
   modifications: any[],
-  source: 'edamam' | 'spoonacular',
+  source: 'edamam' | 'spoonacular' | 'manual' | 'bonhappetee',
   originalRecipe?: any,
   recipeServings: number = 1
 ): Promise<any> {
@@ -909,11 +909,11 @@ async function calculateNutritionForModifications(
 
 /**
  * Helper function to get ingredient nutrition
- * Always uses Spoonacular for accuracy, regardless of recipe source
+ * Tries Spoonacular first, then Edamam as fallback (works for all recipe sources)
  */
 async function getIngredientNutrition(
   ingredient: string,
-  source: 'edamam' | 'spoonacular',
+  source: 'edamam' | 'spoonacular' | 'manual' | 'bonhappetee',
   amount?: number,
   unit?: string
 ): Promise<any> {

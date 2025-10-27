@@ -22,7 +22,7 @@ const replaceIngredientSchema = Joi.object({
   amount: Joi.number().min(0).optional(),
   unit: Joi.string().optional(),
   servings: Joi.number().min(0.1).max(20).default(1).optional(), // Portion size adjustment
-  source: Joi.string().valid('edamam', 'spoonacular').required()
+  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'auto').default('auto').optional() // 'auto' tries both providers
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {

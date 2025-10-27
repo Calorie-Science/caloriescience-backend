@@ -10,23 +10,55 @@ export interface CustomRecipeIngredient {
 }
 
 export interface IngredientNutrition {
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
-  fiber?: number;
-  sugar?: number;
-  sodium?: number;
-  weight?: number;
-  // Extended nutrition
-  saturatedFat?: number;
-  cholesterol?: number;
-  vitaminA?: number;
-  vitaminC?: number;
-  calcium?: number;
-  iron?: number;
-  potassium?: number;
-  [key: string]: any; // Allow additional nutrition fields
+  calories: number;
+  
+  macros: {
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber: number;
+    sugar: number;
+    sodium: number;
+    cholesterol?: number;
+    saturatedFat?: number;
+    transFat?: number;
+    monounsaturatedFat?: number;
+    polyunsaturatedFat?: number;
+  };
+  
+  micros: {
+    vitamins: {
+      vitaminA?: number;
+      vitaminC?: number;
+      vitaminD?: number;
+      vitaminE?: number;
+      vitaminK?: number;
+      thiamin?: number;
+      riboflavin?: number;
+      niacin?: number;
+      vitaminB6?: number;
+      folate?: number;
+      vitaminB12?: number;
+      biotin?: number;
+      pantothenicAcid?: number;
+    };
+    minerals: {
+      calcium?: number;
+      iron?: number;
+      magnesium?: number;
+      phosphorus?: number;
+      potassium?: number;
+      zinc?: number;
+      copper?: number;
+      manganese?: number;
+      selenium?: number;
+      iodine?: number;
+      chromium?: number;
+      molybdenum?: number;
+    };
+  };
+  
+  weight?: number; // Optional weight in grams
 }
 
 export interface CreateCustomRecipeInput {

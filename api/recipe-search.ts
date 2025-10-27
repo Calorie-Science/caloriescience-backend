@@ -1,8 +1,78 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { MultiProviderRecipeSearchService, UnifiedSearchParams } from '../lib/multiProviderRecipeSearchService';
 import { requireAuth } from '../lib/auth';
+import { checkAllergenConflicts } from '../lib/allergenChecker';
+import { supabase } from '../lib/supabase';
 
 const multiProviderService = new MultiProviderRecipeSearchService();
+
+/**
+ * Check which recipes are used in active drafts for a nutritionist
+ */
+async function getRecipeUsageInDrafts(nutritionistId: string, recipeIds: string[]): Promise<Map<string, { draftIds: string[]; planIds: string[] }>> {
+  const usage = new Map<string, { draftIds: string[]; planIds: string[] }>();
+  
+  if (recipeIds.length === 0) {
+    return usage;
+  }
+  
+  try {
+    // Get all active drafts for this nutritionist
+    const { data: drafts, error } = await supabase
+      .from('meal_plan_drafts')
+      .select('id, suggestions')
+      .eq('nutritionist_id', nutritionistId)
+      .in('status', ['draft', 'completed']) // Exclude finalized
+      .gte('expires_at', new Date().toISOString()); // Only non-expired drafts
+    
+    if (error || !drafts) {
+      console.error('Error fetching drafts for recipe usage:', error);
+      return usage;
+    }
+    
+    // Scan all drafts for recipe usage
+    for (const draft of drafts) {
+      const suggestions = draft.suggestions || [];
+      
+      for (const day of suggestions) {
+        const meals = day.meals || {};
+        
+        for (const mealName of Object.keys(meals)) {
+          const meal = meals[mealName];
+          const recipes = meal.recipes || [];
+          const selectedRecipeId = meal.selectedRecipeId;
+          
+          // Check all recipes in this meal
+          for (const recipe of recipes) {
+            if (recipeIds.includes(recipe.id)) {
+              if (!usage.has(recipe.id)) {
+                usage.set(recipe.id, { draftIds: [], planIds: [] });
+              }
+              
+              const recipeUsage = usage.get(recipe.id)!;
+              if (!recipeUsage.draftIds.includes(draft.id)) {
+                recipeUsage.draftIds.push(draft.id);
+              }
+              
+              // Mark if this recipe is selected
+              if (recipe.id === selectedRecipeId) {
+                // Recipe is selected in this draft
+                recipeUsage.planIds.push(draft.id);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`📊 Recipe usage check: ${usage.size} recipes used in ${drafts.length} drafts`);
+    
+  } catch (error) {
+    console.error('Error checking recipe usage:', error);
+  }
+  
+  return usage;
+}
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   // Get user from request (set by requireAuth middleware)
@@ -43,11 +113,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       // Validate provider
-      const validProviders = ['edamam', 'spoonacular', 'both', 'manual'];
+      const validProviders = ['edamam', 'spoonacular', 'bonhappetee', 'both', 'all', 'manual'];
       if (!validProviders.includes(provider as string)) {
         return res.status(400).json({
           error: 'Invalid provider parameter',
-          message: 'provider must be one of: edamam, spoonacular, both, manual'
+          message: 'provider must be one of: edamam, spoonacular, bonhappetee, both, all, manual'
         });
       }
 
@@ -63,7 +133,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         time: time as string,
         excluded: excluded ? (Array.isArray(excluded) ? excluded as string[] : [excluded as string]) : undefined,
         maxResults: maxResultsNum,
-        provider: provider as 'edamam' | 'spoonacular' | 'both' | 'manual',
+        provider: provider as 'edamam' | 'spoonacular' | 'bonhappetee' | 'both' | 'all' | 'manual',
         includeCustom: includeCustom === 'true'
       };
 
@@ -77,10 +147,67 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Search recipes directly from APIs (no caching)
       const results = await multiProviderService.searchRecipes(searchParams, user.id);
 
+      // Optional: Apply ingredient-level allergen filtering if health filters provided
+      let filteredRecipes = results.recipes;
+      let filteringApplied = false;
+      
+      if (searchParams.health && searchParams.health.length > 0) {
+        console.log(`🔍 Applying ingredient-level allergen filtering for health labels:`, searchParams.health);
+        
+        const recipesBeforeFilter = filteredRecipes.length;
+        
+        // Extract allergens from health labels (e.g., "dairy-free" → "dairy")
+        const allergenFilters = searchParams.health
+          .filter(h => h.endsWith('-free'))
+          .map(h => h.replace('-free', ''));
+        
+        if (allergenFilters.length > 0) {
+          filteredRecipes = filteredRecipes.filter(recipe => {
+            const conflictCheck = checkAllergenConflicts(
+              recipe.allergens || [],
+              recipe.healthLabels || [],
+              allergenFilters,
+              recipe.ingredients
+            );
+            
+            if (conflictCheck.hasConflict) {
+              console.log(`❌ Filtered "${recipe.title}" - conflicts:`, conflictCheck.conflictingAllergens);
+            }
+            
+            return !conflictCheck.hasConflict;
+          });
+          
+          filteringApplied = true;
+          console.log(`🧹 Ingredient-level filter: ${recipesBeforeFilter} → ${filteredRecipes.length} recipes`);
+        }
+      }
+
+      // Get recipe usage in drafts
+      const recipeIds = filteredRecipes.map(r => r.id);
+      const usageMap = await getRecipeUsageInDrafts(user.id, recipeIds);
+      
+      // Enrich recipes with usage metadata
+      const enrichedRecipes = filteredRecipes.map(recipe => ({
+        ...recipe,
+        usageMetadata: usageMap.has(recipe.id) ? {
+          usedInDrafts: usageMap.get(recipe.id)!.draftIds,
+          selectedInPlans: usageMap.get(recipe.id)!.planIds
+        } : undefined
+      }));
+
       return res.status(200).json({
         success: true,
-        data: results,
-        message: `Found ${results.recipes.length} recipes from ${results.provider}`
+        data: {
+          ...results,
+          recipes: enrichedRecipes,
+          totalResults: filteredRecipes.length
+        },
+        metadata: {
+          ingredientLevelFiltering: filteringApplied,
+          originalCount: results.recipes.length,
+          filteredCount: filteredRecipes.length
+        },
+        message: `Found ${filteredRecipes.length} recipes from ${results.provider}`
       });
 
     } catch (error) {

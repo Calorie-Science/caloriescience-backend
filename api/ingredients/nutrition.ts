@@ -96,19 +96,50 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       standardizedNutrition = NutritionMappingService.transformEdamamNutrition(nutritionData, 1);
     }
 
-    // Return only standardized nutrition data (no raw API response)
+    // Helper function to extract quantities from standardized nutrition
+    const extractQuantities = (obj: any): any => {
+      if (obj && typeof obj === 'object' && 'quantity' in obj) {
+        return obj.quantity;
+      }
+      if (obj && typeof obj === 'object') {
+        const result: any = {};
+        for (const key in obj) {
+          result[key] = extractQuantities(obj[key]);
+        }
+        return result;
+      }
+      return obj;
+    };
+
+    // Return complete nutrition data including macros, vitamins, and minerals
     return res.status(200).json({
       success: true,
       ingredient: ingredientText,
       source: actualSource,
       nutrition: {
+        // Basic calories
         calories: standardizedNutrition.calories.quantity,
-        protein: standardizedNutrition.macros.protein?.quantity || 0,
-        carbs: standardizedNutrition.macros.carbs?.quantity || 0,
-        fat: standardizedNutrition.macros.fat?.quantity || 0,
-        fiber: standardizedNutrition.macros.fiber?.quantity || 0,
-        sugar: standardizedNutrition.macros.sugar?.quantity || 0,
-        sodium: standardizedNutrition.macros.sodium?.quantity || 0
+        
+        // Macros (with quantities extracted)
+        macros: {
+          protein: standardizedNutrition.macros.protein?.quantity || 0,
+          carbs: standardizedNutrition.macros.carbs?.quantity || 0,
+          fat: standardizedNutrition.macros.fat?.quantity || 0,
+          fiber: standardizedNutrition.macros.fiber?.quantity || 0,
+          sugar: standardizedNutrition.macros.sugar?.quantity || 0,
+          sodium: standardizedNutrition.macros.sodium?.quantity || 0,
+          cholesterol: standardizedNutrition.macros.cholesterol?.quantity || 0,
+          saturatedFat: standardizedNutrition.macros.saturatedFat?.quantity || 0,
+          transFat: standardizedNutrition.macros.transFat?.quantity || 0,
+          monounsaturatedFat: standardizedNutrition.macros.monounsaturatedFat?.quantity || 0,
+          polyunsaturatedFat: standardizedNutrition.macros.polyunsaturatedFat?.quantity || 0
+        },
+        
+        // Micronutrients
+        micros: {
+          vitamins: extractQuantities(standardizedNutrition.micros.vitamins),
+          minerals: extractQuantities(standardizedNutrition.micros.minerals)
+        }
       }
     });
 

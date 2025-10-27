@@ -43,20 +43,113 @@ export function extractAllergensFromHealthLabels(healthLabels: string[]): Import
 }
 
 /**
- * Ingredient keywords that indicate specific allergens
+ * Comprehensive ingredient keywords that indicate specific allergens
+ * Used for deep ingredient-level allergen filtering
  */
-const ALLERGEN_INGREDIENT_KEYWORDS: Record<ImportedValidAllergen, string[]> = {
-  'dairy': ['milk', 'cheese', 'paneer', 'butter', 'cream', 'yogurt', 'ghee', 'curd', 'whey', 'casein', 'lactose'],
-  'eggs': ['egg', 'eggs', 'mayonnaise'],
-  'peanuts': ['peanut', 'peanuts'],
-  'tree nuts': ['almond', 'almonds', 'cashew', 'cashews', 'walnut', 'walnuts', 'pecan', 'pecans', 'hazelnut', 'macadamia', 'pistachio'],
-  'soy': ['soy', 'tofu', 'edamame', 'miso', 'tempeh'],
-  'wheat': ['wheat', 'flour', 'bread', 'pasta'],
-  'gluten': ['wheat', 'barley', 'rye', 'flour', 'bread'],
-  'fish': ['fish', 'salmon', 'tuna', 'cod', 'tilapia'],
-  'shellfish': ['shrimp', 'crab', 'lobster', 'oyster', 'clam', 'mussel'],
-  'sesame': ['sesame', 'tahini'],
-  'sulfites': ['sulfite', 'sulfites']
+export const ALLERGEN_INGREDIENT_KEYWORDS: Record<ImportedValidAllergen, string[]> = {
+  'dairy': [
+    // Milk products
+    'milk', 'whole milk', 'skim milk', '2% milk', 'low-fat milk', 'nonfat milk',
+    'buttermilk', 'evaporated milk', 'condensed milk', 'powdered milk', 'dry milk',
+    // Cheese
+    'cheese', 'cheddar', 'mozzarella', 'parmesan', 'parmigiano', 'ricotta', 'feta',
+    'goat cheese', 'blue cheese', 'swiss cheese', 'provolone', 'brie', 'camembert',
+    'cottage cheese', 'cream cheese', 'mascarpone', 'gouda', 'gruyere',
+    // Indian dairy
+    'paneer', 'khoa', 'mawa', 'rabri', 'dahi', 'curd', 'lassi',
+    // Butter & cream
+    'butter', 'ghee', 'clarified butter', 'cream', 'heavy cream', 'whipping cream',
+    'sour cream', 'crème fraîche', 'half and half', 'half-and-half',
+    // Yogurt
+    'yogurt', 'yoghurt', 'greek yogurt', 'frozen yogurt',
+    // Ice cream
+    'ice cream', 'gelato', 'kulfi',
+    // Other
+    'whey', 'casein', 'lactose', 'dairy'
+  ],
+  'eggs': [
+    'egg', 'eggs', 'egg white', 'egg yolk', 'whole egg', 'scrambled egg',
+    'fried egg', 'boiled egg', 'poached egg', 'omelette', 'omelet',
+    'mayonnaise', 'mayo', 'aioli', 'egg wash', 'meringue'
+  ],
+  'peanuts': [
+    'peanut', 'peanuts', 'peanut butter', 'peanut oil', 'groundnut',
+    'groundnuts', 'ground nut'
+  ],
+  'tree nuts': [
+    // Almonds
+    'almond', 'almonds', 'almond milk', 'almond butter', 'almond flour',
+    'almond meal', 'marcona almond',
+    // Cashews
+    'cashew', 'cashews', 'cashew butter', 'cashew cream', 'kaju',
+    // Walnuts
+    'walnut', 'walnuts', 'walnut oil', 'black walnut',
+    // Pecans
+    'pecan', 'pecans', 'pecan pie',
+    // Hazelnuts
+    'hazelnut', 'hazelnuts', 'hazelnut butter', 'filbert',
+    // Macadamia
+    'macadamia', 'macadamia nut', 'macadamia nuts',
+    // Pistachios
+    'pistachio', 'pistachios', 'pista',
+    // Pine nuts
+    'pine nut', 'pine nuts', 'pignoli', 'pinon',
+    // Brazil nuts
+    'brazil nut', 'brazil nuts',
+    // Chestnuts
+    'chestnut', 'chestnuts',
+    // Generic
+    'nut', 'nuts', 'mixed nuts', 'nut butter'
+  ],
+  'soy': [
+    'soy', 'soya', 'soybean', 'soybeans', 'soy sauce', 'soya sauce',
+    'tofu', 'tempeh', 'edamame', 'miso', 'soy milk', 'soy protein',
+    'soy lecithin', 'textured vegetable protein', 'tvp', 'natto'
+  ],
+  'wheat': [
+    'wheat', 'wheat flour', 'whole wheat', 'wheat bread', 'wheat pasta',
+    'semolina', 'durum', 'spelt', 'kamut', 'farro', 'bulgur',
+    'couscous', 'seitan', 'wheat germ', 'wheat bran'
+  ],
+  'gluten': [
+    // Wheat
+    'wheat', 'wheat flour', 'whole wheat', 'bread', 'pasta', 'noodles',
+    // Barley
+    'barley', 'malt', 'malt vinegar', 'malt extract', 'beer',
+    // Rye
+    'rye', 'rye flour', 'rye bread',
+    // Other
+    'flour', 'all-purpose flour', 'plain flour', 'self-rising flour',
+    'semolina', 'couscous', 'seitan', 'bulgur', 'spelt', 'kamut',
+    'farro', 'durum', 'graham flour'
+  ],
+  'fish': [
+    'fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'trout',
+    'bass', 'snapper', 'grouper', 'mahi mahi', 'catfish', 'sardine',
+    'sardines', 'anchovy', 'anchovies', 'mackerel', 'herring',
+    'sole', 'flounder', 'swordfish', 'haddock', 'pollock', 'pike',
+    'fish sauce', 'fish oil', 'fish stock', 'fish broth'
+  ],
+  'shellfish': [
+    // Crustaceans
+    'shrimp', 'prawn', 'prawns', 'crab', 'crab meat', 'lobster',
+    'crayfish', 'crawfish',
+    // Mollusks
+    'oyster', 'oysters', 'clam', 'clams', 'mussel', 'mussels',
+    'scallop', 'scallops', 'squid', 'calamari', 'octopus',
+    'conch', 'abalone',
+    // Generic
+    'shellfish', 'seafood'
+  ],
+  'sesame': [
+    'sesame', 'sesame seed', 'sesame seeds', 'sesame oil',
+    'tahini', 'tahina', 'til', 'gingelly'
+  ],
+  'sulfites': [
+    'sulfite', 'sulfites', 'sulphite', 'sulphites',
+    'sodium sulfite', 'sodium bisulfite', 'potassium bisulfite',
+    'dried fruit', 'wine', 'vinegar'
+  ]
 };
 
 /**

@@ -246,207 +246,105 @@ export class ClaudeService {
   private prepareInputMessage(request: ClaudeMealPlanRequest): string {
     const { clientGoals, additionalText, mealProgram } = request;
     
-    let message = `Generate a comprehensive meal plan based on nutritional guidelines. Structure is JSON array of meals for the day with nutrition breakdown per meal. Give overall nutrition also in the JSON in end. Focus on healthy, balanced meals with accurate cooking recipes and detailed instructions inside each meal item.
+    let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.
 
-CRITICAL ALLERGEN AND DIETARY RESTRICTION INSTRUCTIONS:
-- NEVER include any allergens or ingredients that the client is allergic to, even in trace amounts
-- NEVER include any form, derivative, or cross-contamination risk of client allergies
-- If a client has a nut allergy, exclude ALL nuts, nut oils, nut flours, nut milks, and anything processed in facilities with nuts
-- If a client has a gluten allergy/intolerance, exclude ALL wheat, barley, rye, and ANY processed foods that may contain gluten
-- If a client has a dairy allergy/intolerance, exclude ALL milk, cheese, butter, cream, yogurt, whey, casein, and any dairy derivatives
-- Double-check every ingredient in every recipe to ensure ZERO allergen contamination
-- When in doubt about an ingredient's allergen content, DO NOT include it
-- Prioritize client safety over recipe variety - it's better to be overly cautious
-
-Follow this JSON structure. Don't focus on shopping list etc. Focus on nutrients and allergies. You can give recipe url and images as null.
-
-Please generate a comprehensive meal plan based on the following nutritional guidelines:
-
-`;
-    
-    // Add client goals information
-    message += `NUTRITIONAL GUIDELINES:\n`;
-    message += `- Target Calories: ${clientGoals.eerGoalCalories || 'Not specified'}\n`;
-    message += `- Protein Range: ${clientGoals.proteinGoalMin || 0} - ${clientGoals.proteinGoalMax || 0} grams\n`;
-    message += `- Carbs Range: ${clientGoals.carbsGoalMin || 0} - ${clientGoals.carbsGoalMax || 0} grams\n`;
-    message += `- Fat Range: ${clientGoals.fatGoalMin || 0} - ${clientGoals.fatGoalMax || 0} grams\n`;
+NUTRITIONAL TARGETS:
+- Calories: ${clientGoals.eerGoalCalories || 'Not specified'}
+- Protein: ${clientGoals.proteinGoalMin || 0}-${clientGoals.proteinGoalMax || 0}g
+- Carbs: ${clientGoals.carbsGoalMin || 0}-${clientGoals.carbsGoalMax || 0}g
+- Fat: ${clientGoals.fatGoalMin || 0}-${clientGoals.fatGoalMax || 0}g`;
     
     if (clientGoals.fiberGoalGrams) {
-      message += `- Fiber Goal: ${clientGoals.fiberGoalGrams} grams\n`;
+      message += `\n- Fiber: ${clientGoals.fiberGoalGrams}g`;
     }
     
-    if (clientGoals.waterGoalLiters) {
-      message += `- Water Goal: ${clientGoals.waterGoalLiters} liters\n`;
-    }
-    
-    // CRITICAL: Add strong allergen exclusion
+    // CRITICAL: Add allergen exclusion
     if (clientGoals.allergies && clientGoals.allergies.length > 0) {
-      message += `\n⚠️ CRITICAL ALLERGIES (MUST EXCLUDE COMPLETELY): ${clientGoals.allergies.join(', ')}\n`;
-      message += `- These allergies are LIFE-THREATENING. Exclude ALL forms, derivatives, and cross-contamination risks.\n`;
-      message += `- Do NOT include any ingredient that could contain traces of these allergens.\n`;
-      message += `- Check every single ingredient in every recipe for allergen content.\n`;
+      message += `\n\n⚠️ ALLERGIES (EXCLUDE COMPLETELY): ${clientGoals.allergies.join(', ')}`;
+      message += `\n- Exclude ALL forms, derivatives, and cross-contamination risks of these allergens.`;
     }
     
     if (clientGoals.preferences && clientGoals.preferences.length > 0) {
-      message += `- Dietary Preferences: ${clientGoals.preferences.join(', ')}\n`;
-      message += `  * Follow these dietary restrictions strictly (e.g., vegan = no animal products, vegetarian = no meat/fish, keto = low carb high fat)\n`;
-      message += `  * Ensure all meals and ingredients align with these dietary choices\n`;
+      message += `\n- Dietary Preferences: ${clientGoals.preferences.join(', ')}`;
     }
     
     if (clientGoals.cuisineTypes && clientGoals.cuisineTypes.length > 0) {
-      message += `- Cuisine Preferences: ${clientGoals.cuisineTypes.join(', ')}\n`;
-      message += `  * Focus on recipes and flavors from these cuisine types\n`;
-      message += `  * Use authentic ingredients and cooking methods when possible\n`;
-      message += `  * Balance variety across different cuisine types if multiple are specified\n`;
+      message += `\n- Cuisine Types: ${clientGoals.cuisineTypes.join(', ')}`;
     }
     
     if (clientGoals.notes) {
-      message += `- Additional Notes: ${clientGoals.notes}\n`;
+      message += `\n- Notes: ${clientGoals.notes}`;
     }
     
-    // CRITICAL: Add meal program constraints
+    // Add meal program constraints
     if (mealProgram && mealProgram.meals && mealProgram.meals.length > 0) {
-      message += `\n🍽️ MEAL PROGRAM STRUCTURE (MUST FOLLOW EXACTLY):\n`;
-      message += `- You must generate exactly ${mealProgram.meals.length} meals as specified below\n`;
-      message += `- Each meal must match the specified timing, type, and calorie targets\n`;
-      message += `- Do NOT add extra meals or skip any meals from this program\n\n`;
+      message += `\n\nMEAL STRUCTURE (${mealProgram.meals.length} meals):`;
       
-      mealProgram.meals.forEach((meal: any, index: number) => {
-        message += `Meal ${meal.mealOrder}: ${meal.mealName}\n`;
-        message += `  - Meal Type: ${meal.mealType || 'Not specified'}\n`;
-        message += `  - Scheduled Time: ${meal.mealTime}\n`;
-        message += `  - Target Calories: ${meal.targetCalories || 'Proportional to daily target'}\n`;
-        if (index < mealProgram.meals.length - 1) message += `\n`;
+      mealProgram.meals.forEach((meal: any) => {
+        message += `\n${meal.mealOrder}. ${meal.mealName} (${meal.mealTime}) - ${meal.targetCalories || 'proportional'} cal`;
       });
-      
-      message += `\n⚠️ CRITICAL: Your response must include exactly these ${mealProgram.meals.length} meals in the specified order with matching calorie targets.\n`;
     }
     
-    message += `\n`;
-    
-    // Add any additional text
     if (additionalText) {
-      message += `ADDITIONAL REQUIREMENTS:\n${additionalText}\n\n`;
+      message += `\n\nADDITIONAL: ${additionalText}`;
     }
     
     message += `
-CRITICAL JSON FORMATTING INSTRUCTIONS:
-- You MUST return ONLY valid JSON - no extra text before or after
-- Do NOT wrap the JSON in markdown code blocks (no \`\`\`json)
-- Do NOT include any explanations or additional text
-- Ensure all JSON strings are properly quoted with double quotes
-- Ensure all object properties are properly closed with closing braces
-- Test your JSON mentally before responding - it must be parseable
 
-RESPONSE FORMAT - Return ONLY this exact JSON structure:
+JSON FORMAT (return ONLY this structure):
 {
-    "success": true,
-    "message": "Meal plan generated successfully",
-    "data": {
-        "mealPlan": {
-            "dailyNutrition": {
-                "totalCalories": 3000,
-                "totalProtein": 120,
-                "totalCarbs": 400,
-                "totalFat": 100,
-                "totalFiber": 30,
-                "totalSodium": 2000,
-                "totalSugar": 50,
-                "totalCholesterol": 300,
-                "totalCalcium": 1000,
-                "totalIron": 15
-            },
-            "previewId": "claude-generated-plan",
-            "days": [
-                {
-                    "dayNumber": 1,
-                    "date": "2025-09-17",
-                    "meals": [
-                        {
-                            "id": "meal-breakfast",
-                            "mealType": "breakfast",
-                            "mealOrder": 1,
-                            "recipeName": "Example Breakfast",
-                            "recipeUrl": null,
-                            "recipeImageUrl": null,
-                            "caloriesPerServing": 500,
-                            "proteinGrams": 20,
-                            "carbsGrams": 60,
-                            "fatGrams": 15,
-                            "fiberGrams": 8,
-                            "servingsPerMeal": 1,
-                            "totalCalories": 500,
-                            "totalProtein": 20,
-                            "totalCarbs": 60,
-                            "totalFat": 15,
-                            "totalFiber": 8,
-                            "recipe": [
-                                "Step 1: Add ingredients",
-                                "Step 2: Mix well",
-                                "Step 3: Cook for 10 minutes"
-                            ],
-                            "ingredients": [
-                                {
-                                    "text": "1 cup oats",
-                                    "quantity": 80,
-                                    "measure": "gram",
-                                    "food": "oats",
-                                    "weight": 80
-                                }
-                            ],
-                            "edamamRecipeId": null
-                        }
-                    ],
-                    "dailyNutrition": {
-                        "totalCalories": 3000,
-                        "totalProtein": 120,
-                        "totalCarbs": 400,
-                        "totalFat": 100,
-                        "totalFiber": 30,
-                        "totalSodium": 2000,
-                        "totalSugar": 50,
-                        "totalCholesterol": 300,
-                        "totalCalcium": 1000,
-                        "totalIron": 15
-                    }
-                }
-            ]
-        },
-        "clientGoals": {
-            "eerGoalCalories": 3000,
-            "proteinGoalMin": 100,
-            "proteinGoalMax": 150,
-            "carbsGoalMin": 300,
-            "carbsGoalMax": 450,
-            "fatGoalMin": 80,
-            "fatGoalMax": 120
-        }
-    }
+  "success": true,
+  "message": "Meal plan generated successfully",
+  "data": {
+    "mealPlan": {
+      "dailyNutrition": {"totalCalories": 0, "totalProtein": 0, "totalCarbs": 0, "totalFat": 0, "totalFiber": 0, "totalSodium": 0, "totalSugar": 0},
+      "previewId": "claude-generated-plan",
+      "days": [{
+        "dayNumber": 1,
+        "date": "2025-09-17",
+        "meals": [{
+          "id": "meal-1",
+          "mealType": "breakfast",
+          "mealOrder": 1,
+          "recipeName": "Recipe Name",
+          "recipeUrl": null,
+          "recipeImageUrl": null,
+          "caloriesPerServing": 0,
+          "proteinGrams": 0,
+          "carbsGrams": 0,
+          "fatGrams": 0,
+          "fiberGrams": 0,
+          "servingsPerMeal": 1,
+          "totalCalories": 0,
+          "totalProtein": 0,
+          "totalCarbs": 0,
+          "totalFat": 0,
+          "totalFiber": 0,
+          "recipe": ["Step 1", "Step 2"],
+          "ingredients": [{"text": "ingredient", "quantity": 0, "measure": "unit", "food": "food", "weight": 0}],
+          "edamamRecipeId": null
+        }],
+        "dailyNutrition": {"totalCalories": 0, "totalProtein": 0, "totalCarbs": 0, "totalFat": 0, "totalFiber": 0, "totalSodium": 0, "totalSugar": 0}
+      }]
+    },
+    "clientGoals": ${JSON.stringify({
+      eerGoalCalories: clientGoals.eerGoalCalories,
+      proteinGoalMin: clientGoals.proteinGoalMin,
+      proteinGoalMax: clientGoals.proteinGoalMax,
+      carbsGoalMin: clientGoals.carbsGoalMin,
+      carbsGoalMax: clientGoals.carbsGoalMax,
+      fatGoalMin: clientGoals.fatGoalMin,
+      fatGoalMax: clientGoals.fatGoalMax
+    })}
+  }
 }
 
-FINAL CRITICAL INSTRUCTIONS:
-- EXCLUDE ALL ALLERGENS COMPLETELY - no exceptions, no trace amounts
-- FOLLOW MEAL PROGRAM STRUCTURE EXACTLY - correct number of meals, timing, and calorie targets
-- Ensure all nutrition calculations are accurate
-- Provide detailed, actionable cooking instructions
-- Focus on balanced, nutritious meals that meet the client's goals
-- Follow dietary preferences strictly and incorporate preferred cuisine types
-
-JSON RESPONSE REQUIREMENTS:
-1. Return ONLY the JSON object - no explanations, no markdown, no extra text
-2. Start your response immediately with { and end with }
-3. Ensure all strings use double quotes "like this"
-4. Ensure all numeric values are numbers, not strings
-5. CRITICAL: Every array element MUST be followed by a comma except the last one
-   - ✅ Correct: ["item1", "item2", "item3"]
-   - ❌ Wrong: ["item1" "item2" "item3"]
-6. CRITICAL: Every object in an array MUST be followed by a comma except the last one
-   - ✅ Correct: [{"a": 1}, {"b": 2}, {"c": 3}]
-   - ❌ Wrong: [{"a": 1} {"b": 2} {"c": 3}]
-7. Double-check your JSON is complete and properly closed
-8. Pay special attention to the "ingredients" arrays - each ingredient object needs a comma
-
-Your response must start with: {"success": true, "message": "Meal plan generated successfully", "data": {`;
+RULES:
+1. Return ONLY JSON (no markdown, no text before/after)
+2. Exclude all allergens completely
+3. Match meal structure exactly
+4. Use proper JSON syntax with commas between array/object items
+5. Start response with: {"success": true,`;
 
     return message;
   }
