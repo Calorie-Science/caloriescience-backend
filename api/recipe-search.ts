@@ -163,7 +163,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Search simple ingredients with allergen filtering (async)
         ingredientRecipes = await simpleIngredientService.searchIngredientsAsRecipes(
           searchParams.query,
-          2, // Fetch up to 2 matching ingredients
+          7, // Fetch up to 7 matching ingredients (includes raw + cooked variants)
           allergenFilters && allergenFilters.length > 0 ? allergenFilters : undefined
         );
         

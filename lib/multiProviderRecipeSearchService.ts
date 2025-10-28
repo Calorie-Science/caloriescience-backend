@@ -583,11 +583,14 @@ export class MultiProviderRecipeSearchService {
           ]);
           
           // Transform ingredients to our format
+          // Bon Happetee provides: ingredient_name, basic_unit_measure (in grams), proportion
           const ingredients = (ingredientsData || []).map((ing: any) => ({
             name: ing.ingredient_name || ing.food_name || '',
             food: ing.ingredient_name || ing.food_name || '',
-            amount: ing.quantity || 0,
-            unit: ing.unit || ''
+            amount: ing.basic_unit_measure || 0, // Amount in grams
+            unit: 'g', // Bon Happetee always uses grams
+            category: ing.category,
+            proportion: ing.proportion // Percentage of total recipe (0-1)
           }));
           
           // Extract allergens from disorder data
@@ -1516,11 +1519,30 @@ export class MultiProviderRecipeSearchService {
         throw new Error('Bon Happetee service not initialized - API key missing');
       }
 
-      const recipeData = await this.bonHappeteeService.getRecipeDetails(foodItemId);
+      // Fetch recipe details and ingredients in parallel
+      const [recipeData, ingredientsData] = await Promise.all([
+        this.bonHappeteeService.getRecipeDetails(foodItemId),
+        this.bonHappeteeService.getIngredients(foodItemId)
+      ]);
+
       const { NutritionMappingService } = require('./nutritionMappingService');
       
       // Transform Bon Happetee nutrition to standardized format
       const nutrition = NutritionMappingService.transformBonHappeteeNutrition(recipeData.nutrients);
+
+      // Transform ingredients to standardized format
+      // Bon Happetee provides: ingredient_name, basic_unit_measure (in grams), proportion
+      const ingredients = (ingredientsData || []).map((ing: any) => ({
+        text: ing.ingredient_name || ing.food_name || '',
+        food: ing.ingredient_name || ing.food_name || '',
+        quantity: ing.basic_unit_measure || 0, // Amount in grams
+        measure: 'g', // Bon Happetee always uses grams
+        weight: ing.basic_unit_measure || 0,
+        category: ing.category,
+        proportion: ing.proportion // Percentage of total recipe (0-1)
+      }));
+
+      console.log(`✅ Bon Happetee recipe ${foodItemId}: ${ingredients.length} ingredients found`);
 
       return {
         id: foodItemId,
@@ -1531,7 +1553,7 @@ export class MultiProviderRecipeSearchService {
         servings: 1, // Bon Happetee provides per-serving nutrition
         readyInMinutes: (recipeData.prepTime || 0) + (recipeData.cookTime || 0),
         nutrition: nutrition,
-        ingredients: [], // Bon Happetee doesn't provide ingredient breakdown
+        ingredients: ingredients,
         instructions: [],
         cuisineType: recipeData.cuisineType,
         mealType: recipeData.mealType,

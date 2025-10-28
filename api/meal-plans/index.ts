@@ -170,16 +170,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           });
         }
 
-        // Get AI model from request (support both aiModel and aiProvider field names)
-        const aiModel = (req.body.aiModel || req.body.aiProvider || 'openai') as 'openai' | 'claude' | 'gemini';
-
-        // Validate AI model
-        if (!['openai', 'claude', 'gemini'].includes(aiModel)) {
-          return res.status(400).json({
-            error: 'Invalid AI model',
-            message: 'aiModel/aiProvider must be one of: openai, claude, gemini'
-          });
-        }
+        // Only Claude is supported now
+        const aiModel = 'claude' as const;
 
         try {
           // Get active client goals
@@ -192,13 +184,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             });
           }
 
-          // Start async generation
+          // Start async generation with Claude (returns complete draft in same format as automated/manual)
+          const days = req.body.days || 7;
+          const startDate = req.body.startDate;
           const result = await asyncMealPlanService.startGeneration(
             clientId,
             user.id,
             activeGoalResult.data,
             req.body.additionalText,
-            aiModel
+            aiModel,
+            days,
+            startDate
           );
 
           if (!result.success) {
@@ -207,19 +203,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             });
           }
 
+          // Return the formatted draft (same structure as automated/manual meal plans)
           return res.status(200).json({
             success: true,
-            message: 'Async meal plan generation started',
-            data: {
-              mealPlan: {
-                id: result.data?.id,
-                status: result.data?.status || 'pending',
-                clientId: result.data?.clientId,
-                nutritionistId: result.data?.nutritionistId,
-                aiModel: aiModel,
-                estimatedCompletionTime: aiModel === 'claude' || aiModel === 'gemini' ? 'immediate' : '2-3 minutes'
-              }
-            }
+            message: 'AI meal plan generated successfully',
+            data: result.data
           });
         } catch (error) {
           console.error('❌ Error starting async generation:', error);

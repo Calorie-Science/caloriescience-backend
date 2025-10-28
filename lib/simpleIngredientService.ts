@@ -1,6 +1,14 @@
 /**
  * Simple ingredient service - fetches from database with in-memory caching
  * Provides instant results for common ingredients (fruits, vegetables, proteins, etc.)
+ * 
+ * Database includes both RAW and COOKED variants:
+ * - Raw: banana, broccoli, mushroom, etc.
+ * - Sautéed: sauteed mushroom, sauteed broccoli, sauteed spinach, etc.
+ * - Grilled: grilled mushroom, grilled broccoli, grilled bell pepper, etc.
+ * - Stir-fry: stir-fry mushroom, stir-fry broccoli, stir-fry zucchini, etc.
+ * 
+ * Migration: database/migrations/072_add_cooked_vegetable_variants.sql
  */
 
 import { supabase } from './supabase';
@@ -262,6 +270,145 @@ export class SimpleIngredientService {
       // Fallback to hardcoded
       return COMMON_INGREDIENTS;
     }
+  }
+
+  /**
+   * Search for ingredients by name and return raw ingredient data
+   * @param query - Search term
+   * @param maxResults - Maximum results to return (default: 50)
+   * @param allergenFilters - Optional allergens to exclude
+   * @param categoryFilter - Optional category filter
+   */
+  async searchIngredients(
+    query: string, 
+    maxResults: number = 50, 
+    allergenFilters?: string[], 
+    categoryFilter?: string
+  ): Promise<any[]> {
+    if (!query || query.trim().length < 2) {
+      return [];
+    }
+
+    const searchTerm = query.trim().toLowerCase();
+    
+    // Get ingredients from database (or cache)
+    const allIngredients = await this.getIngredients();
+    
+    // Check if search term matches a category keyword
+    const categoryExpansion = this.getCategoryExpansion(searchTerm);
+    
+    // Find matching ingredients
+    let matches: SimpleIngredient[];
+    
+    if (categoryExpansion) {
+      // Expand search to include all items in matching categories
+      console.log(`🔍 Expanding search "${searchTerm}" to categories: ${categoryExpansion.join(', ')}`);
+      
+      // For fish/seafood searches, include all protein items that are fish
+      const isFishSearch = searchTerm === 'fish' || searchTerm === 'seafood';
+      
+      matches = allIngredients.filter(ing => {
+        // Match by category OR by name
+        const matchesCategory = categoryExpansion.includes(ing.category);
+        const matchesName = ing.name.toLowerCase().includes(searchTerm);
+        
+        // For fish searches, check if ingredient is a type of fish
+        if (isFishSearch && ing.category === 'protein') {
+          const isFishType = this.isFishOrSeafood(ing.name);
+          if (isFishType) return true;
+        }
+        
+        return matchesCategory || matchesName;
+      });
+      
+      // Sort: prioritize exact name matches, then fish types, then others
+      matches.sort((a, b) => {
+        const aNameMatch = a.name.toLowerCase().includes(searchTerm);
+        const bNameMatch = b.name.toLowerCase().includes(searchTerm);
+        if (aNameMatch && !bNameMatch) return -1;
+        if (!aNameMatch && bNameMatch) return 1;
+        return 0;
+      });
+    } else {
+      // Regular name-based search
+      matches = allIngredients.filter(ing => 
+        ing.name.toLowerCase().includes(searchTerm) || searchTerm.includes(ing.name.toLowerCase())
+      );
+    }
+
+    // Filter by category if provided
+    if (categoryFilter) {
+      matches = matches.filter(ing => ing.category === categoryFilter);
+    }
+
+    // Filter by allergens if provided
+    if (allergenFilters && allergenFilters.length > 0) {
+      matches = matches.filter(ing => {
+        const ingredientAllergens = ing.allergens || this.getAllergens(ing.name);
+        const healthLabels = ing.healthLabels || this.getHealthLabels(ing.category, ing.name);
+        
+        // Check for allergen conflicts
+        return !this.hasAllergenConflict(ingredientAllergens, healthLabels, allergenFilters);
+      });
+    }
+
+    // Limit results
+    matches = matches.slice(0, maxResults);
+
+    // Return formatted ingredient data (matching recipe API format)
+    return matches.map(ing => {
+      // Build vitamins object
+      const vitamins: any = {};
+      if (ing.vitaminC) vitamins.vitaminC = { quantity: ing.vitaminC, unit: 'mg' };
+      if (ing.vitaminA) vitamins.vitaminA = { quantity: ing.vitaminA, unit: 'mcg' };
+
+      // Build minerals object
+      const minerals: any = {};
+      if (ing.calcium) minerals.calcium = { quantity: ing.calcium, unit: 'mg' };
+      if (ing.iron) minerals.iron = { quantity: ing.iron, unit: 'mg' };
+      if (ing.potassium) minerals.potassium = { quantity: ing.potassium, unit: 'mg' };
+
+      return {
+        id: ing.name,
+        name: ing.name,
+        title: ing.name.charAt(0).toUpperCase() + ing.name.slice(1),
+        category: ing.category,
+        servingSize: {
+          quantity: ing.servingSize.quantity,
+          unit: ing.servingSize.unit,
+          display: `${ing.servingSize.quantity} ${ing.servingSize.unit}`
+        },
+        
+        // Flat nutrition (for easy access - matches recipe format)
+        calories: Math.round(ing.calories * 10) / 10,
+        protein: Math.round(ing.protein * 10) / 10,
+        carbs: Math.round(ing.carbs * 10) / 10,
+        fat: Math.round(ing.fat * 10) / 10,
+        fiber: Math.round(ing.fiber * 10) / 10,
+        
+        // Detailed nutrition object (matches recipe format exactly)
+        nutrition: {
+          calories: { quantity: Math.round(ing.calories * 10) / 10, unit: 'kcal' },
+          macros: {
+            protein: { quantity: Math.round(ing.protein * 10) / 10, unit: 'g' },
+            carbs: { quantity: Math.round(ing.carbs * 10) / 10, unit: 'g' },
+            fat: { quantity: Math.round(ing.fat * 10) / 10, unit: 'g' },
+            fiber: { quantity: Math.round(ing.fiber * 10) / 10, unit: 'g' },
+            sugar: { quantity: Math.round((ing.sugar || 0) * 10) / 10, unit: 'g' },
+            sodium: { quantity: Math.round((ing.sodium || 0) * 10) / 10, unit: 'mg' }
+          },
+          micros: {
+            vitamins,
+            minerals
+          }
+        },
+        
+        // Labels
+        healthLabels: ing.healthLabels || this.getHealthLabels(ing.category, ing.name),
+        dietLabels: ing.dietLabels || this.getDietLabels(ing.category, ing.name),
+        allergens: ing.allergens || this.getAllergens(ing.name)
+      };
+    });
   }
 
   /**
@@ -557,6 +704,103 @@ export class SimpleIngredientService {
     }
     
     return labels;
+  }
+
+  /**
+   * Get category expansion for generic search terms
+   * Returns categories to include when user searches for generic terms
+   */
+  private getCategoryExpansion(searchTerm: string): string[] | null {
+    const expansionMap: { [key: string]: string[] } = {
+      // Fish/Seafood
+      'fish': ['protein'],
+      'seafood': ['protein'],
+      
+      // Vegetables
+      'vegetable': ['vegetable'],
+      'vegetables': ['vegetable'],
+      'veggie': ['vegetable'],
+      'veggies': ['vegetable'],
+      
+      // Fruits
+      'fruit': ['fruit'],
+      'fruits': ['fruit'],
+      
+      // Proteins
+      'protein': ['protein'],
+      'proteins': ['protein'],
+      'meat': ['protein'],
+      'meats': ['protein'],
+      
+      // Grains
+      'grain': ['grain'],
+      'grains': ['grain'],
+      'rice': ['grain'],
+      
+      // Dairy
+      'dairy': ['dairy'],
+      'milk': ['dairy'],
+      
+      // Nuts
+      'nut': ['nuts'],
+      'nuts': ['nuts'],
+      
+      // Legumes
+      'legume': ['legume'],
+      'legumes': ['legume'],
+      'bean': ['legume'],
+      'beans': ['legume'],
+      
+      // Herbs
+      'herb': ['herb'],
+      'herbs': ['herb'],
+      
+      // Spices
+      'spice': ['spice'],
+      'spices': ['spice']
+    };
+    
+    return expansionMap[searchTerm] || null;
+  }
+  
+  /**
+   * Get keywords associated with a category for matching
+   */
+  private getCategoryKeywords(category: string): string[] {
+    const keywordMap: { [key: string]: string[] } = {
+      'protein': ['fish', 'seafood', 'meat', 'chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'salmon', 'tuna', 'tilapia', 'shrimp', 'prawn', 'crab', 'tofu', 'tempeh', 'seitan', 'egg', 'paneer'],
+      'vegetable': ['vegetable', 'veggie', 'greens'],
+      'fruit': ['fruit'],
+      'grain': ['grain', 'rice', 'wheat', 'oat', 'quinoa', 'barley'],
+      'dairy': ['milk', 'cheese', 'yogurt', 'butter'],
+      'nuts': ['nut', 'almond', 'walnut', 'cashew', 'peanut'],
+      'legume': ['bean', 'lentil', 'chickpea', 'pea'],
+      'herb': ['herb'],
+      'spice': ['spice']
+    };
+    
+    return keywordMap[category] || [];
+  }
+  
+  /**
+   * Check if an ingredient name is a fish or seafood type
+   */
+  private isFishOrSeafood(name: string): boolean {
+    const fishTypes = [
+      'salmon', 'tuna', 'tilapia', 'cod', 'bass', 'trout', 'halibut', 
+      'mackerel', 'sardine', 'anchovy', 'catfish', 'flounder', 'haddock',
+      'mahi', 'snapper', 'swordfish', 'pollock'
+    ];
+    
+    const seafoodTypes = [
+      'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'oyster', 
+      'mussel', 'clam', 'squid', 'octopus', 'crayfish'
+    ];
+    
+    const allAquatic = [...fishTypes, ...seafoodTypes];
+    const lowerName = name.toLowerCase();
+    
+    return allAquatic.some(type => lowerName.includes(type));
   }
 
   private getAllergens(name: string): string[] {

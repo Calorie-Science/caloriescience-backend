@@ -22,7 +22,7 @@ export interface AsyncMealPlan {
 
 export interface AsyncMealPlanResponse {
   success: boolean;
-  data?: AsyncMealPlan;
+  data?: AsyncMealPlan | any; // Can be AsyncMealPlan or formatted draft structure
   error?: string;
 }
 
@@ -90,14 +90,16 @@ export class AsyncMealPlanService {
   }
 
   /**
-   * Start async meal plan generation and return preview ID
+   * Start async meal plan generation and return formatted draft
    */
   async startGeneration(
     clientId: string,
     nutritionistId: string,
     clientGoals: any,
     additionalText?: string,
-    aiModel: 'openai' | 'claude' | 'gemini' = 'openai'
+    aiModel: 'openai' | 'claude' | 'gemini' = 'claude',
+    days: number = 7,
+    startDate?: string
   ): Promise<AsyncMealPlanResponse> {
     try {
       console.log('🔄 Async Meal Plan Service - Starting generation for client:', clientId, 'using AI model:', aiModel);
@@ -248,6 +250,26 @@ export class AsyncMealPlanService {
 
       console.log('✅ Async Meal Plan Service - Generation started with ID:', asyncMealPlan.id);
 
+      // If Claude (completed immediately), format as draft response
+      if (aiModel === 'claude' && status === 'completed' && generatedMealPlan) {
+        const formattedDraft = await this.formatAsDraft(
+          asyncMealPlan.id,
+          clientId,
+          nutritionistId,
+          clientGoals,
+          mealProgram,
+          generatedMealPlan,
+          days,
+          startDate
+        );
+        
+        return {
+          success: true,
+          data: formattedDraft
+        };
+      }
+
+      // For other AI models or pending status, return simple structure
       return {
         success: true,
         data: this.mapDbToAsyncMealPlan(asyncMealPlan)
@@ -715,5 +737,194 @@ export class AsyncMealPlanService {
       console.error('❌ Meal plan validation error:', error);
       return false;
     }
+  }
+
+  /**
+   * Format AI-generated meal plan as a draft (matches automated/manual meal plan structure)
+   */
+  private async formatAsDraft(
+    draftId: string,
+    clientId: string,
+    nutritionistId: string,
+    clientGoals: any,
+    mealProgram: any,
+    generatedMealPlan: any,
+    days: number,
+    startDate?: string
+  ): Promise<any> {
+    try {
+      const mealPlan = generatedMealPlan?.data?.mealPlan;
+      if (!mealPlan) {
+        throw new Error('Invalid meal plan structure');
+      }
+
+      // Calculate start date
+      const planStartDate = startDate || new Date().toISOString().split('T')[0];
+
+      // Transform AI meal plan days into suggestions format
+      const suggestions = mealPlan.days.map((day: any) => {
+        const meals: any = {};
+        
+        // Group meals by mealType
+        if (day.meals && Array.isArray(day.meals)) {
+          day.meals.forEach((meal: any) => {
+            const mealType = (meal.mealType || 'meal').toLowerCase();
+            
+            if (!meals[mealType]) {
+              meals[mealType] = {
+                recipes: [],
+                customizations: {},
+                selectedRecipeId: meal.id,
+                mealTime: meal.mealTime || this.getMealTimeForType(mealType),
+                targetCalories: meal.totalCalories || 0
+              };
+            }
+            
+            // Add recipe
+            meals[mealType].recipes.push({
+              id: meal.id || `ai-recipe-${Date.now()}-${Math.random()}`,
+              title: meal.recipeName || 'AI Generated Recipe',
+              image: meal.recipeImageUrl || null,
+              sourceUrl: meal.recipeUrl || null,
+              source: 'claude',
+              servings: meal.servingsPerMeal || 1,
+              fromCache: false,
+              calories: meal.caloriesPerServing || meal.totalCalories,
+              protein: meal.proteinGrams || meal.totalProtein,
+              carbs: meal.carbsGrams || meal.totalCarbs,
+              fat: meal.fatGrams || meal.totalFat,
+              fiber: meal.fiberGrams || meal.totalFiber,
+              nutrition: {
+                calories: meal.caloriesPerServing || meal.totalCalories || 0,
+                protein: meal.proteinGrams || meal.totalProtein || 0,
+                carbs: meal.carbsGrams || meal.totalCarbs || 0,
+                fat: meal.fatGrams || meal.totalFat || 0,
+                fiber: meal.fiberGrams || meal.totalFiber || 0
+              },
+              ingredients: meal.ingredients || [],
+              instructions: meal.recipe || [],
+              isSelected: true,
+              selectedAt: new Date().toISOString()
+            });
+            
+            // Set total nutrition for the meal
+            meals[mealType].totalNutrition = {
+              calories: meal.totalCalories || 0,
+              protein: meal.totalProtein || 0,
+              carbs: meal.totalCarbs || 0,
+              fat: meal.totalFat || 0,
+              fiber: meal.totalFiber || 0
+            };
+          });
+        }
+        
+        return {
+          day: day.dayNumber,
+          date: day.date,
+          meals
+        };
+      });
+
+      // Calculate nutrition summary
+      const nutrition = {
+        byDay: mealPlan.days.map((day: any) => ({
+          day: day.dayNumber,
+          date: day.date,
+          nutrition: day.dailyNutrition || {
+            totalCalories: 0,
+            totalProtein: 0,
+            totalCarbs: 0,
+            totalFat: 0,
+            totalFiber: 0
+          }
+        })),
+        overall: mealPlan.dailyNutrition || {
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
+          totalFiber: 0
+        }
+      };
+
+      // Calculate completion stats
+      const totalMeals = suggestions.reduce((sum: number, day: any) => 
+        sum + Object.keys(day.meals).length, 0
+      );
+      const selectedMeals = suggestions.reduce((sum: number, day: any) => 
+        sum + Object.values(day.meals).filter((m: any) => m.recipes.length > 0).length, 0
+      );
+      const completionPercentage = totalMeals > 0 ? Math.round((selectedMeals / totalMeals) * 100) : 0;
+
+      // Build meal program structure for searchParams
+      const mealProgramData = mealProgram ? {
+        meals: mealProgram.meals.map((meal: any) => ({
+          mealName: meal.mealName,
+          mealTime: meal.mealTime,
+          mealType: meal.mealType,
+          mealOrder: meal.mealOrder,
+          targetCalories: meal.targetCalories
+        }))
+      } : null;
+
+      return {
+        id: draftId,
+        clientId,
+        nutritionistId,
+        status: 'completed',
+        creationMethod: 'ai_generated',
+        planName: `AI Meal Plan - ${new Date().toLocaleDateString()}`,
+        planDate: planStartDate,
+        durationDays: days,
+        totalDays: days,
+        totalMeals,
+        selectedMeals,
+        completionPercentage,
+        isComplete: completionPercentage === 100,
+        searchParams: {
+          days,
+          startDate: planStartDate,
+          clientGoals: {
+            eerGoalCalories: clientGoals.eerGoalCalories,
+            proteinGoalMin: clientGoals.proteinGoalMin,
+            proteinGoalMax: clientGoals.proteinGoalMax,
+            carbsGoalMin: clientGoals.carbsGoalMin,
+            carbsGoalMax: clientGoals.carbsGoalMax,
+            fatGoalMin: clientGoals.fatGoalMin,
+            fatGoalMax: clientGoals.fatGoalMax,
+            fiberGoalGrams: clientGoals.fiberGoalGrams,
+            waterGoalLiters: clientGoals.waterGoalLiters
+          },
+          dietaryPreferences: {
+            allergies: clientGoals.allergies || [],
+            preferences: clientGoals.preferences || [],
+            cuisineTypes: clientGoals.cuisineTypes || []
+          },
+          overrideMealProgram: mealProgramData
+        },
+        suggestions,
+        nutrition,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        expiresAt: null, // AI-generated plans don't expire
+        aiModel: 'claude'
+      };
+    } catch (error) {
+      console.error('❌ Error formatting AI meal plan as draft:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Helper to get default meal time for a meal type
+   */
+  private getMealTimeForType(mealType: string): string {
+    const defaultTimes: { [key: string]: string } = {
+      breakfast: '08:00',
+      lunch: '12:00',
+      dinner: '18:00',
+      snack: '15:00'
+    };
+    return defaultTimes[mealType.toLowerCase()] || '12:00';
   }
 }

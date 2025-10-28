@@ -133,7 +133,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         user.id
       );
 
-      // Always search for 1-2 matching ingredients to mix with recipes (for simple foods like fruits, vegetables)
+      // Always search for matching ingredients to mix with recipes (for simple foods like fruits, vegetables)
       let ingredientRecipes: any[] = [];
       let totalResults = results.totalResults;
       
@@ -143,7 +143,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         // Use simple ingredient service with allergen filtering (now async)
         ingredientRecipes = await simpleIngredientService.searchIngredientsAsRecipes(
           query as string,
-          2, // Always fetch 2 ingredients
+          7, // Fetch up to 7 ingredients (includes raw + cooked variants)
           clientAllergens.length > 0 ? clientAllergens : undefined // Only pass if not empty
         );
         

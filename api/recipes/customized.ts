@@ -287,7 +287,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         totalSugarG: cached.total_sugar_g || cached.totalSugarG,
         totalSodiumMg: cached.total_sodium_mg || cached.totalSodiumMg,
         totalWeightG: cached.total_weight_g || cached.totalWeightG,
-        ingredients: cached.ingredients || [],
+        ingredients: (cached.ingredients || []).map((ing: any) => ({
+          ...ing,
+          // Transform cached field names to expected format
+          amount: ing.amount !== undefined ? ing.amount : ing.quantity,
+          unit: ing.unit !== undefined ? ing.unit : ing.measure
+        })),
         ingredientLines: cached.ingredient_lines || cached.ingredientLines || [],
         cookingInstructions: cached.cooking_instructions || cached.cookingInstructions || [],
         nutritionDetails: nutritionDetails || {},

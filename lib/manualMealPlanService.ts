@@ -895,6 +895,17 @@ export class ManualMealPlanService {
       }
     }
 
+    // Transform cached ingredients to expected format
+    // Database stores: quantity/measure, but code expects: amount/unit
+    if (recipe.ingredients && Array.isArray(recipe.ingredients)) {
+      recipe.ingredients = recipe.ingredients.map((ing: any) => ({
+        ...ing,
+        // Add 'amount' and 'unit' fields if they don't exist (backwards compatibility)
+        amount: ing.amount !== undefined ? ing.amount : ing.quantity,
+        unit: ing.unit !== undefined ? ing.unit : ing.measure
+      }));
+    }
+
     // Update last accessed timestamp
     await supabase
       .from('cached_recipes')
