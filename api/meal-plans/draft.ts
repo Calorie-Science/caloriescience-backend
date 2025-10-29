@@ -1431,6 +1431,32 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           vitaminsCount: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
           mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
         });
+        
+        // For simple ingredients: if servings parameter is provided and no modifications, 
+        // just multiply the nutrition by servings
+        const requestedServings = customizations.servings || 1;
+        if (requestedServings !== 1 && (!customizations.modifications || customizations.modifications.length === 0)) {
+          console.log(`🔢 Simple ingredient servings adjustment: ${recipeServings} → ${requestedServings}`);
+          
+          // Import NutritionMappingService for multiplication
+          const { NutritionMappingService } = await import('../../lib/nutritionMappingService');
+          const multipliedNutrition = NutritionMappingService.multiplyNutrition(originalNutritionWithMicros, requestedServings);
+          
+          // Set customNutrition directly (skip modification-based calculation)
+          customizations.customNutrition = multipliedNutrition;
+          customizations.customizationsApplied = true;
+          
+          // Update recipe servings
+          recipeServings = requestedServings;
+          
+          console.log('✅ Applied servings multiplier:', {
+            servings: requestedServings,
+            originalCalories: originalNutritionWithMicros.calories?.quantity,
+            newCalories: multipliedNutrition.calories?.quantity
+          });
+          
+          // Skip the normal modification calculation below since we already have customNutrition
+        }
       } else {
         // Normal recipe - try cache first to get full nutrition
         cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
@@ -1738,22 +1764,27 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
       // Calculate new nutrition using the NEW micronutrient-aware service
       // Pass recipe servings so ingredient changes are correctly divided
-      console.log(`🚨🚨🚨 CRITICAL DEBUG 🚨🚨🚨`);
-      console.log(`Recipe servings breakdown:`);
-      console.log(`  - recipe.servings (from draft): ${recipe.servings}`);
-      console.log(`  - cachedRecipe?.servings: ${cachedRecipe?.servings}`);
-      console.log(`  - originalRecipe.servings: ${(originalRecipe as any)?.servings}`);
-      console.log(`  - FINAL recipeServings being passed: ${recipeServings}`);
-      console.log(`🚨🚨🚨 END DEBUG 🚨🚨🚨`);
-      
-      customizations.customNutrition = await calculateNutritionForModifications(
-        originalNutritionWithMicros, // Now passing FULL nutrition with micros!
-        customizations.modifications,
-        customizations.source,
-        originalRecipe,
-        recipeServings // Pass servings so ingredient changes are divided by servings
-      );
-      customizations.customizationsApplied = true;
+      // SKIP if customNutrition was already calculated (e.g., for simple ingredients with servings only)
+      if (!customizations.customNutrition) {
+        console.log(`🚨🚨🚨 CRITICAL DEBUG 🚨🚨🚨`);
+        console.log(`Recipe servings breakdown:`);
+        console.log(`  - recipe.servings (from draft): ${recipe.servings}`);
+        console.log(`  - cachedRecipe?.servings: ${cachedRecipe?.servings}`);
+        console.log(`  - originalRecipe.servings: ${(originalRecipe as any)?.servings}`);
+        console.log(`  - FINAL recipeServings being passed: ${recipeServings}`);
+        console.log(`🚨🚨🚨 END DEBUG 🚨🚨🚨`);
+        
+        customizations.customNutrition = await calculateNutritionForModifications(
+          originalNutritionWithMicros, // Now passing FULL nutrition with micros!
+          customizations.modifications,
+          customizations.source,
+          originalRecipe,
+          recipeServings // Pass servings so ingredient changes are divided by servings
+        );
+        customizations.customizationsApplied = true;
+      } else {
+        console.log('⏭️  Skipping nutrition calculation - already calculated via servings multiplier');
+      }
       
       console.log('✅ Calculated nutrition:', {
         hasMicros: !!customizations.customNutrition.micros,

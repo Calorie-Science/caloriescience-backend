@@ -753,6 +753,79 @@ export class MealPlanDraftService {
       }
     }
 
+    // Update recipe top-level nutrition fields to match customNutrition
+    if (customizations.customNutrition) {
+      console.log('🔄 Updating recipe top-level nutrition fields to match customNutrition');
+      
+      // Extract nutrition values from customNutrition
+      const extractNumber = (value: any): number => {
+        if (typeof value === 'number') return value;
+        if (value?.quantity !== undefined) return value.quantity;
+        return 0;
+      };
+      
+      const customNutritionAny = customizations.customNutrition as any;
+      
+      recipe.calories = extractNumber(customNutritionAny.calories);
+      recipe.protein = extractNumber(customNutritionAny.macros?.protein);
+      recipe.carbs = extractNumber(customNutritionAny.macros?.carbs);
+      recipe.fat = extractNumber(customNutritionAny.macros?.fat);
+      recipe.fiber = extractNumber(customNutritionAny.macros?.fiber);
+      
+      console.log('  ✅ Updated top-level nutrition:', {
+        calories: recipe.calories,
+        protein: recipe.protein,
+        carbs: recipe.carbs,
+        fat: recipe.fat
+      });
+      
+      // For simple ingredients, update the title to reflect new quantity
+      const recipeAny = recipe as any;
+      if (recipeAny.isSimpleIngredient || recipeAny.isIngredient) {
+        // Option 1: servings-based change (simpler approach)
+        const customServings = (customizations as any).servings;
+        if (customServings && customServings !== 1 && recipe.ingredients && recipe.ingredients.length > 0) {
+          const originalIng = recipe.ingredients[0];
+          const originalAmount = originalIng.amount || 1;
+          const originalUnit = originalIng.unit || '';
+          const newAmount = originalAmount * customServings;
+          
+          // Extract ingredient name from title (before the opening parenthesis)
+          const titleMatch = recipe.title.match(/^(.+?)\s*\(/);
+          const ingredientName = titleMatch ? titleMatch[1] : recipe.title;
+          
+          // Build new title with updated quantity
+          const newTitle = `${ingredientName} (${newAmount}${originalUnit})`;
+          
+          console.log(`  🏷️ Updating simple ingredient title (servings): "${recipe.title}" → "${newTitle}"`);
+          recipe.title = newTitle;
+          
+          // Also update the ingredients array
+          recipe.ingredients[0] = {
+            ...originalIng,
+            amount: newAmount,
+            original: `${newAmount} ${originalUnit} ${originalIng.name}`
+          };
+        } 
+        // Option 2: replace modification (legacy approach)
+        else {
+          const replaceMod = customizations.modifications.find((mod: any) => mod.type === 'replace');
+          
+          if (replaceMod && (replaceMod as any).amount !== undefined && (replaceMod as any).unit) {
+            // Extract ingredient name from title (before the opening parenthesis)
+            const titleMatch = recipe.title.match(/^(.+?)\s*\(/);
+            const ingredientName = titleMatch ? titleMatch[1] : recipe.title;
+            
+            // Build new title with updated quantity
+            const newTitle = `${ingredientName} (${(replaceMod as any).amount}${(replaceMod as any).unit})`;
+            
+            console.log(`  🏷️ Updating simple ingredient title (replace): "${recipe.title}" → "${newTitle}"`);
+            recipe.title = newTitle;
+          }
+        }
+      }
+    }
+
     // REPLACE customizations (smart merge already happened in API handler)
     // The API handler in draft.ts already handles smart merging, so we just save what we're given
     console.log(`💾 Saving customizations: ${customizations.modifications.length} modifications (smart merge already applied)`);

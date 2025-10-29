@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { authenticate } from '../../lib/authMiddleware';
+import { requireAuth } from '../../lib/auth';
 import { SimpleIngredientService } from '../../lib/simpleIngredientService';
 
 const simpleIngredientService = new SimpleIngredientService();
@@ -23,17 +23,11 @@ const simpleIngredientService = new SimpleIngredientService();
  */
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
-  
-  // Authentication
-  const authResult = await authenticate(req);
-  if (!authResult.authenticated || !authResult.user) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: authResult.error || 'Authentication required'
-    });
+  // Get user from request (set by requireAuth middleware)
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
-
-  const user = authResult.user;
 
   // Only allow GET requests
   if (req.method !== 'GET') {
@@ -189,5 +183,5 @@ function groupIngredientsByType(ingredients: any[]): {
   return grouped;
 }
 
-export default handler;
+export default requireAuth(handler);
 

@@ -21,7 +21,9 @@ export const VALID_ALLERGIES = [
 ] as const;
 
 // Valid dietary preferences (lifestyle choices)
+// Note: All allergy values are also valid as preferences since people may choose to avoid them for non-allergy reasons
 export const VALID_PREFERENCES = [
+  // Lifestyle preferences
   'alcohol-cocktail',
   'alcohol-free',
   'DASH',
@@ -38,7 +40,26 @@ export const VALID_PREFERENCES = [
   'red-meat-free',
   'sugar-conscious',
   'vegan',
-  'vegetarian'
+  'vegetarian',
+  // All allergen-free options (can be used as preferences too)
+  'celery-free',
+  'crustacean-free',
+  'dairy-free',
+  'egg-free',
+  'fish-free',
+  'fodmap-free',
+  'gluten-free',
+  'lupine-free',
+  'mollusk-free',
+  'mustard-free',
+  'peanut-free',
+  'pork-free',
+  'sesame-free',
+  'shellfish-free',
+  'soy-free',
+  'sulfite-free',
+  'tree-nut-free',
+  'wheat-free'
 ] as const;
 
 // Valid cuisine types for meal planning
