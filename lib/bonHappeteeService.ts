@@ -174,7 +174,7 @@ export class BonHappeteeService {
         basicUnitMeasure: nutritionData.basic_unit_measure,
         allergens: allergens ? allergens.split(',').map((a: string) => a.trim()) : [],
         healthLabels: this.parseHealthLabels(positiveHealth, negativeHealth),
-        cuisineType: nutritionData.food_tags?.cuisines ? [nutritionData.food_tags.cuisines] : [],
+        cuisineType: nutritionData.food_tags?.cuisines ? nutritionData.food_tags.cuisines.split(',').map((c: string) => c.trim()) : [],
         mealType: this.getMealTypes(nutritionData.food_timing),
         foodGroup: nutritionData.food_tags?.food_group,
         prepTime: nutritionData.preparation_tags?.prep_time,

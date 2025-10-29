@@ -1217,6 +1217,139 @@ export class ManualMealPlanService {
   }
 
   /**
+   * Copy entire day's meal plan to another day
+   */
+  async copyDayToDay(params: { draftId: string; sourceDay: number; targetDay: number; extendIfNeeded?: boolean }): Promise<void> {
+    console.log('📋 Copying day in meal plan:', params);
+
+    const { data: draft, error: draftError } = await supabase
+      .from('meal_plan_drafts')
+      .select('*')
+      .eq('id', params.draftId)
+      .single();
+
+    if (draftError || !draft) {
+      throw new Error('Draft not found');
+    }
+
+    // Validate source day exists
+    if (params.sourceDay < 1 || params.sourceDay > draft.plan_duration_days) {
+      throw new Error(`Source day must be between 1 and ${draft.plan_duration_days}`);
+    }
+
+    let suggestions = draft.suggestions as DayStructure[];
+    const sourceDayPlan = suggestions.find((d: DayStructure) => d.day === params.sourceDay);
+    
+    if (!sourceDayPlan) {
+      throw new Error(`Source day ${params.sourceDay} not found in draft`);
+    }
+
+    // Check if we need to extend the plan duration
+    let newPlanDuration = draft.plan_duration_days;
+    if (params.targetDay > draft.plan_duration_days) {
+      if (!params.extendIfNeeded) {
+        throw new Error(`Target day ${params.targetDay} is beyond plan duration (${draft.plan_duration_days} days). Set extendIfNeeded=true to extend the plan.`);
+      }
+      
+      // Extend the plan to accommodate target day
+      console.log(`📅 Extending plan from ${draft.plan_duration_days} to ${params.targetDay} days`);
+      newPlanDuration = params.targetDay;
+      
+      // Get meal slots from first day to use as template for new days
+      const firstDay = suggestions[0];
+      const mealSlots: MealSlot[] = Object.entries(firstDay.meals).map(([mealName, meal]: [string, any]) => ({
+        mealName,
+        mealTime: meal.mealTime || '12:00',
+        targetCalories: meal.targetCalories
+      }));
+
+      // Generate structure for new days
+      const startDate = draft.plan_date || new Date().toISOString().split('T')[0];
+      const start = new Date(startDate);
+      
+      for (let i = draft.plan_duration_days; i < params.targetDay; i++) {
+        const currentDate = new Date(start);
+        currentDate.setDate(start.getDate() + i);
+        
+        const dayStructure: DayStructure = {
+          day: i + 1,
+          date: currentDate.toISOString().split('T')[0],
+          meals: {}
+        };
+
+        // Create meal slots
+        for (const slot of mealSlots) {
+          dayStructure.meals[slot.mealName] = {
+            recipes: [],
+            customizations: {},
+            selectedRecipeId: undefined,
+            mealTime: slot.mealTime,
+            targetCalories: slot.targetCalories
+          };
+        }
+
+        suggestions.push(dayStructure);
+      }
+    }
+
+    // Find or create target day
+    let targetDayPlan = suggestions.find((d: DayStructure) => d.day === params.targetDay);
+    
+    if (!targetDayPlan) {
+      // Should not happen after extension logic above, but handle it
+      throw new Error(`Target day ${params.targetDay} not found in draft`);
+    }
+
+    // Deep copy the source day's meals structure
+    const copiedMeals: { [mealName: string]: any } = {};
+    
+    for (const [mealName, meal] of Object.entries(sourceDayPlan.meals)) {
+      const sourceMeal = meal as any;
+      
+      // Deep clone recipes array
+      const copiedRecipes = sourceMeal.recipes ? JSON.parse(JSON.stringify(sourceMeal.recipes)) : [];
+      
+      // Deep clone customizations
+      const copiedCustomizations = sourceMeal.customizations ? JSON.parse(JSON.stringify(sourceMeal.customizations)) : {};
+      
+      // Copy meal with all its data
+      copiedMeals[mealName] = {
+        recipes: copiedRecipes,
+        customizations: copiedCustomizations,
+        selectedRecipeId: sourceMeal.selectedRecipeId,
+        totalNutrition: sourceMeal.totalNutrition ? JSON.parse(JSON.stringify(sourceMeal.totalNutrition)) : undefined,
+        mealTime: sourceMeal.mealTime,
+        targetCalories: sourceMeal.targetCalories
+      };
+    }
+
+    // Replace target day's meals with copied meals
+    targetDayPlan.meals = copiedMeals;
+
+    // Update the draft
+    const updateData: any = {
+      suggestions: suggestions,
+      updated_at: new Date().toISOString()
+    };
+
+    // Update plan_duration_days if extended
+    if (newPlanDuration > draft.plan_duration_days) {
+      updateData.plan_duration_days = newPlanDuration;
+    }
+
+    const { error: updateError } = await supabase
+      .from('meal_plan_drafts')
+      .update(updateData)
+      .eq('id', params.draftId);
+
+    if (updateError) {
+      throw new Error(`Failed to update draft: ${updateError.message}`);
+    }
+
+    console.log(`✅ Copied day ${params.sourceDay} to day ${params.targetDay}${newPlanDuration > draft.plan_duration_days ? ` (extended plan to ${newPlanDuration} days)` : ''}`);
+  }
+
+  /**
    * Create a new meal slot with target calories
    */
   async createMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number }): Promise<void> {
