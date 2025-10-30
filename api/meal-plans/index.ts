@@ -185,7 +185,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
 
           // Start async generation with Claude (returns complete draft in same format as automated/manual)
-          const days = req.body.days || 7;
+          const days = req.body.days || 2;
           const startDate = req.body.startDate;
           const result = await asyncMealPlanService.startGeneration(
             clientId,

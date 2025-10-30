@@ -12,7 +12,8 @@ const addRecipeSchema = Joi.object({
   recipe: Joi.object({
     id: Joi.string().required(),
     provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee', 'manual').required(),
-    source: Joi.string().valid('api', 'cached').required()
+    source: Joi.string().valid('api', 'cached').required(),
+    isSimpleIngredient: Joi.boolean().optional()
   }).required(),
   servings: Joi.number().min(0.1).max(20).optional()
 });
@@ -100,6 +101,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       provider: recipe.provider,
       source: recipe.source,
       servings,
+      isSimpleIngredient: recipe.isSimpleIngredient || false,
       clientAllergens: clientGoal?.allergies || []
     });
 

@@ -14,6 +14,7 @@
 import { supabase } from './supabase';
 
 interface SimpleIngredient {
+  id?: string; // UUID from database
   name: string;
   servingSize: { quantity: number; unit: string };
   calories: number;
@@ -239,6 +240,7 @@ export class SimpleIngredientService {
 
       // Map database format to SimpleIngredient interface
       const ingredients: SimpleIngredient[] = (data || []).map((row: any) => ({
+        id: row.id, // Include UUID from database
         name: row.name,
         servingSize: { quantity: row.serving_quantity, unit: row.serving_unit },
         calories: row.calories,
@@ -369,7 +371,7 @@ export class SimpleIngredientService {
       if (ing.potassium) minerals.potassium = { quantity: ing.potassium, unit: 'mg' };
 
       return {
-        id: ing.name,
+        id: ing.id || `ingredient_${ing.name.replace(/\s+/g, '_')}`, // Use database UUID or fallback to generated ID
         name: ing.name,
         title: ing.name.charAt(0).toUpperCase() + ing.name.slice(1),
         category: ing.category,
@@ -406,7 +408,10 @@ export class SimpleIngredientService {
         // Labels
         healthLabels: ing.healthLabels || this.getHealthLabels(ing.category, ing.name),
         dietLabels: ing.dietLabels || this.getDietLabels(ing.category, ing.name),
-        allergens: ing.allergens || this.getAllergens(ing.name)
+        allergens: ing.allergens || this.getAllergens(ing.name),
+        
+        // Flag to indicate this is a simple ingredient (for meal plan API)
+        isSimpleIngredient: true
       };
     });
   }
@@ -563,7 +568,7 @@ export class SimpleIngredientService {
     if (ingredient.potassium) minerals.potassium = { quantity: ingredient.potassium, unit: 'mg' };
 
     return {
-      id: `ingredient_${name.replace(/\s+/g, '_')}`,
+      id: ingredient.id || `ingredient_${name.replace(/\s+/g, '_')}`, // Use database UUID or fallback to generated ID
       title,
       image: `https://spoonacular.com/cdn/ingredients_100x100/${name.replace(/\s+/g, '-')}.jpg`,
       sourceUrl: null,

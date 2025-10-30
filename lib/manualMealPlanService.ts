@@ -22,6 +22,7 @@ export interface AddRecipeParams {
   provider: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual';
   source: 'api' | 'cached';
   servings?: number;
+  isSimpleIngredient?: boolean;
 }
 
 export interface AddRecipeWithAllergenCheckParams extends AddRecipeParams {
@@ -203,12 +204,12 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Handle simple ingredient recipes (ID starts with ingredient_)
+    // Handle simple ingredient recipes (check isSimpleIngredient flag)
     let recipe: any;
-    const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
+    const isSimpleIngredient = params.isSimpleIngredient === true;
     
     if (isSimpleIngredient) {
-      // Get simple ingredient recipe from ingredient service
+      // Get simple ingredient recipe by UUID from database
       recipe = await this.getIngredientRecipe(params.recipeId);
       if (!recipe) {
         throw new Error('Ingredient not found');
@@ -290,12 +291,12 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Handle simple ingredient recipes (ID starts with ingredient_)
+    // Handle simple ingredient recipes (check isSimpleIngredient flag)
     let recipe: any;
-    const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
+    const isSimpleIngredient = params.isSimpleIngredient === true;
     
     if (isSimpleIngredient) {
-      // Get simple ingredient recipe from ingredient service
+      // Get simple ingredient recipe by UUID from database
       recipe = await this.getIngredientRecipe(params.recipeId);
       if (!recipe) {
         throw new Error('Ingredient not found');
@@ -1247,11 +1248,7 @@ export class ManualMealPlanService {
     // Check if we need to extend the plan duration
     let newPlanDuration = draft.plan_duration_days;
     if (params.targetDay > draft.plan_duration_days) {
-      if (!params.extendIfNeeded) {
-        throw new Error(`Target day ${params.targetDay} is beyond plan duration (${draft.plan_duration_days} days). Set extendIfNeeded=true to extend the plan.`);
-      }
-      
-      // Extend the plan to accommodate target day
+      // Automatically extend the plan to accommodate target day
       console.log(`📅 Extending plan from ${draft.plan_duration_days} to ${params.targetDay} days`);
       newPlanDuration = params.targetDay;
       
@@ -1477,27 +1474,53 @@ export class ManualMealPlanService {
    * Get ingredient recipe from simple ingredient service
    */
   private async getIngredientRecipe(ingredientId: string): Promise<any> {
-    // Extract ingredient name from ID (format: ingredient_banana, ingredient_chicken_breast)
-    const ingredientName = ingredientId.replace(/^ingredient_/, '').replace(/_/g, ' ');
+    console.log(`🔍 Getting simple ingredient by UUID: ${ingredientId}`);
     
-    console.log(`🔍 Getting ingredient recipe for: ${ingredientName}`);
+    // Fetch ingredient from database by UUID
+    const { data: ingredient, error } = await supabase
+      .from('simple_ingredients')
+      .select('*')
+      .eq('id', ingredientId)
+      .eq('is_active', true)
+      .single();
     
-    // Search for this specific ingredient (now async)
-    const results = await simpleIngredientService.searchIngredientsAsRecipes(ingredientName, 1);
-    
-    if (results.length === 0) {
-      console.log(`❌ Ingredient not found: ${ingredientName}`);
+    if (error || !ingredient) {
+      console.log(`❌ Simple ingredient not found: ${ingredientId}`, error);
       return null;
     }
 
-    const ingredientRecipe = results[0];
+    // Convert database format to recipe format
+    const ingredientRecipe = {
+      id: ingredient.id,
+      title: `${ingredient.name.charAt(0).toUpperCase() + ingredient.name.slice(1)} (${ingredient.serving_quantity}${ingredient.serving_unit})`,
+      servings: 1,
+      calories: Math.round(ingredient.calories),
+      protein: Math.round(ingredient.protein_g * 10) / 10,
+      carbs: Math.round(ingredient.carbs_g * 10) / 10,
+      fat: Math.round(ingredient.fat_g * 10) / 10,
+      fiber: Math.round(ingredient.fiber_g * 10) / 10,
+      nutrition: {
+        calories: { quantity: Math.round(ingredient.calories), unit: 'kcal' },
+        macros: {
+          protein: { quantity: Math.round(ingredient.protein_g * 10) / 10, unit: 'g' },
+          carbs: { quantity: Math.round(ingredient.carbs_g * 10) / 10, unit: 'g' },
+          fat: { quantity: Math.round(ingredient.fat_g * 10) / 10, unit: 'g' },
+          fiber: { quantity: Math.round(ingredient.fiber_g * 10) / 10, unit: 'g' },
+          sugar: { quantity: Math.round((ingredient.sugar_g || 0) * 10) / 10, unit: 'g' },
+          sodium: { quantity: Math.round((ingredient.sodium_mg || 0) * 10) / 10, unit: 'mg' }
+        }
+      },
+      healthLabels: ingredient.health_labels || [],
+      allergens: ingredient.allergens || [],
+      isSimpleIngredient: true
+    };
     
     // Convert to cached recipe format for compatibility
     return {
       id: ingredientRecipe.id,
       external_recipe_id: ingredientRecipe.id,
       recipe_name: ingredientRecipe.title,
-      recipe_image_url: ingredientRecipe.image,
+      recipe_image_url: `https://spoonacular.com/cdn/ingredients_100x100/${ingredient.name.replace(/\s+/g, '-')}.jpg`,
       recipe_url: null,
       servings: ingredientRecipe.servings,
       ready_in_minutes: 0,
@@ -1507,14 +1530,19 @@ export class ManualMealPlanService {
       fat_per_serving_g: ingredientRecipe.fat,
       fiber_per_serving_g: ingredientRecipe.fiber,
       nutrition_details: ingredientRecipe.nutrition,
-      ingredients: ingredientRecipe.ingredients,
-      instructions: ingredientRecipe.instructions,
+      ingredients: [{
+        name: ingredient.name,
+        amount: ingredient.serving_quantity,
+        unit: ingredient.serving_unit,
+        original: `${ingredient.serving_quantity} ${ingredient.serving_unit} ${ingredient.name}`
+      }],
+      instructions: [`Serve ${ingredient.serving_quantity} ${ingredient.serving_unit} of ${ingredient.name}`],
       health_labels: ingredientRecipe.healthLabels,
-      diet_labels: ingredientRecipe.dietLabels,
+      diet_labels: ingredient.diet_labels || [],
       allergens: ingredientRecipe.allergens,
-      cuisine_types: ingredientRecipe.cuisineType,
-      meal_types: ingredientRecipe.mealType,
-      dish_types: ingredientRecipe.dishType
+      cuisine_types: [],
+      meal_types: [],
+      dish_types: []
     };
   }
 

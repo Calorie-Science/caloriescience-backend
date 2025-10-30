@@ -316,22 +316,47 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
                   selectedRecipe.fiber,
                   selectedRecipe.nutrition?.macros?.fiber?.quantity
                 ),
-                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : (selectedRecipe.nutrition?.macros?.sugar?.quantity || null),
-                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : (selectedRecipe.nutrition?.macros?.sodium?.quantity || null),
-                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || selectedRecipe.nutrition?.macros?.saturatedFat?.quantity || null,
-                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || selectedRecipe.nutrition?.macros?.cholesterol?.quantity || null
+                sugar: standardizedRecipe?.sugarPerServingG ? parseFloat(standardizedRecipe.sugarPerServingG) : (selectedRecipe.nutrition?.macros?.sugar?.quantity || selectedRecipe.nutrition?.macros?.sugar?.value || null),
+                sodium: standardizedRecipe?.sodiumPerServingMg ? parseFloat(standardizedRecipe.sodiumPerServingMg) : (selectedRecipe.nutrition?.macros?.sodium?.quantity || selectedRecipe.nutrition?.macros?.sodium?.value || null),
+                saturatedFat: standardizedRecipe?.nutritionDetails?.macros?.saturatedFat?.quantity || selectedRecipe.nutrition?.macros?.saturatedFat?.quantity || selectedRecipe.nutrition?.macros?.saturatedFat?.value || null,
+                cholesterol: standardizedRecipe?.nutritionDetails?.macros?.cholesterol?.quantity || selectedRecipe.nutrition?.macros?.cholesterol?.quantity || selectedRecipe.nutrition?.macros?.cholesterol?.value || null
               };
               
-              // Extract micronutrients from cache
+              // Extract micronutrients from cache OR from stored suggestions (for AI plans)
               if (standardizedRecipe?.nutritionDetails?.micros) {
                 console.log(`📊 Extracting micronutrients from cache`);
                 detailedNutrition.micronutrients = {
                   vitamins: standardizedRecipe.nutritionDetails.micros.vitamins || {},
                   minerals: standardizedRecipe.nutritionDetails.micros.minerals || {}
                 };
-                console.log(`✅ Micronutrients extracted successfully`);
+                console.log(`✅ Micronutrients extracted from cache`);
+              } else if (selectedRecipe.nutrition?.micros) {
+                // For AI-generated meal plans, micros are in the stored suggestions
+                console.log(`📊 Extracting micronutrients from stored suggestions (AI plan)`);
+                
+                // Helper to normalize micronutrient format from {value, unit} to {quantity, unit}
+                const normalizeMicros = (micros: any) => {
+                  const normalized: any = {};
+                  for (const [key, value] of Object.entries(micros)) {
+                    if (value && typeof value === 'object') {
+                      const microValue: any = value;
+                      normalized[key] = {
+                        quantity: microValue.value !== undefined ? microValue.value : microValue.quantity,
+                        unit: microValue.unit
+                      };
+                    }
+                  }
+                  return normalized;
+                };
+                
+                detailedNutrition.micronutrients = {
+                  vitamins: normalizeMicros(selectedRecipe.nutrition.micros.vitamins || {}),
+                  minerals: normalizeMicros(selectedRecipe.nutrition.micros.minerals || {})
+                };
+                console.log(`✅ Micronutrients extracted from suggestions`);
               } else {
-                console.log(`⚠️ No micronutrients found in cache for ${selectedRecipe.id}`);
+                console.log(`⚠️ No micronutrients found for ${selectedRecipe.id}`);
+                detailedNutrition.micronutrients = null;
               }
             }
 
@@ -340,7 +365,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               recipeId: selectedRecipe.id,
               recipeImage: selectedRecipe.image,
               recipeSource: selectedRecipe.source,
-              servings: selectedRecipe.servings || 1,
+              servings: selectedRecipe.servings || 1, // Recipe yield (for ingredients)
+              nutritionServings: customizations?.nutritionServings || customizations?.servings || 1, // Portion size multiplier
               isSelected: true,
               hasCustomizations: !!(customizations?.customizationsApplied),
               customNotes: selectedRecipe.customNotes || null,

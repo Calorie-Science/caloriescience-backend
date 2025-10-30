@@ -41,7 +41,8 @@ const selectRecipeSchema = Joi.object({
       fat: Joi.number().min(0).required(),
       fiber: Joi.number().min(0).required()
     }).optional(),
-    servings: Joi.number().min(0.1).max(20).default(1),
+    servings: Joi.number().min(0.1).max(20).optional(), // Deprecated: use nutritionServings
+    nutritionServings: Joi.number().min(0.1).max(20).default(1), // Portion size multiplier for nutrition
     customizationsApplied: Joi.boolean().default(false)
   }).optional()
 });
@@ -114,6 +115,8 @@ const updateCustomizationsSchema = Joi.object({
       fat: Joi.number().min(0).required(),
       fiber: Joi.number().min(0).required()
     }).optional(), // Now optional - will be auto-calculated if not provided
+    servings: Joi.number().min(0.1).max(20).optional(), // Deprecated: use nutritionServings
+    nutritionServings: Joi.number().min(0.1).max(20).default(1), // Portion size multiplier for nutrition
     customizationsApplied: Joi.boolean().default(false)
   }).required()
 });
@@ -591,6 +594,7 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                     nutrition: finalNutrition,
                     micronutrients: finalMicronutrients,
                     hasCustomizations: true,
+                    nutritionServings: recipeCustomizations.nutritionServings || recipeCustomizations.servings || 1, // Portion size multiplier
                     customizationsSummary: {
                       modificationsCount: modificationsToUse.length,  // Use deduplicated count
                       modifications: modificationsToUse.map((m: any) => ({  // Use deduplicated mods
@@ -1055,6 +1059,12 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
   const { draftId, day, mealName, recipeId, customizations, autoCalculateNutrition = true } = value;
 
+  // Normalize servings to nutritionServings (backward compatibility)
+  if (customizations && customizations.servings !== undefined && customizations.nutritionServings === undefined) {
+    customizations.nutritionServings = customizations.servings;
+    console.log(`🔄 Normalized servings=${customizations.servings} to nutritionServings`);
+  }
+
   try {
     // Verify user has access to this draft
     const draft = await draftService.getDraft(draftId);
@@ -1432,9 +1442,9 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
         });
         
-        // For simple ingredients: if servings parameter is provided and no modifications, 
-        // just multiply the nutrition by servings
-        const requestedServings = customizations.servings || 1;
+        // For simple ingredients: if nutritionServings parameter is provided and no modifications, 
+        // just multiply the nutrition by nutritionServings
+        const requestedServings = customizations.nutritionServings || customizations.servings || 1;
         if (requestedServings !== 1 && (!customizations.modifications || customizations.modifications.length === 0)) {
           console.log(`🔢 Simple ingredient servings adjustment: ${recipeServings} → ${requestedServings}`);
           
@@ -2195,7 +2205,8 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       customizations: {
         modifications: customizations.modifications || [],
         customizationSummary: customizationSummary,
-      appliedServings: finalServings, // Use actual recipe servings from baseRecipe!
+        appliedServings: finalServings, // Recipe servings (for ingredients)
+        nutritionServings: customizations.nutritionServings || customizations.servings || 1, // Portion size multiplier
         micronutrientsIncluded: !!(customizations.customNutrition?.micros),
         nutritionComparison: nutritionComparison,
         originalNutrition: {

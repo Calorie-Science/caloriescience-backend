@@ -82,7 +82,8 @@ export interface MealCustomization {
     fat: number;
     fiber: number;
   };
-  servings: number;
+  servings?: number; // Deprecated: use nutritionServings
+  nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   customizationsApplied: boolean;
 }
 
@@ -783,7 +784,7 @@ export class MealPlanDraftService {
       const recipeAny = recipe as any;
       if (recipeAny.isSimpleIngredient || recipeAny.isIngredient) {
         // Option 1: servings-based change (simpler approach)
-        const customServings = (customizations as any).servings;
+        const customServings = (customizations as any).nutritionServings || (customizations as any).servings;
         if (customServings && customServings !== 1 && recipe.ingredients && recipe.ingredients.length > 0) {
           const originalIng = recipe.ingredients[0];
           const originalAmount = originalIng.amount || 1;
@@ -1075,8 +1076,8 @@ export class MealPlanDraftService {
       };
     }
 
-    // Apply serving adjustment
-    const servings = customization?.servings || 1;
+    // Apply nutritionServings multiplier (portion size adjustment)
+    const servings = customization?.nutritionServings || customization?.servings || 1;
     if (servings !== 1) {
       // Adjust macros
       baseNutrition.totalCalories = Math.round(baseNutrition.totalCalories * servings);

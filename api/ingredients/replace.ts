@@ -21,7 +21,8 @@ const replaceIngredientSchema = Joi.object({
   newIngredient: Joi.string().required(),
   amount: Joi.number().min(0).optional(),
   unit: Joi.string().optional(),
-  servings: Joi.number().min(0.1).max(20).default(1).optional(), // Portion size adjustment
+  servings: Joi.number().min(0.1).max(20).optional(), // Deprecated: use nutritionServings
+  nutritionServings: Joi.number().min(0.1).max(20).default(1).optional(), // Portion size multiplier for nutrition
   source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'auto').default('auto').optional() // 'auto' tries both providers
 });
 
@@ -65,10 +66,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       originalIngredient, 
       newIngredient, 
       amount, 
-      unit, 
-      servings = 1,
+      unit,
+      servings,
+      nutritionServings,
       source 
     } = value;
+    
+    // Normalize to nutritionServings (backward compatibility)
+    const finalNutritionServings = nutritionServings || servings || 1;
 
     // Verify user has access to this draft
     const draft = await draftService.getDraft(draftId);
@@ -205,13 +210,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       fiber: parseFloat((newTotalRecipeNutrition.fiber / recipeServings).toFixed(1))
     };
 
-    // Apply portion size (servings) adjustment
+    // Apply portion size (nutritionServings) adjustment
     const finalNutrition = {
-      calories: Math.round(newPerServingNutrition.calories * servings),
-      protein: parseFloat((newPerServingNutrition.protein * servings).toFixed(1)),
-      carbs: parseFloat((newPerServingNutrition.carbs * servings).toFixed(1)),
-      fat: parseFloat((newPerServingNutrition.fat * servings).toFixed(1)),
-      fiber: parseFloat((newPerServingNutrition.fiber * servings).toFixed(1))
+      calories: Math.round(newPerServingNutrition.calories * finalNutritionServings),
+      protein: parseFloat((newPerServingNutrition.protein * finalNutritionServings).toFixed(1)),
+      carbs: parseFloat((newPerServingNutrition.carbs * finalNutritionServings).toFixed(1)),
+      fat: parseFloat((newPerServingNutrition.fat * finalNutritionServings).toFixed(1)),
+      fiber: parseFloat((newPerServingNutrition.fiber * finalNutritionServings).toFixed(1))
     };
 
     // Get existing customizations or create new
@@ -219,7 +224,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       recipeId,
       source,
       modifications: [],
-      servings: servings, // Use the requested servings
+      nutritionServings: finalNutritionServings, // Use the requested nutritionServings
       customizationsApplied: false
     };
 
@@ -233,7 +238,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // Update with the final nutrition (includes portion size adjustment)
     existingCustomization.customNutrition = finalNutrition;
-    existingCustomization.servings = servings; // Store the portion size
+    existingCustomization.nutritionServings = finalNutritionServings; // Store the portion size multiplier
+    // Keep servings for backward compatibility if it was provided
+    if (servings !== undefined) existingCustomization.servings = servings;
     existingCustomization.customizationsApplied = true;
 
     // Update the draft with the ingredient replacement

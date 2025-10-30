@@ -4,6 +4,7 @@ import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchSer
 import {
   CreateCustomRecipeInput,
   UpdateCustomRecipeInput,
+  EditCustomRecipeBasicDetailsInput,
   CustomRecipeOutput,
   CustomRecipeFilter,
   NutritionCalculationResult,
@@ -202,6 +203,70 @@ export class CustomRecipeService {
     if (error) {
       console.error('Error updating custom recipe:', error);
       throw new Error(`Failed to update custom recipe: ${error.message}`);
+    }
+
+    return this.mapToOutput(data);
+  }
+
+  /**
+   * Update basic details of a custom recipe (without recalculating nutrition)
+   * This method is for updating metadata, descriptions, tags, etc. without changing ingredients
+   */
+  async updateBasicDetails(
+    recipeId: string,
+    input: EditCustomRecipeBasicDetailsInput,
+    nutritionistId: string
+  ): Promise<CustomRecipeOutput> {
+    // Validate ownership
+    await this.validateRecipeOwnership(recipeId, nutritionistId);
+
+    // Prepare update data
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    // Only update fields that are provided
+    if (input.recipeName) updateData.recipe_name = input.recipeName;
+    if (input.description !== undefined) updateData.recipe_description = input.description;
+    if (input.imageUrl !== undefined) updateData.recipe_image_url = input.imageUrl;
+    if (input.servings !== undefined) updateData.servings = input.servings;
+    if (input.prepTimeMinutes !== undefined) updateData.prep_time_minutes = input.prepTimeMinutes;
+    if (input.cookTimeMinutes !== undefined) updateData.cook_time_minutes = input.cookTimeMinutes;
+    if (input.totalTimeMinutes !== undefined) {
+      updateData.total_time_minutes = input.totalTimeMinutes;
+    } else if (input.prepTimeMinutes !== undefined || input.cookTimeMinutes !== undefined) {
+      // Auto-calculate total time if prep or cook time changed
+      const { data: currentRecipe } = await supabase
+        .from('cached_recipes')
+        .select('prep_time_minutes, cook_time_minutes')
+        .eq('id', recipeId)
+        .single();
+      
+      const prepTime = input.prepTimeMinutes !== undefined ? input.prepTimeMinutes : (currentRecipe?.prep_time_minutes || 0);
+      const cookTime = input.cookTimeMinutes !== undefined ? input.cookTimeMinutes : (currentRecipe?.cook_time_minutes || 0);
+      updateData.total_time_minutes = prepTime + cookTime || null;
+    }
+    if (input.instructions !== undefined) updateData.cooking_instructions = input.instructions;
+    if (input.customNotes !== undefined) updateData.custom_notes = input.customNotes;
+    if (input.isPublic !== undefined) updateData.is_public = input.isPublic;
+    if (input.cuisineTypes !== undefined) updateData.cuisine_types = input.cuisineTypes;
+    if (input.mealTypes !== undefined) updateData.meal_types = input.mealTypes;
+    if (input.dishTypes !== undefined) updateData.dish_types = input.dishTypes;
+    if (input.healthLabels !== undefined) updateData.health_labels = input.healthLabels;
+    if (input.dietLabels !== undefined) updateData.diet_labels = input.dietLabels;
+    if (input.allergens !== undefined) updateData.allergens = input.allergens;
+
+    // Perform update
+    const { data, error } = await supabase
+      .from('cached_recipes')
+      .update(updateData)
+      .eq('id', recipeId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating basic details:', error);
+      throw new Error(`Failed to update basic details: ${error.message}`);
     }
 
     return this.mapToOutput(data);

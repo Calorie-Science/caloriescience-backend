@@ -788,8 +788,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       console.log('✅ Applied custom nutrition');
     }
 
-    // Step 7: Apply serving adjustments if any
-    const servings = customizations.servings || 1;
+    // Step 7: Apply nutritionServings multiplier if any
+    const servings = customizations.nutritionServings || customizations.servings || 1;
     if (servings !== 1) {
       customizedRecipe.adjustedServings = servings;
       console.log(`📊 Recipe adjusted for ${servings} servings`);

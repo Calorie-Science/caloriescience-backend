@@ -55,8 +55,9 @@ export class NutritionMappingService {
   /**
    * Get a complete nutrition object with all vitamins and minerals initialized to 0
    * This ensures consistent API responses with exhaustive nutrient lists
+   * PUBLIC METHOD - can be used anywhere to ensure complete nutrition structure
    */
-  private static getCompleteNutritionTemplate(): StandardizedNutrition {
+  public static getCompleteNutritionTemplate(): StandardizedNutrition {
     return {
       calories: { quantity: 0, unit: 'kcal' },
       macros: {
@@ -104,6 +105,71 @@ export class NutritionMappingService {
         }
       }
     };
+  }
+
+  /**
+   * Ensure a nutrition object has the complete standard structure
+   * Fills in missing fields with 0 values while preserving existing data
+   * @param partialNutrition - Nutrition object that may be incomplete
+   * @returns Complete nutrition object with all fields
+   */
+  public static ensureCompleteNutrition(partialNutrition: any): StandardizedNutrition {
+    const complete = this.getCompleteNutritionTemplate();
+    
+    if (!partialNutrition) {
+      return complete;
+    }
+
+    // Merge calories
+    if (partialNutrition.calories) {
+      complete.calories = {
+        quantity: partialNutrition.calories.quantity || partialNutrition.calories || 0,
+        unit: partialNutrition.calories.unit || 'kcal'
+      };
+    }
+
+    // Merge macros
+    if (partialNutrition.macros) {
+      Object.keys(complete.macros).forEach(key => {
+        const macroKey = key as keyof typeof complete.macros;
+        if (partialNutrition.macros[key]) {
+          const currentMacro = complete.macros[macroKey];
+          const partialMacro = partialNutrition.macros[key];
+          complete.macros[macroKey] = {
+            quantity: partialMacro.quantity || partialMacro || 0,
+            unit: partialMacro.unit || (currentMacro ? currentMacro.unit : 'g')
+          } as any;
+        }
+      });
+    }
+
+    // Merge vitamins
+    if (partialNutrition.micros?.vitamins) {
+      Object.keys(complete.micros.vitamins).forEach(key => {
+        const vitaminKey = key as keyof typeof complete.micros.vitamins;
+        if (partialNutrition.micros.vitamins[key]) {
+          complete.micros.vitamins[vitaminKey] = {
+            quantity: partialNutrition.micros.vitamins[key].quantity || 0,
+            unit: partialNutrition.micros.vitamins[key].unit || complete.micros.vitamins[vitaminKey]!.unit
+          } as any;
+        }
+      });
+    }
+
+    // Merge minerals
+    if (partialNutrition.micros?.minerals) {
+      Object.keys(complete.micros.minerals).forEach(key => {
+        const mineralKey = key as keyof typeof complete.micros.minerals;
+        if (partialNutrition.micros.minerals[key]) {
+          complete.micros.minerals[mineralKey] = {
+            quantity: partialNutrition.micros.minerals[key].quantity || 0,
+            unit: partialNutrition.micros.minerals[key].unit || complete.micros.minerals[mineralKey]!.unit
+          } as any;
+        }
+      });
+    }
+
+    return complete;
   }
 
   /**

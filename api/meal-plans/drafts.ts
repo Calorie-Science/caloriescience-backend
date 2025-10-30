@@ -11,6 +11,7 @@ const cacheService = new RecipeCacheService();
 const getDraftsSchema = Joi.object({
   clientId: Joi.string().uuid().optional(),
   status: Joi.string().valid('draft', 'finalized', 'completed').optional(),
+  creationMethod: Joi.string().valid('auto_generated', 'manual', 'ai_generated').optional(),
   page: Joi.number().integer().min(1).default(1),
   pageSize: Joi.number().integer().min(1).max(100).default(10),
   includeNutrition: Joi.boolean().default(true),
@@ -50,7 +51,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { clientId, status, page, pageSize, includeNutrition, sortBy, sortOrder } = value;
+    const { clientId, status, creationMethod, page, pageSize, includeNutrition, sortBy, sortOrder } = value;
 
     // Build query
     let query = supabase
@@ -65,6 +66,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     if (status) {
       query = query.eq('status', status);
+    }
+
+    if (creationMethod) {
+      query = query.eq('creation_method', creationMethod);
     }
 
     // Apply sorting
@@ -113,7 +118,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             protein: 0,
             carbs: 0,
             fat: 0,
-            fiber: 0
+            fiber: 0,
+            sugar: 0,
+            sodium: 0,
+            cholesterol: 0,
+            saturatedFat: 0,
+            transFat: 0,
+            monounsaturatedFat: 0,
+            polyunsaturatedFat: 0
           };
 
           // Calculate nutrition for each meal
@@ -127,33 +139,80 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               protein: 0,
               carbs: 0,
               fat: 0,
-              fiber: 0
+              fiber: 0,
+              sugar: 0,
+              sodium: 0,
+              cholesterol: 0,
+              saturatedFat: 0,
+              transFat: 0,
+              monounsaturatedFat: 0,
+              polyunsaturatedFat: 0
             };
 
             if (selectedRecipe) {
               // Check if there are customizations
               const customizations = meal.customizations?.[selectedRecipe.id];
               
+              // Helper to extract numeric value from various formats
+              const extractValue = (field: any): number => {
+                if (typeof field === 'number') return field;
+                if (field?.value !== undefined) return field.value; // {value, unit} format
+                if (field?.quantity !== undefined) return field.quantity; // {quantity, unit} format
+                return 0;
+              };
+              
               if (customizations?.customNutrition) {
-                // Use custom nutrition if available
-                mealNutrition = customizations.customNutrition;
+                // Use custom nutrition if available (extract from standardized format)
+                const customNut = customizations.customNutrition;
+                const customMacros = customNut.macros || {};
+                mealNutrition = {
+                  calories: extractValue(customNut.calories),
+                  protein: extractValue(customMacros.protein) || extractValue(customNut.protein),
+                  carbs: extractValue(customMacros.carbs) || extractValue(customNut.carbs),
+                  fat: extractValue(customMacros.fat) || extractValue(customNut.fat),
+                  fiber: extractValue(customMacros.fiber) || extractValue(customNut.fiber),
+                  sugar: extractValue(customMacros.sugar) || extractValue(customNut.sugar),
+                  sodium: extractValue(customMacros.sodium) || extractValue(customNut.sodium),
+                  cholesterol: extractValue(customMacros.cholesterol) || extractValue(customNut.cholesterol),
+                  saturatedFat: extractValue(customMacros.saturatedFat) || extractValue(customNut.saturatedFat),
+                  transFat: extractValue(customMacros.transFat) || extractValue(customNut.transFat),
+                  monounsaturatedFat: extractValue(customMacros.monounsaturatedFat) || extractValue(customNut.monounsaturatedFat),
+                  polyunsaturatedFat: extractValue(customMacros.polyunsaturatedFat) || extractValue(customNut.polyunsaturatedFat)
+                };
               } else {
                 // Use recipe's base nutrition
+                const nutrition = selectedRecipe.nutrition || {};
+                const macros = nutrition.macros || {};
+                
                 mealNutrition = {
-                  calories: selectedRecipe.calories || selectedRecipe.nutrition?.calories || 0,
-                  protein: selectedRecipe.protein || selectedRecipe.nutrition?.protein || 0,
-                  carbs: selectedRecipe.carbs || selectedRecipe.nutrition?.carbs || 0,
-                  fat: selectedRecipe.fat || selectedRecipe.nutrition?.fat || 0,
-                  fiber: selectedRecipe.fiber || selectedRecipe.nutrition?.fiber || 0
+                  calories: selectedRecipe.calories || extractValue(nutrition.calories),
+                  protein: selectedRecipe.protein || extractValue(macros.protein),
+                  carbs: selectedRecipe.carbs || extractValue(macros.carbs),
+                  fat: selectedRecipe.fat || extractValue(macros.fat),
+                  fiber: selectedRecipe.fiber || extractValue(macros.fiber),
+                  sugar: extractValue(macros.sugar),
+                  sodium: extractValue(macros.sodium),
+                  cholesterol: extractValue(macros.cholesterol),
+                  saturatedFat: extractValue(macros.saturatedFat),
+                  transFat: extractValue(macros.transFat),
+                  monounsaturatedFat: extractValue(macros.monounsaturatedFat),
+                  polyunsaturatedFat: extractValue(macros.polyunsaturatedFat)
                 };
               }
 
-              // Add to day total
-              dayTotalNutrition.calories += mealNutrition.calories;
-              dayTotalNutrition.protein += mealNutrition.protein;
-              dayTotalNutrition.carbs += mealNutrition.carbs;
-              dayTotalNutrition.fat += mealNutrition.fat;
-              dayTotalNutrition.fiber += mealNutrition.fiber;
+              // Add to day total (all fields)
+              dayTotalNutrition.calories += mealNutrition.calories || 0;
+              dayTotalNutrition.protein += mealNutrition.protein || 0;
+              dayTotalNutrition.carbs += mealNutrition.carbs || 0;
+              dayTotalNutrition.fat += mealNutrition.fat || 0;
+              dayTotalNutrition.fiber += mealNutrition.fiber || 0;
+              dayTotalNutrition.sugar += mealNutrition.sugar || 0;
+              dayTotalNutrition.sodium += mealNutrition.sodium || 0;
+              dayTotalNutrition.cholesterol += mealNutrition.cholesterol || 0;
+              dayTotalNutrition.saturatedFat += mealNutrition.saturatedFat || 0;
+              dayTotalNutrition.transFat += mealNutrition.transFat || 0;
+              dayTotalNutrition.monounsaturatedFat += mealNutrition.monounsaturatedFat || 0;
+              dayTotalNutrition.polyunsaturatedFat += mealNutrition.polyunsaturatedFat || 0;
             }
 
             meals[mealName] = {
@@ -180,8 +239,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           protein: acc.protein + day.dayTotal.protein,
           carbs: acc.carbs + day.dayTotal.carbs,
           fat: acc.fat + day.dayTotal.fat,
-          fiber: acc.fiber + day.dayTotal.fiber
-        }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
+          fiber: acc.fiber + day.dayTotal.fiber,
+          sugar: acc.sugar + day.dayTotal.sugar,
+          sodium: acc.sodium + day.dayTotal.sodium,
+          cholesterol: acc.cholesterol + day.dayTotal.cholesterol,
+          saturatedFat: acc.saturatedFat + day.dayTotal.saturatedFat,
+          transFat: acc.transFat + day.dayTotal.transFat,
+          monounsaturatedFat: acc.monounsaturatedFat + day.dayTotal.monounsaturatedFat,
+          polyunsaturatedFat: acc.polyunsaturatedFat + day.dayTotal.polyunsaturatedFat
+        }), { 
+          calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, 
+          sugar: 0, sodium: 0, cholesterol: 0, saturatedFat: 0, 
+          transFat: 0, monounsaturatedFat: 0, polyunsaturatedFat: 0 
+        });
 
         const totalDays = nutritionByDay.length;
         const dailyAverage = totalDays > 0 ? {
@@ -189,7 +259,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           protein: parseFloat((overallTotal.protein / totalDays).toFixed(1)),
           carbs: parseFloat((overallTotal.carbs / totalDays).toFixed(1)),
           fat: parseFloat((overallTotal.fat / totalDays).toFixed(1)),
-          fiber: parseFloat((overallTotal.fiber / totalDays).toFixed(1))
+          fiber: parseFloat((overallTotal.fiber / totalDays).toFixed(1)),
+          sugar: parseFloat((overallTotal.sugar / totalDays).toFixed(1)),
+          sodium: parseFloat((overallTotal.sodium / totalDays).toFixed(1)),
+          cholesterol: parseFloat((overallTotal.cholesterol / totalDays).toFixed(1)),
+          saturatedFat: parseFloat((overallTotal.saturatedFat / totalDays).toFixed(1)),
+          transFat: parseFloat((overallTotal.transFat / totalDays).toFixed(1)),
+          monounsaturatedFat: parseFloat((overallTotal.monounsaturatedFat / totalDays).toFixed(1)),
+          polyunsaturatedFat: parseFloat((overallTotal.polyunsaturatedFat / totalDays).toFixed(1))
         } : null;
 
         // Calculate completion status
@@ -234,7 +311,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         },
         filters: {
           clientId: clientId || null,
-          status: status || null
+          status: status || null,
+          creationMethod: creationMethod || null
         }
       },
       message: `Retrieved ${enrichedDrafts.length} meal plan draft(s)`

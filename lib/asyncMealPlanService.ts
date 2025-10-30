@@ -143,7 +143,8 @@ export class AsyncMealPlanService {
           additionalText,
           clientId,
           nutritionistId,
-          mealProgram
+          mealProgram,
+          days
         };
 
         const claudeResponse = await this.claudeService.generateMealPlanSync(claudeRequest);
@@ -250,10 +251,13 @@ export class AsyncMealPlanService {
 
       console.log('✅ Async Meal Plan Service - Generation started with ID:', asyncMealPlan.id);
 
-      // If Claude (completed immediately), format as draft response
+      // If Claude (completed immediately), add wrapper fields to the response
       if (aiModel === 'claude' && status === 'completed' && generatedMealPlan) {
-        const formattedDraft = await this.formatAsDraft(
-          asyncMealPlan.id,
+        // Create draft ID that will be used in meal_plan_drafts table
+        const draftId = `ai-${asyncMealPlan.id}`;
+        
+        const formattedDraft = this.wrapClaudeResponse(
+          draftId, // Use draft ID instead of async meal plan ID
           clientId,
           nutritionistId,
           clientGoals,
@@ -262,6 +266,33 @@ export class AsyncMealPlanService {
           days,
           startDate
         );
+        
+        // Also save to meal_plan_drafts table so it shows up in drafts list
+        const { error: draftError } = await supabase
+          .from('meal_plan_drafts')
+          .insert({
+            id: draftId,
+            client_id: clientId,
+            nutritionist_id: nutritionistId,
+            status: 'completed',
+            creation_method: 'ai_generated',
+            search_params: formattedDraft.searchParams,
+            suggestions: formattedDraft.suggestions,
+            plan_name: formattedDraft.planName,
+            plan_date: formattedDraft.planDate,
+            plan_duration_days: formattedDraft.durationDays,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            expires_at: null, // AI plans don't expire
+            finalized_at: new Date().toISOString()
+          });
+        
+        if (draftError) {
+          console.error('⚠️ Failed to save AI plan to meal_plan_drafts:', draftError);
+          // Don't fail the request, just log the error
+        } else {
+          console.log('✅ AI meal plan saved to meal_plan_drafts with ID:', draftId);
+        }
         
         return {
           success: true,
@@ -709,29 +740,41 @@ export class AsyncMealPlanService {
   }
 
   /**
-   * Validate meal plan response structure (copied from ClaudeService)
+   * Validate meal plan response structure (manual/automated format)
    */
   private isValidMealPlanResponse(data: any): boolean {
     try {
-      // Check basic structure
+      // Check basic structure - suggestions is required, nutrition is optional (will be calculated if missing)
       if (!data || typeof data !== 'object') return false;
-      if (!data.success || !data.message || !data.data) return false;
-      if (!data.data.mealPlan) return false;
       
-      const mealPlan = data.data.mealPlan;
+      // Check for required top-level properties
+      if (!data.suggestions || !Array.isArray(data.suggestions)) return false;
       
-      // Check for required mealPlan properties
-      if (!mealPlan.days || !Array.isArray(mealPlan.days)) return false;
-      if (!mealPlan.dailyNutrition || typeof mealPlan.dailyNutrition !== 'object') return false;
+      // Nutrition is optional - it will be calculated from suggestions if missing
+      // if (!data.nutrition || typeof data.nutrition !== 'object') return false;
       
-      // Check that we have at least one day with meals
-      if (mealPlan.days.length === 0) return false;
+      // Check that we have at least one day
+      if (data.suggestions.length === 0) return false;
       
-      const firstDay = mealPlan.days[0];
-      if (!firstDay.meals || !Array.isArray(firstDay.meals)) return false;
-      if (firstDay.meals.length === 0) return false;
+      const firstDay = data.suggestions[0];
+      if (!firstDay.day || !firstDay.date || !firstDay.meals) return false;
+      if (typeof firstDay.meals !== 'object') return false;
       
-      console.log('✅ Meal plan response structure is valid');
+      // Check that we have at least one meal
+      const mealNames = Object.keys(firstDay.meals);
+      if (mealNames.length === 0) return false;
+      
+      // Validate first meal structure
+      const firstMeal = firstDay.meals[mealNames[0]];
+      if (!firstMeal.recipes || !Array.isArray(firstMeal.recipes)) return false;
+      if (!firstMeal.totalNutrition || typeof firstMeal.totalNutrition !== 'object') return false;
+      
+      // Check nutrition structure
+      if (!data.nutrition.byDay || !Array.isArray(data.nutrition.byDay)) return false;
+      if (!data.nutrition.overall || typeof data.nutrition.overall !== 'object') return false;
+      if (!data.nutrition.dailyAverage || typeof data.nutrition.dailyAverage !== 'object') return false;
+      
+      console.log('✅ Meal plan response structure is valid (manual/automated format)');
       return true;
     } catch (error) {
       console.error('❌ Meal plan validation error:', error);
@@ -740,9 +783,83 @@ export class AsyncMealPlanService {
   }
 
   /**
-   * Format AI-generated meal plan as a draft (matches automated/manual meal plan structure)
+   * Calculate nutrition totals from suggestions
+   * Aggregates nutrition from all meals across all days
    */
-  private async formatAsDraft(
+  private calculateNutritionFromSuggestions(suggestions: any[]): any {
+    const totals = {
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      fiber: 0,
+      sugar: 0,
+      sodium: 0,
+      cholesterol: 0,
+      saturatedFat: 0,
+      transFat: 0,
+      monounsaturatedFat: 0,
+      polyunsaturatedFat: 0
+    };
+
+    let totalDays = 0;
+
+    suggestions.forEach((day: any) => {
+      if (day.meals) {
+        totalDays++;
+        Object.values(day.meals).forEach((meal: any) => {
+          if (meal.totalNutrition) {
+            const nutrition = meal.totalNutrition;
+            
+            // Add calories
+            totals.calories += nutrition.calories?.value || nutrition.calories || 0;
+            
+            // Add macros
+            if (nutrition.macros) {
+              totals.protein += nutrition.macros.protein?.value || nutrition.macros.protein || 0;
+              totals.carbs += nutrition.macros.carbs?.value || nutrition.macros.carbs || 0;
+              totals.fat += nutrition.macros.fat?.value || nutrition.macros.fat || 0;
+              totals.fiber += nutrition.macros.fiber?.value || nutrition.macros.fiber || 0;
+              totals.sugar += nutrition.macros.sugar?.value || nutrition.macros.sugar || 0;
+              totals.sodium += nutrition.macros.sodium?.value || nutrition.macros.sodium || 0;
+              totals.cholesterol += nutrition.macros.cholesterol?.value || nutrition.macros.cholesterol || 0;
+              totals.saturatedFat += nutrition.macros.saturatedFat?.value || nutrition.macros.saturatedFat || 0;
+              totals.transFat += nutrition.macros.transFat?.value || nutrition.macros.transFat || 0;
+              totals.monounsaturatedFat += nutrition.macros.monounsaturatedFat?.value || nutrition.macros.monounsaturatedFat || 0;
+              totals.polyunsaturatedFat += nutrition.macros.polyunsaturatedFat?.value || nutrition.macros.polyunsaturatedFat || 0;
+            }
+          }
+        });
+      }
+    });
+
+    // Calculate daily averages
+    const dailyAverage = totalDays > 0 ? {
+      calories: Math.round(totals.calories / totalDays),
+      protein: Math.round((totals.protein / totalDays) * 10) / 10,
+      carbs: Math.round((totals.carbs / totalDays) * 10) / 10,
+      fat: Math.round((totals.fat / totalDays) * 10) / 10,
+      fiber: Math.round((totals.fiber / totalDays) * 10) / 10,
+      sugar: Math.round((totals.sugar / totalDays) * 10) / 10,
+      sodium: Math.round((totals.sodium / totalDays) * 10) / 10,
+      cholesterol: Math.round((totals.cholesterol / totalDays) * 10) / 10,
+      saturatedFat: Math.round((totals.saturatedFat / totalDays) * 10) / 10,
+      transFat: Math.round((totals.transFat / totalDays) * 10) / 10,
+      monounsaturatedFat: Math.round((totals.monounsaturatedFat / totalDays) * 10) / 10,
+      polyunsaturatedFat: Math.round((totals.polyunsaturatedFat / totalDays) * 10) / 10
+    } : totals;
+
+    return {
+      overallTotal: totals,
+      dailyAverage: dailyAverage,
+      totalDays: totalDays
+    };
+  }
+
+  /**
+   * Wrap Claude response with top-level fields to match manual/automated format
+   */
+  private wrapClaudeResponse(
     draftId: string,
     clientId: string,
     nutritionistId: string,
@@ -751,108 +868,33 @@ export class AsyncMealPlanService {
     generatedMealPlan: any,
     days: number,
     startDate?: string
-  ): Promise<any> {
+  ): any {
     try {
-      const mealPlan = generatedMealPlan?.data?.mealPlan;
-      if (!mealPlan) {
-        throw new Error('Invalid meal plan structure');
+      console.log('🔍 Received generatedMealPlan:', JSON.stringify(generatedMealPlan, null, 2).substring(0, 500));
+      
+      // Validate basic structure
+      if (!generatedMealPlan || !generatedMealPlan.suggestions) {
+        console.error('❌ Invalid meal plan structure. Expected suggestions array');
+        console.error('Received keys:', Object.keys(generatedMealPlan || {}));
+        throw new Error('Invalid meal plan structure from Claude');
+      }
+
+      // Calculate nutrition from suggestions if not provided
+      if (!generatedMealPlan.nutrition) {
+        console.log('⚠️ Nutrition object missing from Claude response, calculating from suggestions...');
+        generatedMealPlan.nutrition = this.calculateNutritionFromSuggestions(generatedMealPlan.suggestions);
+        console.log('✅ Calculated nutrition:', generatedMealPlan.nutrition);
       }
 
       // Calculate start date
       const planStartDate = startDate || new Date().toISOString().split('T')[0];
 
-      // Transform AI meal plan days into suggestions format
-      const suggestions = mealPlan.days.map((day: any) => {
-        const meals: any = {};
-        
-        // Group meals by mealType
-        if (day.meals && Array.isArray(day.meals)) {
-          day.meals.forEach((meal: any) => {
-            const mealType = (meal.mealType || 'meal').toLowerCase();
-            
-            if (!meals[mealType]) {
-              meals[mealType] = {
-                recipes: [],
-                customizations: {},
-                selectedRecipeId: meal.id,
-                mealTime: meal.mealTime || this.getMealTimeForType(mealType),
-                targetCalories: meal.totalCalories || 0
-              };
-            }
-            
-            // Add recipe
-            meals[mealType].recipes.push({
-              id: meal.id || `ai-recipe-${Date.now()}-${Math.random()}`,
-              title: meal.recipeName || 'AI Generated Recipe',
-              image: meal.recipeImageUrl || null,
-              sourceUrl: meal.recipeUrl || null,
-              source: 'claude',
-              servings: meal.servingsPerMeal || 1,
-              fromCache: false,
-              calories: meal.caloriesPerServing || meal.totalCalories,
-              protein: meal.proteinGrams || meal.totalProtein,
-              carbs: meal.carbsGrams || meal.totalCarbs,
-              fat: meal.fatGrams || meal.totalFat,
-              fiber: meal.fiberGrams || meal.totalFiber,
-              nutrition: {
-                calories: meal.caloriesPerServing || meal.totalCalories || 0,
-                protein: meal.proteinGrams || meal.totalProtein || 0,
-                carbs: meal.carbsGrams || meal.totalCarbs || 0,
-                fat: meal.fatGrams || meal.totalFat || 0,
-                fiber: meal.fiberGrams || meal.totalFiber || 0
-              },
-              ingredients: meal.ingredients || [],
-              instructions: meal.recipe || [],
-              isSelected: true,
-              selectedAt: new Date().toISOString()
-            });
-            
-            // Set total nutrition for the meal
-            meals[mealType].totalNutrition = {
-              calories: meal.totalCalories || 0,
-              protein: meal.totalProtein || 0,
-              carbs: meal.totalCarbs || 0,
-              fat: meal.totalFat || 0,
-              fiber: meal.totalFiber || 0
-            };
-          });
-        }
-        
-        return {
-          day: day.dayNumber,
-          date: day.date,
-          meals
-        };
-      });
-
-      // Calculate nutrition summary
-      const nutrition = {
-        byDay: mealPlan.days.map((day: any) => ({
-          day: day.dayNumber,
-          date: day.date,
-          nutrition: day.dailyNutrition || {
-            totalCalories: 0,
-            totalProtein: 0,
-            totalCarbs: 0,
-            totalFat: 0,
-            totalFiber: 0
-          }
-        })),
-        overall: mealPlan.dailyNutrition || {
-          totalCalories: 0,
-          totalProtein: 0,
-          totalCarbs: 0,
-          totalFat: 0,
-          totalFiber: 0
-        }
-      };
-
-      // Calculate completion stats
-      const totalMeals = suggestions.reduce((sum: number, day: any) => 
-        sum + Object.keys(day.meals).length, 0
+      // Calculate completion stats from suggestions
+      const totalMeals = generatedMealPlan.suggestions.reduce((sum: number, day: any) => 
+        sum + Object.keys(day.meals || {}).length, 0
       );
-      const selectedMeals = suggestions.reduce((sum: number, day: any) => 
-        sum + Object.values(day.meals).filter((m: any) => m.recipes.length > 0).length, 0
+      const selectedMeals = generatedMealPlan.suggestions.reduce((sum: number, day: any) => 
+        sum + Object.values(day.meals || {}).filter((m: any) => m.recipes && m.recipes.length > 0).length, 0
       );
       const completionPercentage = totalMeals > 0 ? Math.round((selectedMeals / totalMeals) * 100) : 0;
 
@@ -867,6 +909,7 @@ export class AsyncMealPlanService {
         }))
       } : null;
 
+      // Return the Claude response with top-level wrapper fields
       return {
         id: draftId,
         clientId,
@@ -902,15 +945,15 @@ export class AsyncMealPlanService {
           },
           overrideMealProgram: mealProgramData
         },
-        suggestions,
-        nutrition,
+        suggestions: generatedMealPlan.suggestions, // Already in correct format from Claude
+        nutrition: generatedMealPlan.nutrition,      // Already in correct format from Claude
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         expiresAt: null, // AI-generated plans don't expire
         aiModel: 'claude'
       };
     } catch (error) {
-      console.error('❌ Error formatting AI meal plan as draft:', error);
+      console.error('❌ Error wrapping Claude meal plan response:', error);
       throw error;
     }
   }

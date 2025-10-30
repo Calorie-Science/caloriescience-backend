@@ -85,6 +85,25 @@ export interface UpdateCustomRecipeInput extends Partial<CreateCustomRecipeInput
   id: string;
 }
 
+export interface EditCustomRecipeBasicDetailsInput {
+  recipeName?: string;
+  description?: string;
+  imageUrl?: string;
+  servings?: number;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
+  totalTimeMinutes?: number;
+  instructions?: string[];
+  customNotes?: string;
+  isPublic?: boolean;
+  cuisineTypes?: string[];
+  mealTypes?: string[];
+  dishTypes?: string[];
+  healthLabels?: string[];
+  dietLabels?: string[];
+  allergens?: string[];
+}
+
 /**
  * Custom Recipe Output format - matches UnifiedRecipeSummary for consistency
  * across all recipe APIs

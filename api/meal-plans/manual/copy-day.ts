@@ -1,22 +1,33 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Joi from 'joi';
-import { getUserFromToken } from '../../../lib/auth';
+import { requireAuth } from '../../../lib/auth';
 import { ManualMealPlanService } from '../../../lib/manualMealPlanService';
 
 const copyDaySchema = Joi.object({
   draftId: Joi.string().required(),
   sourceDay: Joi.number().integer().min(1).required(),
-  targetDay: Joi.number().integer().min(1).required(),
-  extendIfNeeded: Joi.boolean().default(false)
-});
+  targetDay: Joi.number().integer().min(1).optional(),
+  targetDays: Joi.array().items(Joi.number().integer().min(1)).min(1).optional()
+}).or('targetDay', 'targetDays');
 
 /**
- * Copy entire day's meal plan to another day
+ * Copy entire day's meal plan to another day or multiple days
+ * 
+ * Supports both single target (targetDay) and multiple targets (targetDays array)
  * 
  * POST /api/meal-plans/manual/copy-day
  */
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
-  
+  const user = (req as any).user;
+
+  // Only nutritionists can copy days in manual meal plans
+  if (!user || user.role !== 'nutritionist') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only nutritionists can copy days in manual meal plans'
+    });
+  }
+
   // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({
@@ -26,22 +37,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    // Authenticate user
-    const user = await getUserFromToken(req);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized'
-      });
-    }
-
-    // Only nutritionists can copy days in manual meal plans
-    if (user.role !== 'nutritionist') {
-      return res.status(403).json({
-        success: false,
-        message: 'Only nutritionists can copy days in manual meal plans'
-      });
-    }
 
     // Validate request body
     const { error, value } = copyDaySchema.validate(req.body);
@@ -52,7 +47,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { draftId, sourceDay, targetDay, extendIfNeeded } = value;
+    const { draftId, sourceDay, targetDay, targetDays } = value;
+
+    // Normalize targetDays to array
+    const targetDaysArray = targetDays || (targetDay ? [targetDay] : []);
 
     // Validate draft belongs to nutritionist
     const { supabase } = await import('../../../lib/supabase');
@@ -83,22 +81,62 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Validate sourceDay and targetDay are different
-    if (sourceDay === targetDay) {
+    // Remove duplicates and validate no target day matches source day
+    const uniqueTargetDays = [...new Set(targetDaysArray)];
+    const invalidTargets = uniqueTargetDays.filter(day => day === sourceDay);
+    
+    if (invalidTargets.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Source day and target day must be different'
+        message: 'Source day and target days must be different'
       });
     }
 
-    // Copy the day
+    // Copy to all target days
     const service = new ManualMealPlanService();
-    await service.copyDayToDay({
-      draftId,
-      sourceDay,
-      targetDay,
-      extendIfNeeded
-    });
+    const copiedDays: number[] = [];
+    let maxExtendedDuration = draft.plan_duration_days;
+    let lastError: Error | null = null;
+
+    // Sort target days to handle extension properly (copy to smaller days first)
+    const sortedTargetDays = [...uniqueTargetDays].sort((a, b) => a - b);
+
+    for (const target of sortedTargetDays) {
+      try {
+        await service.copyDayToDay({
+          draftId,
+          sourceDay,
+          targetDay: target,
+          extendIfNeeded: true
+        });
+
+        copiedDays.push(target);
+
+        // Update max extended duration
+        const { data: updatedDraft } = await supabase
+          .from('meal_plan_drafts')
+          .select('plan_duration_days')
+          .eq('id', draftId)
+          .single();
+        
+        if (updatedDraft && updatedDraft.plan_duration_days > maxExtendedDuration) {
+          maxExtendedDuration = updatedDraft.plan_duration_days;
+        }
+      } catch (error: any) {
+        console.error(`Error copying to day ${target}:`, error);
+        lastError = error;
+        // Continue with other targets even if one fails
+      }
+    }
+
+    // If no days were copied, return error
+    if (copiedDays.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to copy day to any target',
+        error: lastError?.message || 'Unknown error'
+      });
+    }
 
     // Fetch the updated draft
     const { data: updatedDraft } = await supabase
@@ -107,13 +145,27 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       .eq('id', draftId)
       .single();
 
-    // Calculate nutrition
-    const updatedDraftWithNutrition = await service.getDraftWithNutrition(draftId);
+    // Get formatted draft with nutrition
+    const draftData = await service.getDraft(draftId);
+    const formattedDraft = await service.formatDraftResponse(draftData);
+
+    // Build success message
+    const extensionMessage = maxExtendedDuration > draft.plan_duration_days 
+      ? ` (extended plan to ${maxExtendedDuration} days)` 
+      : '';
+    
+    const targetMessage = copiedDays.length === 1
+      ? `day ${copiedDays[0]}`
+      : `days ${copiedDays.sort((a, b) => a - b).join(', ')}`;
+    
+    const partialCopyMessage = copiedDays.length < uniqueTargetDays.length
+      ? ` (${copiedDays.length} of ${uniqueTargetDays.length} targets copied successfully)`
+      : '';
 
     return res.status(200).json({
       success: true,
-      data: updatedDraftWithNutrition,
-      message: `Successfully copied day ${sourceDay} to day ${targetDay}${updatedDraft.plan_duration_days > draft.plan_duration_days ? ` (extended plan to ${updatedDraft.plan_duration_days} days)` : ''}`
+      data: formattedDraft,
+      message: `Successfully copied day ${sourceDay} to ${targetMessage}${extensionMessage}${partialCopyMessage}`
     });
 
   } catch (error: any) {
@@ -127,13 +179,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    if (error.message.includes('beyond plan duration')) {
-      return res.status(400).json({
-        success: false,
-        message: error.message
-      });
-    }
-
     return res.status(500).json({
       success: false,
       message: 'Failed to copy day',
@@ -142,5 +187,5 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 }
 
-export default handler;
+export default requireAuth(handler);
 

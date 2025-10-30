@@ -5,6 +5,7 @@
 The AI meal plan generation has been updated to:
 1. **Use only Claude** as the AI provider (OpenAI and Gemini removed)
 2. **Return the same format** as automated and manual meal plans for consistency
+3. **Updated Claude prompt** to directly return manual/automated format (no transformation needed)
 
 ## Changes Made
 
@@ -19,7 +20,40 @@ The AI meal plan generation has been updated to:
 - Returns complete draft structure matching automated/manual meal plans
 - Accepts `days` and `startDate` parameters for customization
 
-### 2. Response Format Standardization
+### 2. Claude Prompt Updates (`lib/claudeService.ts`)
+
+**Before:**
+- Claude returned old format with nested structure:
+```json
+{
+  "success": true,
+  "message": "...",
+  "data": {
+    "mealPlan": {
+      "days": [...],
+      "dailyNutrition": {...}
+    }
+  }
+}
+```
+- Required transformation in `formatAsDraft()` method
+
+**After:**
+- Claude now directly returns manual/automated format:
+```json
+{
+  "suggestions": [...],
+  "nutrition": {
+    "byDay": [...],
+    "overall": {...},
+    "dailyAverage": {...}
+  }
+}
+```
+- No transformation needed, just add wrapper fields
+- Uses `wrapClaudeResponse()` instead of `formatAsDraft()`
+
+### 3. Response Format Standardization
 
 The AI meal plan now returns the **same structure** as automated/manual meal plans:
 
@@ -203,16 +237,30 @@ WHERE ai_model IN ('openai', 'gemini', 'chatgpt');
 
 ## Implementation Details
 
-### New Method: `formatAsDraft`
+### Updated Method: `wrapClaudeResponse` (Replaced `formatAsDraft`)
 
-Added to `AsyncMealPlanService` to transform Claude's meal plan response into the standardized draft format.
+**Before:**
+- Claude returned old format that required complex transformation
+- `formatAsDraft()` method did heavy lifting to convert structure
 
-**Key Transformations:**
-1. **Days Array** → **Suggestions Array**: Converts Claude's day structure to match draft format
-2. **Meals Array** → **Meals Object**: Groups meals by type (breakfast, lunch, dinner, snack)
-3. **Recipe Data**: Transforms Claude's recipe format to match `RecipeSuggestion` interface
-4. **Nutrition Summary**: Creates `byDay` and `overall` nutrition breakdowns
-5. **Completion Stats**: Calculates `totalMeals`, `selectedMeals`, `completionPercentage`
+**After:**
+- Claude now directly returns correct format (suggestions and nutrition)
+- `wrapClaudeResponse()` simply adds top-level wrapper fields
+- No transformation needed - just wraps the response
+
+**What `wrapClaudeResponse` Does:**
+1. Validates Claude response has `suggestions` and `nutrition`
+2. Calculates `totalMeals`, `selectedMeals`, `completionPercentage` from suggestions
+3. Builds `searchParams` object with client goals and preferences
+4. Adds top-level fields: `id`, `clientId`, `status`, `creationMethod`, `planName`, etc.
+5. Returns wrapped response with no modification to suggestions/nutrition
+
+### Updated Validation
+
+Both `ClaudeService` and `AsyncMealPlanService` now validate the new format:
+- Checks for `suggestions` array (not `data.mealPlan.days`)
+- Checks for `nutrition.byDay`, `nutrition.overall`, `nutrition.dailyAverage`
+- Validates meal structure: each meal has `recipes` array and `totalNutrition`
 
 ### Default Meal Times
 
@@ -301,4 +349,46 @@ Should return a complete draft with:
 2. **Recipe Caching**: AI-generated recipes could be cached for reuse
 3. **Customization Support**: Enable ingredient modifications on AI recipes
 4. **Alternative Suggestions**: Generate multiple recipe options per meal
+
+---
+
+## Summary of Recent Changes (Oct 29, 2025)
+
+### What Changed
+
+**Claude Prompt Rewrite:**
+- Updated `prepareInputMessage()` in `claudeService.ts`
+- Changed from old nested format to direct manual/automated format
+- Claude now returns `suggestions` and `nutrition` at top level
+- Matches exact structure of manual and automated meal plans
+
+**Simplified Processing:**
+- Replaced `formatAsDraft()` with `wrapClaudeResponse()`
+- No transformation needed - just add wrapper fields
+- Reduced complexity and potential for bugs
+- Faster processing with less overhead
+
+**Updated Validation:**
+- Changed `isValidMealPlanResponse()` in both services
+- Validates new structure: `suggestions`, `nutrition.byDay`, etc.
+- Better error messages and logging
+
+### Why These Changes Matter
+
+1. **Direct Format Match**: Claude now returns the exact same format as manual/automated meal plans
+2. **No Transformation**: Eliminates the need for complex data transformation
+3. **Consistency**: All three meal plan types (AI, manual, automated) are now 100% consistent
+4. **Maintainability**: Simpler code = easier to maintain and debug
+5. **Performance**: Less processing = faster response times
+
+### Testing Recommendations
+
+After deploying these changes:
+
+1. Test AI meal plan generation with various client goals
+2. Verify the response structure matches manual/automated plans
+3. Check that all fields are populated correctly
+4. Test with different meal programs (custom and default)
+5. Verify nutrition calculations are accurate
+6. Test with allergens and dietary preferences
 
