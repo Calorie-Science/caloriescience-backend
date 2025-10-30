@@ -269,6 +269,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         healthLabels: healthLabels,
         dietLabels: cached.diet_labels || cached.dietLabels || [],
         servings: cached.servings,
+        nutritionServings: 1, // Default to 1, can be changed via edit servings API
         prepTimeMinutes: cached.prep_time_minutes || cached.prepTimeMinutes,
         cookTimeMinutes: cached.cook_time_minutes || cached.cookTimeMinutes,
         totalTimeMinutes: cached.total_time_minutes || cached.totalTimeMinutes,
@@ -407,6 +408,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             healthLabels: recipeDetails.healthLabels || [],
             dietLabels: recipeDetails.dietLabels || recipeDetails.diets || [],
             servings: recipeDetails.servings,
+            nutritionServings: 1, // Default to 1, can be changed via edit servings API
             prepTimeMinutes: recipeDetails.prepTimeMinutes || null,
             cookTimeMinutes: recipeDetails.cookTimeMinutes || null,
             totalTimeMinutes: recipeDetails.readyInMinutes || recipeDetails.totalTimeMinutes,

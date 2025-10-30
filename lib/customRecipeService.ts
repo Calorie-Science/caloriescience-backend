@@ -609,6 +609,7 @@ export class CustomRecipeService {
       source: 'manual',
       readyInMinutes: data.total_time_minutes || undefined,
       servings: data.servings,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       
       // Nutrition data (per serving)
       calories: data.calories_per_serving,

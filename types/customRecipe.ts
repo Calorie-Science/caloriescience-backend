@@ -117,6 +117,7 @@ export interface CustomRecipeOutput {
   source: 'manual';
   readyInMinutes?: number;
   servings?: number;
+  nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   
   // Nutrition data (per serving) - standard format
   calories?: number;

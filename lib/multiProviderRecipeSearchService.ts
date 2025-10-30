@@ -103,6 +103,7 @@ export interface UnifiedRecipeSummary {
   source: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual';
   readyInMinutes?: number;
   servings?: number;
+  nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   // Nutrition data (per serving)
   calories?: number;
   protein?: number;
@@ -704,6 +705,7 @@ export class MultiProviderRecipeSearchService {
         source: 'manual' as const,
         readyInMinutes: recipe.total_time_minutes || undefined,
         servings: recipe.servings || undefined,
+        nutritionServings: 1, // Default to 1, can be changed via edit servings API
         calories: recipe.calories_per_serving || undefined,
         protein: recipe.protein_per_serving_g || undefined,
         carbs: recipe.carbs_per_serving_g || undefined,
@@ -1040,6 +1042,7 @@ export class MultiProviderRecipeSearchService {
       source: 'edamam',
       readyInMinutes: recipe.totalTime > 0 ? recipe.totalTime : undefined,
       servings: servings,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       calories: caloriesPerServing,
       protein: proteinPerServing,
       carbs: carbsPerServing,
@@ -1072,6 +1075,7 @@ export class MultiProviderRecipeSearchService {
       title: recipe.label,
       image: recipe.image,
       servings: recipe.yield || 1,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       calories: Math.round(recipe.calories / (recipe.yield || 1)),
       protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / (recipe.yield || 1)),
       carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / (recipe.yield || 1)),
@@ -1126,6 +1130,7 @@ export class MultiProviderRecipeSearchService {
       source: 'spoonacular',
       readyInMinutes: recipe.readyInMinutes || undefined,
       servings: recipe.servings ? recipe.servings : undefined,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       calories: nutrition.calories,
       protein: nutrition.protein,
       carbs: nutrition.carbs,
@@ -1161,6 +1166,7 @@ export class MultiProviderRecipeSearchService {
       title: recipe.title,
       image: recipe.image,
       servings: recipe.servings,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       readyInMinutes: recipe.readyInMinutes,
       calories: nutrition.calories,
       protein: nutrition.protein,
@@ -1201,6 +1207,7 @@ export class MultiProviderRecipeSearchService {
       title: result.common_names || result.food_name,
       image: null, // Bon Happetee doesn't provide images in search
       servings: 1,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       readyInMinutes: 0,
       calories: result.nutrients?.calories || 0,
       protein: result.nutrients?.protein || 0,
@@ -1313,6 +1320,7 @@ export class MultiProviderRecipeSearchService {
       title: recipe.label,
       image: recipe.image,
       servings: recipe.yield || 1,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       calories: Math.round(recipe.calories / (recipe.yield || 1)),
       protein: Math.round((recipe.totalNutrients?.PROCNT?.quantity || 0) / (recipe.yield || 1) * 10) / 10,
       carbs: Math.round((recipe.totalNutrients?.CHOCDF?.quantity || 0) / (recipe.yield || 1) * 10) / 10,

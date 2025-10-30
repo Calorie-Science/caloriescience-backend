@@ -27,6 +27,7 @@ export interface StandardizedRecipeResponse {
   
   // Serving and timing info
   servings: number;
+  nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   prepTimeMinutes: number | null;
   cookTimeMinutes: number | null;
   totalTimeMinutes: number | null;
@@ -163,6 +164,7 @@ export class RecipeResponseStandardizationService {
       
       // Serving and timing info
       servings: edamamRecipe.servings || 1,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       prepTimeMinutes: edamamRecipe.prep_time_minutes,
       cookTimeMinutes: edamamRecipe.cook_time_minutes,
       totalTimeMinutes: edamamRecipe.total_time_minutes,
@@ -243,6 +245,7 @@ export class RecipeResponseStandardizationService {
       
       // Serving and timing info
       servings: spoonacularRecipe.servings || 1,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       prepTimeMinutes: spoonacularRecipe.prep_time_minutes,
       cookTimeMinutes: spoonacularRecipe.cook_time_minutes,
       totalTimeMinutes: spoonacularRecipe.total_time_minutes,
@@ -568,6 +571,7 @@ export class RecipeResponseStandardizationService {
       healthLabels: recipe.health_labels,
       dietLabels: recipe.diet_labels,
       servings: recipe.servings,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
       prepTimeMinutes: recipe.prep_time_minutes,
       cookTimeMinutes: recipe.cook_time_minutes,
       totalTimeMinutes: recipe.total_time_minutes,
