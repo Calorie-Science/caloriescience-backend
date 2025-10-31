@@ -2,6 +2,36 @@
  * Type definitions for custom recipe creation feature
  */
 
+/**
+ * Portion Size - represents standard serving sizes
+ */
+export interface PortionSize {
+  id: string;
+  name: string; // e.g., "Small Cup", "Large Cup", "Medium Plate", "Small Bowl"
+  description?: string;
+  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'other';
+  volumeMl?: number; // Volume in milliliters (for liquids)
+  weightG?: number; // Weight in grams (for solids)
+  multiplier: number; // Multiplier for nutrition values (base serving = 1.0)
+  isDefault?: boolean; // Whether this is a default portion size
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreatePortionSizeInput {
+  name: string;
+  description?: string;
+  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'other';
+  volumeMl?: number;
+  weightG?: number;
+  multiplier: number;
+  isDefault?: boolean;
+}
+
+export interface UpdatePortionSizeInput extends Partial<CreatePortionSizeInput> {
+  id: string;
+}
+
 export interface CustomRecipeIngredient {
   name: string;
   quantity: number;
@@ -66,6 +96,7 @@ export interface CreateCustomRecipeInput {
   description?: string;
   ingredients: CustomRecipeIngredient[];
   servings: number;
+  portionSizeId?: string; // Reference to default portion size
   instructions?: string[];
   customNotes?: string;
   imageUrl?: string;
@@ -118,6 +149,8 @@ export interface CustomRecipeOutput {
   readyInMinutes?: number;
   servings?: number;
   nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
+  portionSize?: PortionSize; // Current portion size
+  defaultPortionSizeId?: string; // Reference to default portion size
   
   // Nutrition data (per serving) - standard format
   calories?: number;

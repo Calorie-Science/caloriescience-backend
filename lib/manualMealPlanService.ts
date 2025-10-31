@@ -400,6 +400,7 @@ export class ManualMealPlanService {
       sourceUrl: recipe.recipe_url || recipe.sourceUrl,
       source: params.provider,
       servings: params.servings || recipe.servings || 1,
+      nutritionServings: 1, // Default portion size multiplier (can be changed via customizations)
       readyInMinutes: recipe.ready_in_minutes,
       fromCache: params.source === 'cached',
       cacheId: recipe.id,
@@ -627,16 +628,75 @@ export class ManualMealPlanService {
    */
   async formatDraftResponse(draft: any): Promise<any> {
     const nutritionSummary = await this.calculateDraftNutrition(draft.id);
-    
+
+    // Deep clone suggestions to avoid mutating the original
+    const suggestions = JSON.parse(JSON.stringify(draft.suggestions)) as any[];
+
+    // Merge nutritionServings from customizations into recipe objects
+    for (const day of suggestions) {
+      for (const [mealName, meal] of Object.entries(day.meals || {})) {
+        const mealData = meal as any;
+        if (mealData.recipes && mealData.customizations) {
+          // Update each recipe with its customized nutritionServings and nutrition
+          for (const recipe of mealData.recipes) {
+            const customization = mealData.customizations[recipe.id];
+            if (customization) {
+              // Update nutritionServings on the recipe object
+              const nutritionServings = customization.nutritionServings || customization.servings || recipe.nutritionServings || 1;
+              recipe.nutritionServings = nutritionServings;
+
+              // If there's custom nutrition, use it; otherwise multiply base nutrition
+              if (customization.customizationsApplied && customization.customNutrition) {
+                recipe.nutrition = customization.customNutrition;
+              } else if (nutritionServings !== 1 && recipe.nutrition) {
+                // Multiply base nutrition by nutritionServings
+                const multipliedNutrition = JSON.parse(JSON.stringify(recipe.nutrition));
+
+                // Multiply calories
+                if (multipliedNutrition.calories) {
+                  multipliedNutrition.calories.quantity = (multipliedNutrition.calories.quantity || multipliedNutrition.calories) * nutritionServings;
+                }
+
+                // Multiply macros
+                if (multipliedNutrition.macros) {
+                  for (const [key, value] of Object.entries(multipliedNutrition.macros)) {
+                    const val = value as any;
+                    multipliedNutrition.macros[key].quantity = (val.quantity || val) * nutritionServings;
+                  }
+                }
+
+                // Multiply vitamins
+                if (multipliedNutrition.micros?.vitamins) {
+                  for (const [key, value] of Object.entries(multipliedNutrition.micros.vitamins)) {
+                    const val = value as any;
+                    multipliedNutrition.micros.vitamins[key].quantity = (val.quantity || val) * nutritionServings;
+                  }
+                }
+
+                // Multiply minerals
+                if (multipliedNutrition.micros?.minerals) {
+                  for (const [key, value] of Object.entries(multipliedNutrition.micros.minerals)) {
+                    const val = value as any;
+                    multipliedNutrition.micros.minerals[key].quantity = (val.quantity || val) * nutritionServings;
+                  }
+                }
+
+                recipe.nutrition = multipliedNutrition;
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Calculate completion stats (match automated meal plans)
-    const suggestions = draft.suggestions as any[];
     let totalMeals = 0;
     let selectedMeals = 0;
-    
+
     for (const day of suggestions) {
       const mealCount = Object.keys(day.meals || {}).length;
       totalMeals += mealCount;
-      
+
       for (const meal of Object.values(day.meals || {})) {
         const mealData = meal as any;
         if (mealData.recipes && mealData.recipes.length > 0) {
@@ -644,7 +704,7 @@ export class ManualMealPlanService {
         }
       }
     }
-    
+
     const completionPercentage = totalMeals > 0 ? Math.round((selectedMeals / totalMeals) * 100) : 0;
     const isComplete = totalMeals > 0 && selectedMeals === totalMeals;
 
@@ -990,11 +1050,65 @@ export class ManualMealPlanService {
       // Check if there are customizations for this recipe
       const recipeCustomizations = customizations?.[recipe.id];
       const hasCustomNutrition = recipeCustomizations?.customizationsApplied && recipeCustomizations?.customNutrition;
-      
+
       // Use customized nutrition if available, otherwise use base recipe nutrition
-      const nutrition = hasCustomNutrition ? recipeCustomizations.customNutrition : recipe.nutrition;
-      
+      let nutrition = hasCustomNutrition ? recipeCustomizations.customNutrition : recipe.nutrition;
+
       if (!nutrition) continue;
+
+      // Get nutritionServings multiplier (portion size adjustment)
+      const nutritionServings = recipeCustomizations?.nutritionServings || recipeCustomizations?.servings || recipe.nutritionServings || 1;
+
+      // Apply nutritionServings multiplier to all nutrition values
+      if (nutritionServings !== 1) {
+        // Create a deep copy and multiply all values
+        nutrition = JSON.parse(JSON.stringify(nutrition));
+
+        // Multiply calories
+        if (nutrition.calories) {
+          const caloriesValue = this.extractNutritionValue(nutrition.calories);
+          nutrition.calories = {
+            unit: nutrition.calories.unit || 'kcal',
+            quantity: caloriesValue * nutritionServings
+          };
+        }
+
+        // Multiply macros
+        if (nutrition.macros) {
+          for (const [key, value] of Object.entries(nutrition.macros)) {
+            const val = value as any;
+            const numValue = this.extractNutritionValue(val);
+            nutrition.macros[key] = {
+              unit: val.unit || 'g',
+              quantity: numValue * nutritionServings
+            };
+          }
+        }
+
+        // Multiply vitamins
+        if (nutrition.micros?.vitamins) {
+          for (const [key, value] of Object.entries(nutrition.micros.vitamins)) {
+            const val = value as any;
+            const numValue = this.extractNutritionValue(val);
+            nutrition.micros.vitamins[key] = {
+              unit: val.unit || 'mg',
+              quantity: numValue * nutritionServings
+            };
+          }
+        }
+
+        // Multiply minerals
+        if (nutrition.micros?.minerals) {
+          for (const [key, value] of Object.entries(nutrition.micros.minerals)) {
+            const val = value as any;
+            const numValue = this.extractNutritionValue(val);
+            nutrition.micros.minerals[key] = {
+              unit: val.unit || 'mg',
+              quantity: numValue * nutritionServings
+            };
+          }
+        }
+      }
 
       // Add calories (handle both formats)
       total.calories.quantity += this.extractNutritionValue(nutrition.calories);

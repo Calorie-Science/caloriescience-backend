@@ -12,10 +12,11 @@ export interface StandardizedRecipeResponse {
   
   // Basic recipe info
   recipeName: string;
+  description: string | null;
   recipeSource: string;
   recipeUrl: string;
   recipeImageUrl: string;
-  
+
   // Categorization (standardized arrays)
   cuisineTypes: string[];
   mealTypes: string[];
@@ -24,7 +25,8 @@ export interface StandardizedRecipeResponse {
   // Health and dietary info (standardized)
   healthLabels: string[];
   dietLabels: string[];
-  
+  allergens: string[];
+
   // Serving and timing info
   servings: number;
   nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
@@ -149,10 +151,11 @@ export class RecipeResponseStandardizationService {
       
       // Basic recipe info
       recipeName: edamamRecipe.recipe_name,
+      description: edamamRecipe.recipe_description || null,
       recipeSource: edamamRecipe.recipe_source,
       recipeUrl: edamamRecipe.recipe_url,
       recipeImageUrl: edamamRecipe.recipe_image_url,
-      
+
       // Categorization (ensure arrays)
       cuisineTypes: Array.isArray(edamamRecipe.cuisine_types) ? edamamRecipe.cuisine_types : [],
       mealTypes: Array.isArray(edamamRecipe.meal_types) ? edamamRecipe.meal_types : [],
@@ -161,7 +164,8 @@ export class RecipeResponseStandardizationService {
       // Health and dietary info (standardize format)
       healthLabels: Array.isArray(edamamRecipe.health_labels) ? edamamRecipe.health_labels : [],
       dietLabels: Array.isArray(edamamRecipe.diet_labels) ? edamamRecipe.diet_labels : [],
-      
+      allergens: Array.isArray(edamamRecipe.allergens) ? edamamRecipe.allergens : [],
+
       // Serving and timing info
       servings: edamamRecipe.servings || 1,
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
@@ -230,10 +234,11 @@ export class RecipeResponseStandardizationService {
       
       // Basic recipe info
       recipeName: spoonacularRecipe.recipe_name,
+      description: spoonacularRecipe.recipe_description || null,
       recipeSource: spoonacularRecipe.recipe_source,
       recipeUrl: spoonacularRecipe.recipe_url,
       recipeImageUrl: spoonacularRecipe.recipe_image_url,
-      
+
       // Categorization (ensure arrays)
       cuisineTypes: Array.isArray(spoonacularRecipe.cuisine_types) ? spoonacularRecipe.cuisine_types : [],
       mealTypes: Array.isArray(spoonacularRecipe.meal_types) ? spoonacularRecipe.meal_types : [],
@@ -242,7 +247,8 @@ export class RecipeResponseStandardizationService {
       // Health and dietary info (standardize format)
       healthLabels: Array.isArray(spoonacularRecipe.health_labels) ? spoonacularRecipe.health_labels : [],
       dietLabels: standardizedDietLabels,
-      
+      allergens: Array.isArray(spoonacularRecipe.allergens) ? spoonacularRecipe.allergens : [],
+
       // Serving and timing info
       servings: spoonacularRecipe.servings || 1,
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
@@ -498,6 +504,7 @@ export class RecipeResponseStandardizationService {
       external_recipe_id: dbRecipe.external_recipe_id || dbRecipe.externalRecipeId,
       external_recipe_uri: dbRecipe.external_recipe_uri || dbRecipe.externalRecipeUri || '',
       recipe_name: dbRecipe.recipe_name || dbRecipe.recipeName || dbRecipe.title,
+      recipe_description: dbRecipe.recipe_description || dbRecipe.recipeDescription || null,
       recipe_source: dbRecipe.recipe_source || dbRecipe.recipeSource || '',
       recipe_url: dbRecipe.recipe_url || dbRecipe.recipeUrl || '',
       recipe_image_url: dbRecipe.recipe_image_url || dbRecipe.recipeImageUrl || '',
@@ -506,6 +513,7 @@ export class RecipeResponseStandardizationService {
       dish_types: dbRecipe.dish_types || dbRecipe.dishTypes || [],
       health_labels: dbRecipe.health_labels || dbRecipe.healthLabels || [],
       diet_labels: dbRecipe.diet_labels || dbRecipe.dietLabels || [],
+      allergens: dbRecipe.allergens || [],
       servings: dbRecipe.servings || 1,
       prep_time_minutes: dbRecipe.prep_time_minutes || dbRecipe.prepTimeMinutes || null,
       cook_time_minutes: dbRecipe.cook_time_minutes || dbRecipe.cookTimeMinutes || null,
@@ -562,6 +570,7 @@ export class RecipeResponseStandardizationService {
       externalRecipeId: recipe.external_recipe_id,
       externalRecipeUri: recipe.external_recipe_uri,
       recipeName: recipe.recipe_name,
+      description: recipe.recipe_description || null,
       recipeSource: recipe.recipe_source,
       recipeUrl: recipe.recipe_url,
       recipeImageUrl: recipe.recipe_image_url,
@@ -570,6 +579,7 @@ export class RecipeResponseStandardizationService {
       dishTypes: recipe.dish_types,
       healthLabels: recipe.health_labels,
       dietLabels: recipe.diet_labels,
+      allergens: recipe.allergens || [],
       servings: recipe.servings,
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
       prepTimeMinutes: recipe.prep_time_minutes,

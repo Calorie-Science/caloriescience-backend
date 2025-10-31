@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { EdamamService } from './edamamService';
 import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchService';
+import { PortionSizeService } from './portionSizeService';
 import {
   CreateCustomRecipeInput,
   UpdateCustomRecipeInput,
@@ -15,10 +16,12 @@ import {
 export class CustomRecipeService {
   private edamamService: EdamamService;
   private multiProviderService: MultiProviderRecipeSearchService;
+  private portionSizeService: PortionSizeService;
 
   constructor() {
     this.edamamService = new EdamamService();
     this.multiProviderService = new MultiProviderRecipeSearchService();
+    this.portionSizeService = new PortionSizeService();
   }
 
   /**
@@ -50,6 +53,14 @@ export class CustomRecipeService {
       nutrition: ing.nutritionData
     }));
 
+    // Validate and get portion size if provided
+    if (input.portionSizeId) {
+      const portionSize = await this.portionSizeService.getPortionSizeById(input.portionSizeId);
+      if (!portionSize) {
+        throw new Error('Invalid portion size ID');
+      }
+    }
+
     // Insert into cached_recipes
     const { data, error } = await supabase
       .from('cached_recipes')
@@ -60,7 +71,7 @@ export class CustomRecipeService {
         recipe_description: input.description,
         recipe_url: null,
         recipe_image_url: input.imageUrl,
-        
+
         // Classification
         cuisine_types: input.cuisineTypes || [],
         meal_types: input.mealTypes || [],
@@ -68,12 +79,13 @@ export class CustomRecipeService {
         health_labels: input.healthLabels || [],
         diet_labels: input.dietLabels || [],
         allergens: input.allergens || [],
-        
+
         // Servings & Time
         servings: input.servings,
+        default_portion_size_id: input.portionSizeId || null,
         prep_time_minutes: input.prepTimeMinutes,
         cook_time_minutes: input.cookTimeMinutes,
-        total_time_minutes: input.totalTimeMinutes || 
+        total_time_minutes: input.totalTimeMinutes ||
           ((input.prepTimeMinutes || 0) + (input.cookTimeMinutes || 0)) || null,
         
         // Total Nutrition
@@ -597,7 +609,7 @@ export class CustomRecipeService {
   }
 
   /**
-   * Map database record to output format (UnifiedRecipeSummary format)
+   * Map database record to output format (UnifiedRecipeSummary format) - sync version for backward compatibility
    */
   private mapToOutput(data: any): CustomRecipeOutput {
     return {
@@ -610,6 +622,86 @@ export class CustomRecipeService {
       readyInMinutes: data.total_time_minutes || undefined,
       servings: data.servings,
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
+      defaultPortionSizeId: data.default_portion_size_id || undefined,
+
+      // Nutrition data (per serving)
+      calories: data.calories_per_serving,
+      protein: data.protein_per_serving_g,
+      carbs: data.carbs_per_serving_g,
+      fat: data.fat_per_serving_g,
+      fiber: data.fiber_per_serving_g,
+
+      // Metadata for filtering
+      healthLabels: data.health_labels || [],
+      dietLabels: data.diet_labels || [],
+      cuisineType: data.cuisine_types || [],
+      dishType: data.dish_types || [],
+      mealType: data.meal_types || [],
+      allergens: data.allergens || [],
+
+      // Ingredients (formatted for allergen checking)
+      ingredients: (data.ingredients || []).map((ing: any) => ({
+        name: ing.name,
+        food: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        original: `${ing.quantity} ${ing.unit} ${ing.name}`,
+        nutrition: ing.nutrition
+      })),
+
+      // Custom recipe metadata
+      isCustom: true,
+      createdBy: data.created_by_nutritionist_id,
+      isPublic: data.is_public,
+
+      // Additional fields for detailed view (backward compatible)
+      description: data.recipe_description,
+      prepTimeMinutes: data.prep_time_minutes,
+      cookTimeMinutes: data.cook_time_minutes,
+      totalTimeMinutes: data.total_time_minutes,
+      ingredientLines: data.ingredient_lines || [],
+      instructions: data.cooking_instructions || [],
+      customNotes: data.custom_notes,
+      nutritionDetails: this.standardizeNutritionDetails(data.nutrition_details, data),
+
+      // Total nutrition (for detailed calculations)
+      totalCalories: data.total_calories,
+      totalProtein: data.total_protein_g,
+      totalCarbs: data.total_carbs_g,
+      totalFat: data.total_fat_g,
+      totalFiber: data.total_fiber_g,
+      totalSugar: data.total_sugar_g,
+      totalSodium: data.total_sodium_mg,
+      totalWeight: data.total_weight_g,
+
+      // Timestamps
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  }
+
+  /**
+   * Map database record to output format (UnifiedRecipeSummary format) - async version with portion size
+   */
+  private async mapToOutputAsync(data: any): Promise<CustomRecipeOutput> {
+    // Fetch portion size if available
+    let portionSize = null;
+    if (data.default_portion_size_id) {
+      portionSize = await this.portionSizeService.getPortionSizeById(data.default_portion_size_id);
+    }
+
+    return {
+      // Standard UnifiedRecipeSummary fields
+      id: data.id,
+      title: data.recipe_name,
+      image: data.recipe_image_url || '',
+      sourceUrl: '',
+      source: 'manual',
+      readyInMinutes: data.total_time_minutes || undefined,
+      servings: data.servings,
+      nutritionServings: 1, // Default to 1, can be changed via edit servings API
+      portionSize: portionSize || undefined,
+      defaultPortionSizeId: data.default_portion_size_id || undefined,
       
       // Nutrition data (per serving)
       calories: data.calories_per_serving,
@@ -786,6 +878,273 @@ export class CustomRecipeService {
       pantothenicAcid: 'mg'
     };
     return units[vitaminKey] || 'mg';
+  }
+
+  /**
+   * Change portion size for a recipe and recalculate nutrition
+   * This is typically used when viewing/adding a recipe to a meal plan
+   */
+  async getRecipeWithPortionSize(
+    recipeId: string,
+    portionSizeId: string,
+    nutritionistId: string
+  ): Promise<CustomRecipeOutput> {
+    // Fetch the recipe
+    const recipe = await this.getCustomRecipe(recipeId, nutritionistId);
+    if (!recipe) {
+      throw new Error('Recipe not found');
+    }
+
+    // Fetch the portion size
+    const portionSize = await this.portionSizeService.getPortionSizeById(portionSizeId);
+    if (!portionSize) {
+      throw new Error('Portion size not found');
+    }
+
+    // Calculate nutrition with the new portion size multiplier
+    const scaledNutrition = this.portionSizeService.calculateNutritionForPortion(
+      {
+        calories: recipe.calories,
+        protein: recipe.protein,
+        carbs: recipe.carbs,
+        fat: recipe.fat,
+        fiber: recipe.fiber
+      },
+      portionSize.multiplier
+    );
+
+    // Return recipe with scaled nutrition and portion size info
+    return {
+      ...recipe,
+      calories: scaledNutrition.calories,
+      protein: scaledNutrition.protein,
+      carbs: scaledNutrition.carbs,
+      fat: scaledNutrition.fat,
+      fiber: scaledNutrition.fiber,
+      portionSize: portionSize,
+      nutritionServings: portionSize.multiplier
+    };
+  }
+
+  /**
+   * Update the default portion size for a recipe
+   */
+  async updateDefaultPortionSize(
+    recipeId: string,
+    portionSizeId: string | null,
+    nutritionistId: string
+  ): Promise<CustomRecipeOutput> {
+    // Validate ownership
+    await this.validateRecipeOwnership(recipeId, nutritionistId);
+
+    // Validate portion size if provided
+    if (portionSizeId) {
+      const portionSize = await this.portionSizeService.getPortionSizeById(portionSizeId);
+      if (!portionSize) {
+        throw new Error('Invalid portion size ID');
+      }
+    }
+
+    // Update the recipe
+    const { data, error } = await supabase
+      .from('cached_recipes')
+      .update({
+        default_portion_size_id: portionSizeId,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', recipeId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating default portion size:', error);
+      throw new Error(`Failed to update default portion size: ${error.message}`);
+    }
+
+    return await this.mapToOutputAsync(data);
+  }
+
+  /**
+   * Modify ingredients in a custom recipe and update the base recipe
+   * Similar to meal plan customizations but updates the recipe itself
+   */
+  async modifyIngredients(
+    recipeId: string,
+    modifications: Array<{
+      type: 'replace' | 'omit' | 'add';
+      originalIngredient?: string;
+      originalAmount?: number;
+      originalUnit?: string;
+      newIngredient?: string;
+      amount?: number;
+      unit?: string;
+    }>,
+    nutritionistId: string,
+    servings?: number,
+    autoCalculateNutrition: boolean = true
+  ): Promise<{ recipe: CustomRecipeOutput }> {
+    // Validate ownership
+    await this.validateRecipeOwnership(recipeId, nutritionistId);
+
+    // Fetch the current recipe
+    const { data: recipe, error: fetchError } = await supabase
+      .from('cached_recipes')
+      .select('*')
+      .eq('id', recipeId)
+      .eq('provider', 'manual')
+      .single();
+
+    if (fetchError || !recipe) {
+      throw new Error('Custom recipe not found');
+    }
+
+    // Parse current ingredients
+    let currentIngredients = Array.isArray(recipe.ingredients)
+      ? [...recipe.ingredients]
+      : [];
+
+    console.log(`📝 Current ingredients count: ${currentIngredients.length}`);
+    console.log(`🔧 Applying ${modifications.length} modifications`);
+
+    // Apply each modification
+    for (const mod of modifications) {
+      if (mod.type === 'omit') {
+        // Remove ingredient by name (case-insensitive)
+        const beforeCount = currentIngredients.length;
+        currentIngredients = currentIngredients.filter((ing: any) =>
+          ing.name.toLowerCase() !== mod.originalIngredient!.toLowerCase()
+        );
+        const afterCount = currentIngredients.length;
+
+        if (beforeCount === afterCount) {
+          throw new Error(`Ingredient "${mod.originalIngredient}" not found in recipe`);
+        }
+
+        console.log(`  ✅ Omitted: ${mod.originalIngredient}`);
+      }
+      else if (mod.type === 'replace') {
+        // Find and replace ingredient
+        const ingredientIndex = currentIngredients.findIndex((ing: any) =>
+          ing.name.toLowerCase() === mod.originalIngredient!.toLowerCase()
+        );
+
+        if (ingredientIndex === -1) {
+          throw new Error(`Ingredient "${mod.originalIngredient}" not found in recipe`);
+        }
+
+        // Fetch nutrition for new ingredient
+        let newIngredientNutrition = null;
+        if (autoCalculateNutrition) {
+          try {
+            newIngredientNutrition = await this.edamamService.getIngredientNutrition(
+              `${mod.amount} ${mod.unit} ${mod.newIngredient}`
+            );
+          } catch (error) {
+            console.warn(`  ⚠️ Could not fetch nutrition for ${mod.newIngredient}, using zero values`);
+          }
+        }
+
+        currentIngredients[ingredientIndex] = {
+          name: mod.newIngredient!,
+          quantity: mod.amount!,
+          unit: mod.unit!,
+          nutrition: newIngredientNutrition
+        };
+
+        console.log(`  ✅ Replaced: ${mod.originalIngredient} → ${mod.newIngredient}`);
+      }
+      else if (mod.type === 'add') {
+        // Fetch nutrition for new ingredient
+        let newIngredientNutrition = null;
+        if (autoCalculateNutrition) {
+          try {
+            newIngredientNutrition = await this.edamamService.getIngredientNutrition(
+              `${mod.amount} ${mod.unit} ${mod.newIngredient}`
+            );
+          } catch (error) {
+            console.warn(`  ⚠️ Could not fetch nutrition for ${mod.newIngredient}, using zero values`);
+          }
+        }
+
+        currentIngredients.push({
+          name: mod.newIngredient!,
+          quantity: mod.amount!,
+          unit: mod.unit!,
+          nutrition: newIngredientNutrition
+        });
+
+        console.log(`  ✅ Added: ${mod.newIngredient}`);
+      }
+    }
+
+    console.log(`📊 New ingredients count: ${currentIngredients.length}`);
+
+    // Recalculate nutrition from modified ingredients
+    const updatedServings = servings || recipe.servings;
+    let nutrition: NutritionCalculationResult | null = null;
+
+    if (autoCalculateNutrition) {
+      console.log('🧮 Recalculating nutrition...');
+      nutrition = await this.calculateRecipeNutrition(
+        currentIngredients.map((ing: any) => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          unit: ing.unit,
+          nutritionData: ing.nutrition
+        })),
+        updatedServings
+      );
+    }
+
+    // Update ingredient lines
+    const ingredientLines = currentIngredients.map((ing: any) =>
+      `${ing.quantity} ${ing.unit} ${ing.name}`
+    );
+
+    // Prepare update data
+    const updateData: any = {
+      ingredients: currentIngredients,
+      ingredient_lines: ingredientLines,
+      servings: updatedServings,
+      updated_at: new Date().toISOString()
+    };
+
+    // Update nutrition if recalculated
+    if (nutrition) {
+      updateData.total_calories = nutrition.totalCalories;
+      updateData.total_protein_g = nutrition.totalProteinG;
+      updateData.total_carbs_g = nutrition.totalCarbsG;
+      updateData.total_fat_g = nutrition.totalFatG;
+      updateData.total_fiber_g = nutrition.totalFiberG;
+      updateData.total_sugar_g = nutrition.totalSugarG;
+      updateData.total_sodium_mg = nutrition.totalSodiumMg;
+      updateData.total_weight_g = nutrition.totalWeightG;
+      updateData.calories_per_serving = nutrition.caloriesPerServing;
+      updateData.protein_per_serving_g = nutrition.proteinPerServingG;
+      updateData.carbs_per_serving_g = nutrition.carbsPerServingG;
+      updateData.fat_per_serving_g = nutrition.fatPerServingG;
+      updateData.fiber_per_serving_g = nutrition.fiberPerServingG;
+      updateData.nutrition_details = nutrition.detailedNutrition;
+    }
+
+    // Update the recipe
+    const { data: updatedRecipe, error: updateError } = await supabase
+      .from('cached_recipes')
+      .update(updateData)
+      .eq('id', recipeId)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Error updating recipe:', updateError);
+      throw new Error(`Failed to update recipe: ${updateError.message}`);
+    }
+
+    console.log('✅ Recipe ingredients modified and nutrition recalculated');
+
+    return {
+      recipe: this.mapToOutput(updatedRecipe)
+    };
   }
 }
 
