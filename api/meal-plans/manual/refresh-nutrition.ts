@@ -1,5 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { ManualMealPlanService } from '../../../lib/manualMealPlanService';
+import { requireRole } from '../../../lib/auth';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -19,23 +20,12 @@ const supabase = createClient(
  *   "recipeId": "string"
  * }
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'PUT, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    return res.status(200).end();
-  }
-
-  // Add CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'PUT') {
     return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
+
+  const user = (req as any).user;
 
   try {
     const { draftId, day, mealName, recipeId } = req.body;
@@ -56,6 +46,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (draftError || !draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
+    }
+
+    // Check ownership
+    if (draft.nutritionist_id !== user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this meal plan draft'
+      });
     }
 
     // Find the day in suggestions
@@ -177,3 +175,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 }
+
+export default requireRole(['nutritionist'])(handler);
