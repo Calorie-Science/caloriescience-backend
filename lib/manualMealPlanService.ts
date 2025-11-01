@@ -422,7 +422,8 @@ export class ManualMealPlanService {
     }
 
     // How many servings the person is consuming (e.g., 1, 1.5, 2)
-    const nutritionServings = params.nutritionServings || params.servings || 1;
+    // Note: params.servings is DEPRECATED - do not use as fallback
+    const nutritionServings = params.nutritionServings || 1;
 
     // Convert recipe to the format used in meal plans (matching automated meal plan format)
     const recipeForPlan = {
@@ -758,13 +759,11 @@ export class ManualMealPlanService {
             recipe.nutritionServings = recipe.nutritionServings || 1; // Default to 1
             recipe.portionSizeMultiplier = recipe.portionSizeMultiplier || 1; // Default to 1
 
-            console.log(`📊 Recipe ${recipe.title || recipe.id}: nutritionServings=${recipe.nutritionServings}, portionSizeMultiplier=${recipe.portionSizeMultiplier}`);
-
             // Check for customizations
             const customization = mealData.customizations?.[recipe.id];
             if (customization) {
-              // Update nutritionServings on the recipe object
-              const nutritionServings = customization.nutritionServings || customization.servings || recipe.nutritionServings || 1;
+              // Update nutritionServings on the recipe object (don't fallback to customization.servings as that's the recipe's base servings, not nutrition multiplier)
+              const nutritionServings = customization.nutritionServings || recipe.nutritionServings || 1;
               recipe.nutritionServings = nutritionServings;
 
               // Update portionSizeMultiplier if provided
@@ -772,44 +771,47 @@ export class ManualMealPlanService {
                 recipe.portionSizeMultiplier = customization.portionSizeMultiplier;
               }
 
-              // If there's custom nutrition, use it; otherwise multiply base nutrition
+              // If there's custom nutrition, use it as the base (will be multiplied below if nutritionServings !== 1)
               if (customization.customizationsApplied && customization.customNutrition) {
-                recipe.nutrition = customization.customNutrition;
-              } else if (nutritionServings !== 1 && recipe.nutrition) {
-                // Multiply base nutrition by nutritionServings
-                const multipliedNutrition = JSON.parse(JSON.stringify(recipe.nutrition));
-
-                // Multiply calories
-                if (multipliedNutrition.calories) {
-                  multipliedNutrition.calories.quantity = (multipliedNutrition.calories.quantity || multipliedNutrition.calories) * nutritionServings;
-                }
-
-                // Multiply macros
-                if (multipliedNutrition.macros) {
-                  for (const [key, value] of Object.entries(multipliedNutrition.macros)) {
-                    const val = value as any;
-                    multipliedNutrition.macros[key].quantity = (val.quantity || val) * nutritionServings;
-                  }
-                }
-
-                // Multiply vitamins
-                if (multipliedNutrition.micros?.vitamins) {
-                  for (const [key, value] of Object.entries(multipliedNutrition.micros.vitamins)) {
-                    const val = value as any;
-                    multipliedNutrition.micros.vitamins[key].quantity = (val.quantity || val) * nutritionServings;
-                  }
-                }
-
-                // Multiply minerals
-                if (multipliedNutrition.micros?.minerals) {
-                  for (const [key, value] of Object.entries(multipliedNutrition.micros.minerals)) {
-                    const val = value as any;
-                    multipliedNutrition.micros.minerals[key].quantity = (val.quantity || val) * nutritionServings;
-                  }
-                }
-
-                recipe.nutrition = multipliedNutrition;
+                recipe.nutrition = JSON.parse(JSON.stringify(customization.customNutrition));
+                // Don't skip - still need to multiply by nutritionServings below
               }
+            }
+
+            // Multiply base nutrition by nutritionServings (for all recipes with nutritionServings !== 1)
+            if (recipe.nutritionServings !== 1 && recipe.nutrition) {
+              const multipliedNutrition = JSON.parse(JSON.stringify(recipe.nutrition));
+
+              // Multiply calories
+              if (multipliedNutrition.calories) {
+                multipliedNutrition.calories.quantity = (multipliedNutrition.calories.quantity || multipliedNutrition.calories) * recipe.nutritionServings;
+              }
+
+              // Multiply macros
+              if (multipliedNutrition.macros) {
+                for (const [key, value] of Object.entries(multipliedNutrition.macros)) {
+                  const val = value as any;
+                  multipliedNutrition.macros[key].quantity = (val.quantity || val) * recipe.nutritionServings;
+                }
+              }
+
+              // Multiply vitamins
+              if (multipliedNutrition.micros?.vitamins) {
+                for (const [key, value] of Object.entries(multipliedNutrition.micros.vitamins)) {
+                  const val = value as any;
+                  multipliedNutrition.micros.vitamins[key].quantity = (val.quantity || val) * recipe.nutritionServings;
+                }
+              }
+
+              // Multiply minerals
+              if (multipliedNutrition.micros?.minerals) {
+                for (const [key, value] of Object.entries(multipliedNutrition.micros.minerals)) {
+                  const val = value as any;
+                  multipliedNutrition.micros.minerals[key].quantity = (val.quantity || val) * recipe.nutritionServings;
+                }
+              }
+
+              recipe.nutrition = multipliedNutrition;
             }
           }
         }
@@ -914,7 +916,7 @@ export class ManualMealPlanService {
       completionPercentage, // Match automated
       isComplete, // Match automated
       searchParams: enrichedSearchParams, // Includes overrideMealProgram without mealType
-      suggestions: draft.suggestions,
+      suggestions, // Return processed suggestions with multiplied nutrition
       // Match automated: dayWiseNutrition and totalNutrition at top level, not nested in nutrition
       dayWiseNutrition: nutritionSummary?.dayWiseNutrition,
       totalNutrition: nutritionSummary?.overall, // Renamed from overall to totalNutrition
