@@ -21,8 +21,11 @@ export interface AddRecipeParams {
   recipeId: string;
   provider: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual';
   source: 'api' | 'cached';
-  servings?: number;
+  servings?: number; // DEPRECATED: This was confusing, use nutritionServings instead
   isSimpleIngredient?: boolean;
+  portionSizeId?: string; // Portion size to apply (gets multiplier from portion_sizes table)
+  portionSizeMultiplier?: number; // Direct portion size multiplier (e.g., 1.458 for Large Cup)
+  nutritionServings?: number; // How many servings the person is consuming (e.g., 1, 1.5, 2)
 }
 
 export interface AddRecipeWithAllergenCheckParams extends AddRecipeParams {
@@ -35,6 +38,15 @@ export interface RemoveRecipeParams {
   mealName: string;
   recipeId?: string; // If provided, removes specific recipe; if not, removes all recipes
   removeMealSlot?: boolean; // If true, removes entire meal slot from structure
+}
+
+export interface UpdateRecipeServingsParams {
+  draftId: string;
+  day: number;
+  mealName: string;
+  recipeId: string;
+  nutritionServings: number; // New nutrition servings value
+  portionSizeMultiplier?: number; // Optional: update portion size multiplier too
 }
 
 export interface MealSlot {
@@ -374,12 +386,17 @@ export class ManualMealPlanService {
     let fullNutrition: any = null;
     if (recipe.nutrition_details) {
       try {
-        fullNutrition = typeof recipe.nutrition_details === 'string' 
-          ? JSON.parse(recipe.nutrition_details) 
+        fullNutrition = typeof recipe.nutrition_details === 'string'
+          ? JSON.parse(recipe.nutrition_details)
           : recipe.nutrition_details;
       } catch (e) {
         console.error('Error parsing nutrition_details:', e);
       }
+    }
+
+    // Ensure fullNutrition always has micros structure (even if empty)
+    if (fullNutrition && !fullNutrition.micros) {
+      fullNutrition.micros = { vitamins: {}, minerals: {} };
     }
 
     // Extract values from fullNutrition if available, otherwise fall back to column values
@@ -392,6 +409,21 @@ export class ManualMealPlanService {
     // Check if this is a simple ingredient
     const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
     
+    // Determine portion size multiplier (size of ONE serving)
+    let portionSizeMultiplier = 1; // Default to 1.0 (medium/standard size)
+
+    if (params.portionSizeMultiplier !== undefined) {
+      // Direct multiplier provided
+      portionSizeMultiplier = params.portionSizeMultiplier;
+    } else if (params.portionSizeId) {
+      // TODO: Fetch portion size from database and get multiplier
+      // For now, assume it's passed in portionSizeMultiplier
+      portionSizeMultiplier = 1;
+    }
+
+    // How many servings the person is consuming (e.g., 1, 1.5, 2)
+    const nutritionServings = params.nutritionServings || params.servings || 1;
+
     // Convert recipe to the format used in meal plans (matching automated meal plan format)
     const recipeForPlan = {
       id: recipe.external_recipe_id || recipe.id,
@@ -399,8 +431,9 @@ export class ManualMealPlanService {
       image: recipe.recipe_image_url || recipe.image,
       sourceUrl: recipe.recipe_url || recipe.sourceUrl,
       source: params.provider,
-      servings: params.servings || recipe.servings || 1,
-      nutritionServings: 1, // Default portion size multiplier (can be changed via customizations)
+      servings: recipe.servings || 1, // Recipe's base servings (for ingredient calculations)
+      portionSizeMultiplier: portionSizeMultiplier, // Size multiplier (Small/Medium/Large Cup)
+      nutritionServings: nutritionServings, // How many servings person is consuming
       readyInMinutes: recipe.ready_in_minutes,
       fromCache: params.source === 'cached',
       cacheId: recipe.id,
@@ -416,7 +449,8 @@ export class ManualMealPlanService {
           carbs: { unit: 'g', quantity: carbs },
           fat: { unit: 'g', quantity: fat },
           fiber: { unit: 'g', quantity: fiber }
-        }
+        },
+        micros: { vitamins: {}, minerals: {} }
       },
       ingredients: recipe.ingredients || [],
       instructions: recipe.instructions || [],
@@ -557,6 +591,87 @@ export class ManualMealPlanService {
   }
 
   /**
+   * Update nutritionServings (and optionally portionSizeMultiplier) for an existing recipe
+   * This automatically recalculates nutrition without removing and re-adding the recipe
+   */
+  async updateRecipeServings(params: UpdateRecipeServingsParams): Promise<void> {
+    console.log('🔄 Updating recipe servings:', params);
+
+    // Fetch the draft
+    const { data: draft, error: draftError } = await supabase
+      .from('meal_plan_drafts')
+      .select('*')
+      .eq('id', params.draftId)
+      .single();
+
+    if (draftError || !draft) {
+      throw new Error('Draft not found');
+    }
+
+    // Find the day in suggestions
+    const suggestions = draft.suggestions as DayStructure[];
+    const dayPlan = suggestions.find((d: DayStructure) => d.day === params.day);
+
+    if (!dayPlan) {
+      throw new Error(`Day ${params.day} not found in draft`);
+    }
+
+    // Find the meal (case-insensitive)
+    let targetMealName = params.mealName;
+    const mealKeys = Object.keys(dayPlan.meals);
+    const matchedMeal = mealKeys.find(key => key.toLowerCase() === params.mealName.toLowerCase());
+
+    if (matchedMeal) {
+      targetMealName = matchedMeal;
+    } else {
+      throw new Error(`Meal ${params.mealName} not found for day ${params.day}`);
+    }
+
+    const meal = dayPlan.meals[targetMealName];
+
+    // Find the recipe
+    const recipe = meal.recipes?.find((r: any) => r.id === params.recipeId);
+    if (!recipe) {
+      throw new Error(`Recipe ${params.recipeId} not found in ${targetMealName}`);
+    }
+
+    // Store old values for logging
+    const oldNutritionServings = recipe.nutritionServings || 1;
+    const oldPortionSizeMultiplier = recipe.portionSizeMultiplier || 1;
+
+    // Update nutritionServings
+    recipe.nutritionServings = params.nutritionServings;
+
+    // Update portionSizeMultiplier if provided
+    if (params.portionSizeMultiplier !== undefined) {
+      recipe.portionSizeMultiplier = params.portionSizeMultiplier;
+    }
+
+    // Recalculate meal nutrition with updated servings
+    meal.totalNutrition = this.calculateMealNutrition(meal.recipes, meal.customizations);
+
+    console.log(`✅ Updated servings for recipe ${params.recipeId}:`);
+    console.log(`   nutritionServings: ${oldNutritionServings} → ${params.nutritionServings}`);
+    if (params.portionSizeMultiplier !== undefined) {
+      console.log(`   portionSizeMultiplier: ${oldPortionSizeMultiplier} → ${params.portionSizeMultiplier}`);
+    }
+    console.log(`   Total multiplier: ${(oldPortionSizeMultiplier * oldNutritionServings).toFixed(2)}x → ${((recipe.portionSizeMultiplier || 1) * recipe.nutritionServings).toFixed(2)}x`);
+
+    // Update the draft
+    const { error: updateError } = await supabase
+      .from('meal_plan_drafts')
+      .update({
+        suggestions: suggestions,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', params.draftId);
+
+    if (updateError) {
+      throw new Error(`Failed to update draft: ${updateError.message}`);
+    }
+  }
+
+  /**
    * Finalize a manual meal plan
    */
   async finalize(draftId: string, planName: string): Promise<void> {
@@ -636,14 +751,26 @@ export class ManualMealPlanService {
     for (const day of suggestions) {
       for (const [mealName, meal] of Object.entries(day.meals || {})) {
         const mealData = meal as any;
-        if (mealData.recipes && mealData.customizations) {
+        if (mealData.recipes) {
           // Update each recipe with its customized nutritionServings and nutrition
           for (const recipe of mealData.recipes) {
-            const customization = mealData.customizations[recipe.id];
+            // Ensure nutritionServings and portionSizeMultiplier are always present (explicit assignment)
+            recipe.nutritionServings = recipe.nutritionServings || 1; // Default to 1
+            recipe.portionSizeMultiplier = recipe.portionSizeMultiplier || 1; // Default to 1
+
+            console.log(`📊 Recipe ${recipe.title || recipe.id}: nutritionServings=${recipe.nutritionServings}, portionSizeMultiplier=${recipe.portionSizeMultiplier}`);
+
+            // Check for customizations
+            const customization = mealData.customizations?.[recipe.id];
             if (customization) {
               // Update nutritionServings on the recipe object
               const nutritionServings = customization.nutritionServings || customization.servings || recipe.nutritionServings || 1;
               recipe.nutritionServings = nutritionServings;
+
+              // Update portionSizeMultiplier if provided
+              if (customization.portionSizeMultiplier) {
+                recipe.portionSizeMultiplier = customization.portionSizeMultiplier;
+              }
 
               // If there's custom nutrition, use it; otherwise multiply base nutrition
               if (customization.customizationsApplied && customization.customNutrition) {
@@ -1034,7 +1161,7 @@ export class ManualMealPlanService {
   /**
    * Calculate total nutrition for a meal from multiple recipes
    */
-  private calculateMealNutrition(recipes: any[], customizations?: any): any {
+  public calculateMealNutrition(recipes: any[], customizations?: any): any {
     if (!recipes || recipes.length === 0) {
       return undefined;
     }
@@ -1056,11 +1183,18 @@ export class ManualMealPlanService {
 
       if (!nutrition) continue;
 
-      // Get nutritionServings multiplier (portion size adjustment)
-      const nutritionServings = recipeCustomizations?.nutritionServings || recipeCustomizations?.servings || recipe.nutritionServings || 1;
+      // Get BOTH multipliers:
+      // 1. portionSizeMultiplier = size of ONE serving (Small Cup = 0.625x, Large Cup = 1.458x)
+      // 2. nutritionServings = how many servings person is consuming (1, 1.5, 2, etc.)
+      const portionSizeMultiplier = recipe.portionSizeMultiplier || recipeCustomizations?.portionSizeMultiplier || 1;
+      const nutritionServings = recipeCustomizations?.nutritionServings || recipe.nutritionServings || 1;
 
-      // Apply nutritionServings multiplier to all nutrition values
-      if (nutritionServings !== 1) {
+      // Total multiplier = Portion Size × Number of Servings
+      // Example: Large Cup (1.458x) × 2 servings = 2.916x total nutrition
+      const totalMultiplier = portionSizeMultiplier * nutritionServings;
+
+      // Apply total multiplier to all nutrition values
+      if (totalMultiplier !== 1) {
         // Create a deep copy and multiply all values
         nutrition = JSON.parse(JSON.stringify(nutrition));
 
@@ -1069,7 +1203,7 @@ export class ManualMealPlanService {
           const caloriesValue = this.extractNutritionValue(nutrition.calories);
           nutrition.calories = {
             unit: nutrition.calories.unit || 'kcal',
-            quantity: caloriesValue * nutritionServings
+            quantity: caloriesValue * totalMultiplier
           };
         }
 
@@ -1080,7 +1214,7 @@ export class ManualMealPlanService {
             const numValue = this.extractNutritionValue(val);
             nutrition.macros[key] = {
               unit: val.unit || 'g',
-              quantity: numValue * nutritionServings
+              quantity: numValue * totalMultiplier
             };
           }
         }
@@ -1092,7 +1226,7 @@ export class ManualMealPlanService {
             const numValue = this.extractNutritionValue(val);
             nutrition.micros.vitamins[key] = {
               unit: val.unit || 'mg',
-              quantity: numValue * nutritionServings
+              quantity: numValue * totalMultiplier
             };
           }
         }
@@ -1104,7 +1238,7 @@ export class ManualMealPlanService {
             const numValue = this.extractNutritionValue(val);
             nutrition.micros.minerals[key] = {
               unit: val.unit || 'mg',
-              quantity: numValue * nutritionServings
+              quantity: numValue * totalMultiplier
             };
           }
         }

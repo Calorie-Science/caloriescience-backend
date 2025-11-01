@@ -790,10 +790,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       console.log('✅ Applied custom nutrition');
     }
 
-    // Step 7: Apply nutritionServings multiplier if any
+    // Step 7: Apply nutritionServings multiplier
     const servings = customizations.nutritionServings || customizations.servings || 1;
+    customizedRecipe.nutritionServings = servings;
     if (servings !== 1) {
-      customizedRecipe.adjustedServings = servings;
       console.log(`📊 Recipe adjusted for ${servings} servings`);
     }
 

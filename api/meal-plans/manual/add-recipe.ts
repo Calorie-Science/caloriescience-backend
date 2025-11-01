@@ -15,7 +15,10 @@ const addRecipeSchema = Joi.object({
     source: Joi.string().valid('api', 'cached').required(),
     isSimpleIngredient: Joi.boolean().optional()
   }).required(),
-  servings: Joi.number().min(0.1).max(20).optional()
+  servings: Joi.number().min(0.1).max(20).optional(), // DEPRECATED: Use nutritionServings instead
+  portionSizeId: Joi.string().optional(), // Portion size ID (fetches multiplier from DB)
+  portionSizeMultiplier: Joi.number().min(0.1).max(20).optional(), // Direct portion size multiplier (e.g., 1.458 for Large Cup)
+  nutritionServings: Joi.number().min(0.1).max(20).optional() // How many servings person is consuming (e.g., 1, 1.5, 2)
 });
 
 /**
@@ -54,7 +57,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { draftId, day, mealName, recipe, servings } = value;
+    const { draftId, day, mealName, recipe, servings, portionSizeId, portionSizeMultiplier, nutritionServings } = value;
 
     console.log('🍽️ Adding recipe to manual meal plan:', {
       nutritionist: user.email,
@@ -63,7 +66,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       mealName,
       recipeId: recipe.id,
       provider: recipe.provider,
-      source: recipe.source
+      source: recipe.source,
+      portionSizeId,
+      portionSizeMultiplier,
+      nutritionServings
     });
 
     // Verify draft exists and belongs to this nutritionist
@@ -92,7 +98,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       .limit(1)
       .single();
 
-    // Add the recipe
+    // Add the recipe with portion size support
     const addedRecipeInfo = await manualMealPlanService.addRecipeWithAllergenCheck({
       draftId,
       day,
@@ -102,7 +108,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       source: recipe.source,
       servings,
       isSimpleIngredient: recipe.isSimpleIngredient || false,
-      clientAllergens: clientGoal?.allergies || []
+      clientAllergens: clientGoal?.allergies || [],
+      portionSizeId, // Portion size ID
+      portionSizeMultiplier, // Direct portion size multiplier
+      nutritionServings // How many servings person is consuming
     });
 
     // Fetch updated draft with complete nutrition (same structure as GET endpoint)

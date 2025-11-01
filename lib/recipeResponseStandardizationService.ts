@@ -73,6 +73,14 @@ export interface StandardizedRecipeResponse {
   dataQualityScore: number;
   createdAt: string;
   updatedAt: string;
+
+  // Custom recipe fields (only for manual provider)
+  isPublic?: boolean;
+  createdBy?: string; // nutritionist ID who created the recipe
+  defaultPortionSizeId?: string; // Default portion size ID
+  portionSize?: any; // Full portion size object with name, multiplier, etc.
+  customNotes?: string; // Custom notes from nutritionist
+  cookingTips?: string; // Helpful cooking tips for this recipe
 }
 
 export interface StandardizedIngredient {
@@ -548,9 +556,15 @@ export class RecipeResponseStandardizationService {
       has_cooking_instructions: dbRecipe.has_cooking_instructions || dbRecipe.hasCookingInstructions || false,
       data_quality_score: dbRecipe.data_quality_score || dbRecipe.dataQualityScore || 0,
       created_at: dbRecipe.created_at || dbRecipe.createdAt || '',
-      updated_at: dbRecipe.updated_at || dbRecipe.updatedAt || ''
+      updated_at: dbRecipe.updated_at || dbRecipe.updatedAt || '',
+      // Custom recipe fields (only for manual provider)
+      is_public: dbRecipe.is_public !== undefined ? dbRecipe.is_public : dbRecipe.isPublic,
+      created_by_nutritionist_id: dbRecipe.created_by_nutritionist_id || dbRecipe.createdByNutritionistId,
+      default_portion_size_id: dbRecipe.default_portion_size_id || dbRecipe.defaultPortionSizeId,
+      custom_notes: dbRecipe.custom_notes || dbRecipe.customNotes,
+      cooking_tips: dbRecipe.cooking_tips || dbRecipe.cookingTips
     };
-    
+
     // For manual provider, return directly to avoid recursion
     // For other providers, use their specific standardization
     if (recipeForStandardization.provider === 'manual') {
@@ -564,7 +578,7 @@ export class RecipeResponseStandardizationService {
    * Build standardized response from normalized data
    */
   private buildStandardizedResponse(recipe: any): StandardizedRecipeResponse {
-    return {
+    const standardized: StandardizedRecipeResponse = {
       id: recipe.id,
       provider: recipe.provider,
       externalRecipeId: recipe.external_recipe_id,
@@ -616,6 +630,17 @@ export class RecipeResponseStandardizationService {
       createdAt: recipe.created_at,
       updatedAt: recipe.updated_at
     };
+
+    // Add custom recipe fields if this is a manual recipe
+    if (recipe.provider === 'manual') {
+      standardized.isPublic = recipe.is_public !== undefined ? recipe.is_public : recipe.isPublic;
+      standardized.createdBy = recipe.created_by_nutritionist_id || recipe.createdByNutritionistId;
+      standardized.defaultPortionSizeId = recipe.default_portion_size_id || recipe.defaultPortionSizeId;
+      standardized.customNotes = recipe.custom_notes || recipe.customNotes;
+      standardized.cookingTips = recipe.cooking_tips || recipe.cookingTips;
+    }
+
+    return standardized;
   }
   
   /**

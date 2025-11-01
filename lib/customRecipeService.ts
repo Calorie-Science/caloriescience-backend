@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { EdamamService } from './edamamService';
 import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchService';
 import { PortionSizeService } from './portionSizeService';
+import { IngredientNutritionTransformer } from './ingredientNutritionTransformer';
 import {
   CreateCustomRecipeInput,
   UpdateCustomRecipeInput,
@@ -115,7 +116,8 @@ export class CustomRecipeService {
         created_by_nutritionist_id: nutritionistId,
         is_public: input.isPublic,
         custom_notes: input.customNotes,
-        
+        cooking_tips: input.cookingTips,
+
         // Data quality
         has_complete_nutrition: true,
         has_detailed_ingredients: true,
@@ -169,6 +171,7 @@ export class CustomRecipeService {
     if (input.totalTimeMinutes !== undefined) updateData.total_time_minutes = input.totalTimeMinutes;
     if (input.instructions) updateData.cooking_instructions = input.instructions;
     if (input.customNotes !== undefined) updateData.custom_notes = input.customNotes;
+    if (input.cookingTips !== undefined) updateData.cooking_tips = input.cookingTips;
     if (input.isPublic !== undefined) updateData.is_public = input.isPublic;
 
     // Update nutrition if recalculated
@@ -260,6 +263,7 @@ export class CustomRecipeService {
     }
     if (input.instructions !== undefined) updateData.cooking_instructions = input.instructions;
     if (input.customNotes !== undefined) updateData.custom_notes = input.customNotes;
+    if (input.cookingTips !== undefined) updateData.cooking_tips = input.cookingTips;
     if (input.isPublic !== undefined) updateData.is_public = input.isPublic;
     if (input.cuisineTypes !== undefined) updateData.cuisine_types = input.cuisineTypes;
     if (input.mealTypes !== undefined) updateData.meal_types = input.mealTypes;
@@ -267,6 +271,7 @@ export class CustomRecipeService {
     if (input.healthLabels !== undefined) updateData.health_labels = input.healthLabels;
     if (input.dietLabels !== undefined) updateData.diet_labels = input.dietLabels;
     if (input.allergens !== undefined) updateData.allergens = input.allergens;
+    if (input.portionSizeId !== undefined) updateData.default_portion_size_id = input.portionSizeId;
 
     // Perform update
     const { data, error } = await supabase
@@ -437,14 +442,20 @@ export class CustomRecipeService {
 
     // Sum up nutrition from all ingredients
     for (const ingredient of ingredients) {
-      const nutrition = ingredient.nutritionData;
+      let nutrition = ingredient.nutritionData;
       if (nutrition) {
+        // Transform nutrition data to standardized format if needed
+        const transformed = IngredientNutritionTransformer.transformToStandardFormat(nutrition);
+        if (transformed) {
+          nutrition = transformed;
+        }
+
         // Accumulate calories
         totalCalories += nutrition.calories || 0;
-        
+
         // Support both flat and nested format
         const macros = nutrition.macros || nutrition; // Fallback to root if no macros object
-        
+
         // Accumulate macros
         totalProteinG += macros.protein || 0;
         totalCarbsG += macros.carbs || 0;
@@ -662,6 +673,7 @@ export class CustomRecipeService {
       ingredientLines: data.ingredient_lines || [],
       instructions: data.cooking_instructions || [],
       customNotes: data.custom_notes,
+      cookingTips: data.cooking_tips,
       nutritionDetails: this.standardizeNutritionDetails(data.nutrition_details, data),
 
       // Total nutrition (for detailed calculations)
@@ -741,6 +753,7 @@ export class CustomRecipeService {
       ingredientLines: data.ingredient_lines || [],
       instructions: data.cooking_instructions || [],
       customNotes: data.custom_notes,
+      cookingTips: data.cooking_tips,
       nutritionDetails: this.standardizeNutritionDetails(data.nutrition_details, data),
       
       // Total nutrition (for detailed calculations)

@@ -119,7 +119,23 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             console.log(`  ✅ Extracted ${extractedLabels.length} health labels:`, extractedLabels);
           }
         }
-        
+
+        // Fetch full portion size object if this is a custom recipe with a portion size
+        if (cachedRecipe.provider === 'manual' && standardizedRecipe.defaultPortionSizeId) {
+          try {
+            const PortionSizeService = (await import('../../../lib/portionSizeService')).PortionSizeService;
+            const portionSizeService = new PortionSizeService();
+            const portionSize = await portionSizeService.getPortionSizeById(standardizedRecipe.defaultPortionSizeId);
+            if (portionSize) {
+              standardizedRecipe.portionSize = portionSize;
+              console.log(`  ✅ Added portion size: ${portionSize.name} (${portionSize.multiplier}x)`);
+            }
+          } catch (error) {
+            console.error('  ⚠️ Failed to fetch portion size:', error);
+            // Don't fail the request, just log the error
+          }
+        }
+
         return res.status(200).json({
           success: true,
           data: standardizedRecipe,

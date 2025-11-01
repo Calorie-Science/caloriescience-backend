@@ -99,6 +99,7 @@ export interface CreateCustomRecipeInput {
   portionSizeId?: string; // Reference to default portion size
   instructions?: string[];
   customNotes?: string;
+  cookingTips?: string; // Helpful cooking tips for this recipe
   imageUrl?: string;
   healthLabels?: string[];
   allergens?: string[];
@@ -126,6 +127,7 @@ export interface EditCustomRecipeBasicDetailsInput {
   totalTimeMinutes?: number;
   instructions?: string[];
   customNotes?: string;
+  cookingTips?: string; // Helpful cooking tips for this recipe
   isPublic?: boolean;
   cuisineTypes?: string[];
   mealTypes?: string[];
@@ -133,6 +135,7 @@ export interface EditCustomRecipeBasicDetailsInput {
   healthLabels?: string[];
   dietLabels?: string[];
   allergens?: string[];
+  portionSizeId?: string; // Default portion size for this recipe
 }
 
 /**
@@ -191,6 +194,7 @@ export interface CustomRecipeOutput {
   ingredientLines?: string[];
   instructions?: string[];
   customNotes?: string;
+  cookingTips?: string; // Helpful cooking tips for this recipe
   nutritionDetails?: any;
   
   // Total nutrition (for detailed calculations)

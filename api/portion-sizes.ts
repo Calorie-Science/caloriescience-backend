@@ -48,6 +48,16 @@ const getDefaultsSchema = Joi.object({
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle OPTIONS preflight request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   // Only allow GET and POST
   if (req.method === 'GET') {
     // GET request - list all portion sizes

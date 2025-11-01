@@ -17,13 +17,15 @@ const editBasicDetailsSchema = Joi.object({
   totalTimeMinutes: Joi.number().integer().min(0).max(10000).allow(null).optional(),
   instructions: Joi.array().items(Joi.string()).optional(),
   customNotes: Joi.string().max(5000).allow('').optional(),
+  cookingTips: Joi.string().max(5000).allow('').optional(), // Helpful cooking tips for this recipe
   isPublic: Joi.boolean().optional(),
   cuisineTypes: Joi.array().items(Joi.string()).optional(),
   mealTypes: Joi.array().items(Joi.string()).optional(),
   dishTypes: Joi.array().items(Joi.string()).optional(),
   healthLabels: Joi.array().items(Joi.string()).optional(),
   dietLabels: Joi.array().items(Joi.string()).optional(),
-  allergens: Joi.array().items(Joi.string()).optional()
+  allergens: Joi.array().items(Joi.string()).optional(),
+  portionSizeId: Joi.string().uuid().allow(null).optional() // Default portion size for this recipe
 }).min(1); // At least one field must be provided
 
 /**
@@ -34,6 +36,16 @@ const editBasicDetailsSchema = Joi.object({
  * without triggering nutrition recalculation.
  */
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle OPTIONS preflight request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const user = (req as any).user;
 
   // Only nutritionists can edit custom recipes
