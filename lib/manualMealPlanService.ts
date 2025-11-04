@@ -3,8 +3,10 @@ import { MultiProviderRecipeSearchService } from './multiProviderRecipeSearchSer
 import { checkAllergenConflicts } from './allergenChecker';
 import type { ValidAllergen } from './allergenChecker';
 import { simpleIngredientService } from './simpleIngredientService';
+import { PortionSizeService } from './portionSizeService';
 
 const recipeSearchService = new MultiProviderRecipeSearchService();
+const portionSizeService = new PortionSizeService();
 
 export interface CreateManualDraftParams {
   clientId: string;
@@ -408,7 +410,7 @@ export class ManualMealPlanService {
 
     // Check if this is a simple ingredient
     const isSimpleIngredient = params.recipeId.startsWith('ingredient_');
-    
+
     // Determine portion size multiplier (size of ONE serving)
     let portionSizeMultiplier = 1; // Default to 1.0 (medium/standard size)
 
@@ -416,9 +418,34 @@ export class ManualMealPlanService {
       // Direct multiplier provided
       portionSizeMultiplier = params.portionSizeMultiplier;
     } else if (params.portionSizeId) {
-      // TODO: Fetch portion size from database and get multiplier
-      // For now, assume it's passed in portionSizeMultiplier
-      portionSizeMultiplier = 1;
+      // Fetch portion size from database and calculate multiplier
+      // For custom recipes: multiplier = selected_portion_multiplier / default_portion_multiplier
+      const selectedPortionSize = await portionSizeService.getPortionSizeById(params.portionSizeId);
+
+      if (selectedPortionSize) {
+        // Get the recipe's default portion size if it has one
+        const recipeDefaultPortionSizeId = recipe.default_portion_size_id;
+
+        if (recipeDefaultPortionSizeId) {
+          // Recipe has a default portion size - calculate relative multiplier
+          const defaultPortionSize = await portionSizeService.getPortionSizeById(recipeDefaultPortionSizeId);
+
+          if (defaultPortionSize) {
+            // Calculate: selected multiplier / default multiplier
+            // Example: Large Cup (1.458) / Small Cup (0.625) = 2.333x
+            portionSizeMultiplier = selectedPortionSize.multiplier / defaultPortionSize.multiplier;
+            console.log(`📏 Portion size adjustment: ${defaultPortionSize.name} (${defaultPortionSize.multiplier}) → ${selectedPortionSize.name} (${selectedPortionSize.multiplier}) = ${portionSizeMultiplier}x`);
+          } else {
+            // Default portion size not found, use selected multiplier as-is
+            portionSizeMultiplier = selectedPortionSize.multiplier;
+          }
+        } else {
+          // Recipe doesn't have a default portion size, use selected multiplier as-is
+          portionSizeMultiplier = selectedPortionSize.multiplier;
+        }
+      } else {
+        console.warn(`⚠️ Portion size ID ${params.portionSizeId} not found, using default multiplier 1.0`);
+      }
     }
 
     // How many servings the person is consuming (e.g., 1, 1.5, 2)

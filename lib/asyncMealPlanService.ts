@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { OpenAIAssistantService, AssistantMealPlanRequest, AssistantMealPlanResponse } from './openaiAssistantService';
 import { ClaudeService, ClaudeMealPlanRequest, ClaudeMealPlanResponse } from './claudeService';
 import { GeminiService, GeminiMealPlanRequest, GeminiMealPlanResponse } from './geminiService';
+import { GrokService, GrokMealPlanRequest, GrokMealPlanResponse } from './grokService';
 
 export interface AsyncMealPlan {
   id: string;
@@ -11,7 +12,7 @@ export interface AsyncMealPlan {
   runId: string;
   clientGoals: any;
   additionalText?: string;
-  aiModel: 'openai' | 'claude' | 'gemini';
+  aiModel: 'openai' | 'claude' | 'gemini' | 'grok';
   status: 'pending' | 'completed' | 'failed';
   generatedMealPlan?: any;
   errorMessage?: string;
@@ -30,11 +31,13 @@ export class AsyncMealPlanService {
   private openaiService: OpenAIAssistantService;
   private claudeService: ClaudeService;
   private geminiService: GeminiService;
+  private grokService: GrokService;
 
   constructor() {
     this.openaiService = new OpenAIAssistantService();
     this.claudeService = new ClaudeService();
     this.geminiService = new GeminiService();
+    this.grokService = new GrokService();
   }
 
   /**
@@ -97,7 +100,7 @@ export class AsyncMealPlanService {
     nutritionistId: string,
     clientGoals: any,
     additionalText?: string,
-    aiModel: 'openai' | 'claude' | 'gemini' = 'claude',
+    aiModel: 'openai' | 'claude' | 'gemini' | 'grok' = 'claude',
     days: number = 7,
     startDate?: string
   ): Promise<AsyncMealPlanResponse> {
@@ -113,7 +116,31 @@ export class AsyncMealPlanService {
       let status: 'pending' | 'completed' | 'failed' = 'pending';
       let generatedMealPlan: any = null;
 
-      if (aiModel === 'gemini') {
+      if (aiModel === 'grok') {
+        // Grok: Generate meal plan synchronously (fast)
+        const grokRequest: GrokMealPlanRequest = {
+          clientGoals,
+          additionalText,
+          clientId,
+          nutritionistId,
+          mealProgram,
+          days
+        };
+
+        const grokResponse = await this.grokService.generateMealPlanSync(grokRequest);
+
+        if (!grokResponse.success) {
+          return {
+            success: false,
+            error: grokResponse.error || 'Failed to generate Grok meal plan'
+          };
+        }
+
+        threadId = grokResponse.messageId || `thread-grok-${Date.now()}`;
+        runId = `run-grok-${Date.now()}`;
+        status = 'completed';
+        generatedMealPlan = grokResponse.data;
+      } else if (aiModel === 'gemini') {
         // Gemini: Generate meal plan synchronously (fast)
         const geminiRequest: GeminiMealPlanRequest = {
           clientGoals,
@@ -124,7 +151,7 @@ export class AsyncMealPlanService {
         };
 
         const geminiResponse = await this.geminiService.generateMealPlanSync(geminiRequest);
-        
+
         if (!geminiResponse.success) {
           return {
             success: false,
@@ -251,12 +278,12 @@ export class AsyncMealPlanService {
 
       console.log('✅ Async Meal Plan Service - Generation started with ID:', asyncMealPlan.id);
 
-      // If Claude (completed immediately), add wrapper fields to the response
-      if (aiModel === 'claude' && status === 'completed' && generatedMealPlan) {
+      // If Claude or Grok (completed immediately), add wrapper fields to the response
+      if ((aiModel === 'claude' || aiModel === 'grok') && status === 'completed' && generatedMealPlan) {
         // Create draft ID that will be used in meal_plan_drafts table
         const draftId = `ai-${asyncMealPlan.id}`;
         
-        const formattedDraft = this.wrapClaudeResponse(
+        const formattedDraft = this.wrapAIResponse(
           draftId, // Use draft ID instead of async meal plan ID
           clientId,
           nutritionistId,
@@ -264,7 +291,8 @@ export class AsyncMealPlanService {
           mealProgram,
           generatedMealPlan,
           days,
-          startDate
+          startDate,
+          aiModel
         );
         
         // Also save to meal_plan_drafts table so it shows up in drafts list
@@ -857,9 +885,9 @@ export class AsyncMealPlanService {
   }
 
   /**
-   * Wrap Claude response with top-level fields to match manual/automated format
+   * Wrap AI response (Claude/Grok) with top-level fields to match manual/automated format
    */
-  private wrapClaudeResponse(
+  private wrapAIResponse(
     draftId: string,
     clientId: string,
     nutritionistId: string,
@@ -867,7 +895,8 @@ export class AsyncMealPlanService {
     mealProgram: any,
     generatedMealPlan: any,
     days: number,
-    startDate?: string
+    startDate?: string,
+    aiModel: 'claude' | 'grok' = 'claude'
   ): any {
     try {
       console.log('🔍 Received generatedMealPlan:', JSON.stringify(generatedMealPlan, null, 2).substring(0, 500));
@@ -909,6 +938,12 @@ export class AsyncMealPlanService {
         }))
       } : null;
 
+      // Generate unique plan name with timestamp to avoid duplicates
+      const now = new Date();
+      const dateStr = now.toLocaleDateString();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const uniquePlanName = `AI Meal Plan - ${dateStr} ${timeStr}`;
+
       // Return the Claude response with top-level wrapper fields
       return {
         id: draftId,
@@ -916,7 +951,7 @@ export class AsyncMealPlanService {
         nutritionistId,
         status: 'completed',
         creationMethod: 'ai_generated',
-        planName: `AI Meal Plan - ${new Date().toLocaleDateString()}`,
+        planName: uniquePlanName,
         planDate: planStartDate,
         durationDays: days,
         totalDays: days,
@@ -950,10 +985,10 @@ export class AsyncMealPlanService {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         expiresAt: null, // AI-generated plans don't expire
-        aiModel: 'claude'
+        aiModel: aiModel
       };
     } catch (error) {
-      console.error('❌ Error wrapping Claude meal plan response:', error);
+      console.error('❌ Error wrapping AI meal plan response:', error);
       throw error;
     }
   }

@@ -170,8 +170,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           });
         }
 
-        // Only Claude is supported now
-        const aiModel = 'claude' as const;
+        // Get AI model from request body, default to Claude
+        const aiModel = (req.body.aiModel as 'openai' | 'claude' | 'gemini' | 'grok') || 'claude';
+
+        // Validate AI model
+        if (!['openai', 'claude', 'gemini', 'grok'].includes(aiModel)) {
+          return res.status(400).json({
+            error: 'Invalid AI model',
+            message: 'aiModel must be one of: openai, claude, gemini, grok'
+          });
+        }
 
         try {
           // Get active client goals
