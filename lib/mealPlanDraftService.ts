@@ -757,23 +757,88 @@ export class MealPlanDraftService {
     // Update recipe top-level nutrition fields to match customNutrition
     if (customizations.customNutrition) {
       console.log('🔄 Updating recipe top-level nutrition fields to match customNutrition');
-      
+
       // Extract nutrition values from customNutrition
       const extractNumber = (value: any): number => {
         if (typeof value === 'number') return value;
         if (value?.quantity !== undefined) return value.quantity;
         return 0;
       };
-      
+
       const customNutritionAny = customizations.customNutrition as any;
-      
-      recipe.calories = extractNumber(customNutritionAny.calories);
-      recipe.protein = extractNumber(customNutritionAny.macros?.protein);
-      recipe.carbs = extractNumber(customNutritionAny.macros?.carbs);
-      recipe.fat = extractNumber(customNutritionAny.macros?.fat);
-      recipe.fiber = extractNumber(customNutritionAny.macros?.fiber);
-      
-      console.log('  ✅ Updated top-level nutrition:', {
+      const nutritionServings = (customizations as any).nutritionServings || (customizations as any).servings || 1;
+
+      // Store MULTIPLIED nutrition values in the recipe (so they show correctly in GET responses)
+      recipe.calories = extractNumber(customNutritionAny.calories) * nutritionServings;
+      recipe.protein = extractNumber(customNutritionAny.macros?.protein) * nutritionServings;
+      recipe.carbs = extractNumber(customNutritionAny.macros?.carbs) * nutritionServings;
+      recipe.fat = extractNumber(customNutritionAny.macros?.fat) * nutritionServings;
+      recipe.fiber = extractNumber(customNutritionAny.macros?.fiber) * nutritionServings;
+
+      // Update recipe.nutrition to include multiplied values with micros
+      if (customNutritionAny.macros || customNutritionAny.micros) {
+        const recipeNutrition: any = {
+          calories: { quantity: recipe.calories, unit: 'kcal' },
+          macros: {},
+          micros: { vitamins: {}, minerals: {} },
+          totalNutrients: {} // Add totalNutrients for calculateMealTotalNutrition
+        };
+
+        // Multiply macros
+        if (customNutritionAny.macros) {
+          Object.entries(customNutritionAny.macros).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              const multipliedValue = {
+                quantity: value.quantity * nutritionServings,
+                unit: value.unit,
+                label: value.label
+              };
+              recipeNutrition.macros[key] = multipliedValue;
+              // Also add to totalNutrients
+              recipeNutrition.totalNutrients[key] = multipliedValue;
+            }
+          });
+        }
+
+        // Multiply micros
+        if (customNutritionAny.micros?.vitamins) {
+          Object.entries(customNutritionAny.micros.vitamins).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              const multipliedValue = {
+                quantity: value.quantity * nutritionServings,
+                unit: value.unit,
+                label: value.label
+              };
+              recipeNutrition.micros.vitamins[key] = multipliedValue;
+              // Also add to totalNutrients
+              recipeNutrition.totalNutrients[key] = multipliedValue;
+            }
+          });
+        }
+
+        if (customNutritionAny.micros?.minerals) {
+          Object.entries(customNutritionAny.micros.minerals).forEach(([key, value]: [string, any]) => {
+            if (value && value.quantity !== undefined) {
+              const multipliedValue = {
+                quantity: value.quantity * nutritionServings,
+                unit: value.unit,
+                label: value.label
+              };
+              recipeNutrition.micros.minerals[key] = multipliedValue;
+              // Also add to totalNutrients
+              recipeNutrition.totalNutrients[key] = multipliedValue;
+            }
+          });
+        }
+
+        recipe.nutrition = recipeNutrition;
+      }
+
+      // Store nutritionServings on the recipe so it displays correctly
+      (recipe as any).nutritionServings = nutritionServings;
+
+      console.log('  ✅ Updated top-level nutrition (multiplied by nutritionServings):', {
+        nutritionServings,
         calories: recipe.calories,
         protein: recipe.protein,
         carbs: recipe.carbs,
@@ -1030,86 +1095,61 @@ export class MealPlanDraftService {
       }
     }
 
-    // Apply customizations if any
+    // Check if customizations are applied
     const customization = meal.customizations[meal.selectedRecipeId];
-    if (customization && customization.customizationsApplied && customization.customNutrition) {
-      // Check if customNutrition has new format with micros
-      let customTotalNutrients = customization.customNutrition.totalNutrients || {};
-      
-      // If customNutrition has micros in the new format, build totalNutrients from it
-      if (customization.customNutrition.micros && Object.keys(customTotalNutrients).length === 0) {
-        // Add macros from customNutrition
-        if (customization.customNutrition.macros) {
-          Object.entries(customization.customNutrition.macros).forEach(([key, value]: [string, any]) => {
-            if (value && value.quantity !== undefined) {
-              customTotalNutrients[key] = value;
-            }
-          });
-        }
-        
-        // Add vitamins
-        if (customization.customNutrition.micros?.vitamins) {
-          Object.entries(customization.customNutrition.micros.vitamins).forEach(([key, value]: [string, any]) => {
-            if (value && value.quantity !== undefined) {
-              customTotalNutrients[key] = value;
-            }
-          });
-        }
-        
-        // Add minerals
-        if (customization.customNutrition.micros?.minerals) {
-          Object.entries(customization.customNutrition.micros.minerals).forEach(([key, value]: [string, any]) => {
-            if (value && value.quantity !== undefined) {
-              customTotalNutrients[key] = value;
-            }
-          });
-        }
-      }
-      
-      baseNutrition = {
-        totalCalories: customization.customNutrition.calories?.quantity || customization.customNutrition.calories || 0,
-        protein: customization.customNutrition.macros?.protein?.quantity || customization.customNutrition.protein || 0,
-        carbs: customization.customNutrition.macros?.carbs?.quantity || customization.customNutrition.carbs || 0,
-        fat: customization.customNutrition.macros?.fat?.quantity || customization.customNutrition.fat || 0,
-        fiber: customization.customNutrition.macros?.fiber?.quantity || customization.customNutrition.fiber || 0,
-        totalNutrients: Object.keys(customTotalNutrients).length > 0 ? customTotalNutrients : baseNutrition.totalNutrients
-      };
-    }
+    const customizationsApplied = customization && customization.customizationsApplied;
 
-    // Apply nutritionServings multiplier (portion size adjustment)
-    const servings = customization?.nutritionServings || customization?.servings || 1;
-    if (servings !== 1) {
-      // Adjust macros
-      baseNutrition.totalCalories = Math.round(baseNutrition.totalCalories * servings);
-      baseNutrition.protein = baseNutrition.protein * servings;
-      baseNutrition.carbs = baseNutrition.carbs * servings;
-      baseNutrition.fat = baseNutrition.fat * servings;
-      baseNutrition.fiber = baseNutrition.fiber * servings;
-      
-      // Adjust micronutrients
-      const adjustedNutrients: any = {};
-      Object.entries(baseNutrition.totalNutrients).forEach(([key, value]: [string, any]) => {
-        if (value && typeof value === 'object' && 'quantity' in value) {
-          adjustedNutrients[key] = {
-            ...value,
-            quantity: value.quantity * servings
-          };
-        }
-      });
-      baseNutrition.totalNutrients = adjustedNutrients;
+    // If customizations are applied, the selectedRecipe already has MULTIPLIED values
+    // (from updateCustomization in mealPlanDraftService.ts)
+    // So we should NOT multiply again. Just use the values as-is.
+
+    // If NO customizations, we need to multiply by servings
+    if (!customizationsApplied) {
+      const servings = customization?.nutritionServings || customization?.servings || 1;
+      if (servings !== 1) {
+        // Adjust macros
+        baseNutrition.totalCalories = Math.round(baseNutrition.totalCalories * servings);
+        baseNutrition.protein = baseNutrition.protein * servings;
+        baseNutrition.carbs = baseNutrition.carbs * servings;
+        baseNutrition.fat = baseNutrition.fat * servings;
+        baseNutrition.fiber = baseNutrition.fiber * servings;
+
+        // Adjust micronutrients
+        const adjustedNutrients: any = {};
+        Object.entries(baseNutrition.totalNutrients).forEach(([key, value]: [string, any]) => {
+          if (value && typeof value === 'object' && 'quantity' in value) {
+            adjustedNutrients[key] = {
+              ...value,
+              quantity: value.quantity * servings
+            };
+          }
+        });
+        baseNutrition.totalNutrients = adjustedNutrients;
+      }
     }
 
     // Standardize nutrient keys for aggregation
     const standardizedNutrients = nutritionService.standardizeNutrientKeys(baseNutrition.totalNutrients);
-    
+
+    // Extract commonly accessed nutrients from totalNutrients
+    const extractQuantity = (nutrientKey: string): number => {
+      const nutrient = standardizedNutrients[nutrientKey];
+      return nutrient && typeof nutrient === 'object' && 'quantity' in nutrient ? nutrient.quantity : 0;
+    };
+
     // Return in the format that calculateDailyNutrition expects
-    // It expects fields: totalCalories, protein, carbs, fat, fiber, totalNutrients
+    // It expects fields: totalCalories, protein, carbs, fat, fiber, sodium, sugar, cholesterol, calcium, iron, totalNutrients
     return {
       totalCalories: baseNutrition.totalCalories,
       protein: baseNutrition.protein,
       carbs: baseNutrition.carbs,
       fat: baseNutrition.fat,
       fiber: baseNutrition.fiber,
+      sodium: extractQuantity('sodium'),
+      sugar: extractQuantity('sugars') || extractQuantity('sugar'),
+      cholesterol: extractQuantity('cholesterol'),
+      calcium: extractQuantity('calcium'),
+      iron: extractQuantity('iron'),
       totalNutrients: standardizedNutrients
     };
   }

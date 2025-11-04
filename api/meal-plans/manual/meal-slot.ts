@@ -9,7 +9,7 @@ const createMealSlotSchema = Joi.object({
   day: Joi.number().integer().min(1).required(),
   mealName: Joi.string().required(),
   mealTime: Joi.string().optional(), // HH:MM format
-  targetCalories: Joi.number().min(0).optional()
+  targetCalories: Joi.number().min(0).allow(null).optional()
 });
 
 const updateMealSlotSchema = Joi.object({
@@ -18,7 +18,7 @@ const updateMealSlotSchema = Joi.object({
   day: Joi.number().integer().min(1).required(),
   mealName: Joi.string().required(),
   mealTime: Joi.string().optional(),
-  targetCalories: Joi.number().min(0).optional()
+  targetCalories: Joi.number().min(0).allow(null).optional()
 });
 
 const deleteMealSlotSchema = Joi.object({

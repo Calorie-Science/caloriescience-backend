@@ -464,20 +464,24 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       console.log('ℹ️ No customizations found, returning base recipe');
       
       // Format ingredients with proper image URLs even for non-customized recipes
-      baseRecipe.ingredients = baseRecipe.ingredients?.map((ing: any) => ({
-        id: ing.id,
-        name: ing.name || ing.food,
-        unit: ing.unit || '',
-        amount: ing.amount || 0,
-        image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
-        originalString: ing.original || ing.originalString || '',
-        aisle: ing.aisle || '',
-        meta: ing.meta || [],
-        measures: ing.measures || {
-          us: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' },
-          metric: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' }
-        }
-      })) || [];
+      // Format ingredients - ensure 'amount' field (custom/manual recipes use 'quantity')
+      baseRecipe.ingredients = baseRecipe.ingredients?.map((ing: any) => {
+        const ingredientAmount = ing.amount || ing.quantity || 0;
+        return {
+          id: ing.id,
+          name: ing.name || ing.food,
+          unit: ing.unit || '',
+          amount: ingredientAmount,
+          image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
+          originalString: ing.original || ing.originalString || '',
+          aisle: ing.aisle || '',
+          meta: ing.meta || [],
+          measures: ing.measures || {
+            us: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' },
+            metric: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' }
+          }
+        };
+      }) || [];
       
       // Normalize cookingInstructions to array of objects with number and step
       if (baseRecipe.cookingInstructions && Array.isArray(baseRecipe.cookingInstructions)) {
@@ -794,7 +798,63 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     const servings = customizations.nutritionServings || customizations.servings || 1;
     customizedRecipe.nutritionServings = servings;
     if (servings !== 1) {
-      console.log(`📊 Recipe adjusted for ${servings} servings`);
+      console.log(`📊 Multiplying nutrition by ${servings} servings`);
+
+      // Multiply top-level nutrition fields (these are mislabeled as "PerServing" but actually show totals)
+      customizedRecipe.caloriesPerServing = (parseFloat(customizedRecipe.caloriesPerServing) * servings).toString();
+      customizedRecipe.proteinPerServingG = (parseFloat(customizedRecipe.proteinPerServingG) * servings).toString();
+      customizedRecipe.carbsPerServingG = (parseFloat(customizedRecipe.carbsPerServingG) * servings).toString();
+      customizedRecipe.fatPerServingG = (parseFloat(customizedRecipe.fatPerServingG) * servings).toString();
+      customizedRecipe.fiberPerServingG = (parseFloat(customizedRecipe.fiberPerServingG) * servings).toString();
+      customizedRecipe.sugarPerServingG = (parseFloat(customizedRecipe.sugarPerServingG || 0) * servings).toString();
+      customizedRecipe.sodiumPerServingMg = (parseFloat(customizedRecipe.sodiumPerServingMg || 0) * servings).toString();
+
+      // Also multiply the "total" fields (these should match the "PerServing" fields)
+      customizedRecipe.totalCalories = customizedRecipe.caloriesPerServing;
+      customizedRecipe.totalProteinG = customizedRecipe.proteinPerServingG;
+      customizedRecipe.totalCarbsG = customizedRecipe.carbsPerServingG;
+      customizedRecipe.totalFatG = customizedRecipe.fatPerServingG;
+      customizedRecipe.totalFiberG = customizedRecipe.fiberPerServingG;
+      customizedRecipe.totalSugarG = customizedRecipe.sugarPerServingG;
+      customizedRecipe.totalSodiumMg = customizedRecipe.sodiumPerServingMg;
+
+      // Multiply nutritionDetails
+      if (customizedRecipe.nutritionDetails) {
+        // Multiply calories
+        if (customizedRecipe.nutritionDetails.calories) {
+          customizedRecipe.nutritionDetails.calories.quantity *= servings;
+        }
+
+        // Multiply macros
+        if (customizedRecipe.nutritionDetails.macros) {
+          Object.keys(customizedRecipe.nutritionDetails.macros).forEach(key => {
+            const macro = customizedRecipe.nutritionDetails.macros[key];
+            if (macro && typeof macro.quantity === 'number') {
+              macro.quantity *= servings;
+            }
+          });
+        }
+
+        // Multiply micros
+        if (customizedRecipe.nutritionDetails.micros) {
+          if (customizedRecipe.nutritionDetails.micros.vitamins) {
+            Object.keys(customizedRecipe.nutritionDetails.micros.vitamins).forEach(key => {
+              const vitamin = customizedRecipe.nutritionDetails.micros.vitamins[key];
+              if (vitamin && typeof vitamin.quantity === 'number') {
+                vitamin.quantity *= servings;
+              }
+            });
+          }
+          if (customizedRecipe.nutritionDetails.micros.minerals) {
+            Object.keys(customizedRecipe.nutritionDetails.micros.minerals).forEach(key => {
+              const mineral = customizedRecipe.nutritionDetails.micros.minerals[key];
+              if (mineral && typeof mineral.quantity === 'number') {
+                mineral.quantity *= servings;
+              }
+            });
+          }
+        }
+      }
     }
 
     // Format ingredients to ensure proper structure (add originalString, aisle, meta, measures)
@@ -1015,51 +1075,319 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, meal: any, 
  */
 async function handleManualRecipe(recipeId: string, recipe: any, meal: any, res: VercelResponse): Promise<VercelResponse> {
   console.log(`✅ Handling manual/custom recipe: ${recipeId}`);
-  
+
   // Get customizations from meal (not recipe)
   const customizations = meal.customizations?.[recipeId] || null;
-  
-  // Return manual recipe in customized format
-  return res.status(200).json({
-    success: true,
-    data: {
+
+  // Try to fetch from cache to get full nutrition details
+  let baseRecipe: any;
+  let fromCache = false;
+
+  try {
+    const cachedRecipe = await cacheService.getRecipeById(recipeId);
+    if (cachedRecipe) {
+      console.log('✅ Found manual recipe in cache');
+      fromCache = true;
+      const cached = cachedRecipe as any;
+
+      // Build baseRecipe from cache with same structure as main path
+      baseRecipe = {
+        id: cached.id,
+        provider: cached.provider,
+        externalRecipeId: cached.external_recipe_id || cached.externalRecipeId,
+        externalRecipeUri: cached.external_recipe_uri || cached.externalRecipeUri,
+        recipeName: cached.recipe_name || cached.recipeName,
+        description: cached.description,
+        recipeSource: cached.recipe_source || cached.recipeSource,
+        recipeUrl: cached.recipe_url || cached.recipeUrl,
+        recipeImageUrl: cached.recipe_image_url || cached.recipeImageUrl,
+        cuisineTypes: cached.cuisine_types || cached.cuisineTypes || [],
+        mealTypes: cached.meal_types || cached.mealTypes || [],
+        dishTypes: cached.dish_types || cached.dishTypes || [],
+        healthLabels: cached.health_labels || cached.healthLabels || [],
+        dietLabels: cached.diet_labels || cached.dietLabels || [],
+        allergens: cached.allergens || [],
+        servings: cached.servings,
+        nutritionServings: 1,
+        prepTimeMinutes: cached.prep_time_minutes || cached.prepTimeMinutes,
+        cookTimeMinutes: cached.cook_time_minutes || cached.cookTimeMinutes,
+        totalTimeMinutes: cached.total_time_minutes || cached.totalTimeMinutes,
+        caloriesPerServing: (cached.calories_per_serving || cached.caloriesPerServing)?.toString(),
+        proteinPerServingG: (cached.protein_per_serving_g || cached.proteinPerServingG)?.toString(),
+        carbsPerServingG: (cached.carbs_per_serving_g || cached.carbsPerServingG)?.toString(),
+        fatPerServingG: (cached.fat_per_serving_g || cached.fatPerServingG)?.toString(),
+        fiberPerServingG: (cached.fiber_per_serving_g || cached.fiberPerServingG)?.toString(),
+        sugarPerServingG: (cached.total_sugar_g || cached.totalSugarG)?.toString(),
+        sodiumPerServingMg: (cached.total_sodium_mg || cached.totalSodiumMg)?.toString(),
+        totalCalories: (cached.total_calories || cached.totalCalories)?.toString(),
+        totalProteinG: (cached.total_protein_g || cached.totalProteinG)?.toString(),
+        totalCarbsG: (cached.total_carbs_g || cached.totalCarbsG)?.toString(),
+        totalFatG: (cached.total_fat_g || cached.totalFatG)?.toString(),
+        totalFiberG: (cached.total_fiber_g || cached.totalFiberG)?.toString(),
+        totalSugarG: (cached.total_sugar_g || cached.totalSugarG)?.toString(),
+        totalSodiumMg: (cached.total_sodium_mg || cached.totalSodiumMg)?.toString(),
+        totalWeightG: cached.total_weight_g || cached.totalWeightG,
+        ingredients: (cached.ingredients || []).map((ing: any) => ({
+          ...ing,
+          amount: ing.amount || ing.quantity || 0
+        })),
+        ingredientLines: cached.ingredient_lines || cached.ingredientLines || [],
+        cookingInstructions: cached.cooking_instructions || cached.cookingInstructions || [],
+        nutritionDetails: cached.nutrition_details || cached.nutritionDetails || {},
+        originalApiResponse: cached.original_api_response || cached.originalApiResponse || {},
+        cacheStatus: cached.cache_status || cached.cacheStatus,
+        apiFetchCount: cached.api_fetch_count || cached.apiFetchCount,
+        lastApiFetchAt: cached.last_api_fetch_at || cached.lastApiFetchAt,
+        lastAccessedAt: cached.last_accessed_at || cached.lastAccessedAt,
+        hasCompleteNutrition: cached.has_complete_nutrition || cached.hasCompleteNutrition,
+        hasDetailedIngredients: cached.has_detailed_ingredients || cached.hasDetailedIngredients,
+        hasCookingInstructions: cached.has_cooking_instructions || cached.hasCookingInstructions,
+        dataQualityScore: cached.data_quality_score || cached.dataQualityScore,
+        createdAt: cached.created_at || cached.createdAt,
+        updatedAt: cached.updated_at || cached.updatedAt,
+        isPublic: cached.is_public || cached.isPublic,
+        createdBy: cached.created_by || cached.createdBy,
+        defaultPortionSizeId: cached.default_portion_size_id || cached.defaultPortionSizeId
+      };
+    }
+  } catch (error) {
+    console.log('⚠️ Could not fetch manual recipe from cache, using draft data');
+  }
+
+  // If not in cache, use recipe from draft
+  if (!baseRecipe) {
+    baseRecipe = {
       recipeId: recipe.id,
-      title: recipe.title,
-      image: recipe.image,
+      recipeName: recipe.title,
+      recipeImageUrl: recipe.image,
       servings: recipe.servings || 1,
-      readyInMinutes: recipe.readyInMinutes || 0,
-      source: 'manual',
-      sourceUrl: recipe.sourceUrl,
-      
-      // Nutrition - use customized if available, otherwise original
-      nutrition: customizations?.customNutrition || recipe.nutrition,
-      
-      // Ingredients
-      ingredients: recipe.ingredients || [],
-      
-      // Instructions
-      instructions: recipe.instructions || [],
-      
-      // Metadata
+      nutritionServings: 1,
+      totalTimeMinutes: recipe.readyInMinutes || 0,
+      caloriesPerServing: recipe.calories?.toString() || '0',
+      proteinPerServingG: recipe.protein?.toString() || '0',
+      carbsPerServingG: recipe.carbs?.toString() || '0',
+      fatPerServingG: recipe.fat?.toString() || '0',
+      fiberPerServingG: recipe.fiber?.toString() || '0',
+      sugarPerServingG: '0',
+      sodiumPerServingMg: '0',
+      totalCalories: recipe.calories?.toString() || '0',
+      totalProteinG: recipe.protein?.toString() || '0',
+      totalCarbsG: recipe.carbs?.toString() || '0',
+      totalFatG: recipe.fat?.toString() || '0',
+      totalFiberG: recipe.fiber?.toString() || '0',
+      totalSugarG: '0',
+      totalSodiumMg: '0',
+      ingredients: (recipe.ingredients || []).map((ing: any) => ({
+        ...ing,
+        amount: ing.amount || ing.quantity || 0
+      })),
+      cookingInstructions: recipe.instructions || [],
+      nutritionDetails: recipe.nutrition || {},
       healthLabels: recipe.healthLabels || [],
       dietLabels: recipe.dietLabels || [],
       allergens: recipe.allergens || [],
-      cuisineType: recipe.cuisineTypes || [],
-      dishType: recipe.dishTypes || [],
-      mealType: recipe.mealTypes || [],
-      
-      // Customization info
-      currentCustomizations: customizations,
-      currentServings: recipe.servings || 1,
-      modifications: customizations?.modifications || [],
-      customizationsApplied: customizations?.customizationsApplied || false,
-      
-      // Special flags
-      isCustom: true,
-      canCustomize: true,
-      
-      message: customizations ? 'Manual recipe with customizations' : 'Manual recipe - you can customize ingredients'
+      cuisineTypes: recipe.cuisineTypes || [],
+      dishTypes: recipe.dishTypes || [],
+      mealTypes: recipe.mealTypes || [],
+      provider: 'manual',
+      recipeSource: 'manual'
+    };
+  }
+
+  // If no customizations, return baseRecipe
+  // Check both customizationsApplied flag AND nutritionServings to handle older drafts
+  const hasNutritionServings = customizations && (customizations.nutritionServings || customizations.servings) && (customizations.nutritionServings || customizations.servings) !== 1;
+  const shouldApplyCustomizations = customizations && (customizations.customizationsApplied || hasNutritionServings || (customizations.modifications && customizations.modifications.length > 0));
+
+  if (!shouldApplyCustomizations) {
+    return res.status(200).json({
+      success: true,
+      data: baseRecipe,
+      hasCustomizations: false,
+      customizations: null,
+      message: fromCache ? 'Manual recipe retrieved from cache (no customizations)' : 'Manual recipe (no customizations)'
+    });
+  }
+
+  // Apply customizations
+  const customizedRecipe = JSON.parse(JSON.stringify(baseRecipe)); // Deep clone
+
+  // Apply custom nutrition if provided
+  if (customizations.customNutrition) {
+    const customNutrition = customizations.customNutrition;
+
+    // Update per-serving nutrition fields
+    customizedRecipe.caloriesPerServing = (customNutrition.calories?.quantity || 0).toString();
+    customizedRecipe.proteinPerServingG = (customNutrition.macros?.protein?.quantity || 0).toString();
+    customizedRecipe.carbsPerServingG = (customNutrition.macros?.carbs?.quantity || 0).toString();
+    customizedRecipe.fatPerServingG = (customNutrition.macros?.fat?.quantity || 0).toString();
+    customizedRecipe.fiberPerServingG = (customNutrition.macros?.fiber?.quantity || 0).toString();
+    customizedRecipe.sugarPerServingG = (customNutrition.macros?.sugar?.quantity || 0).toString();
+    customizedRecipe.sodiumPerServingMg = (customNutrition.macros?.sodium?.quantity || 0).toString();
+
+    // Update nutritionDetails
+    if (!customizedRecipe.nutritionDetails) {
+      customizedRecipe.nutritionDetails = { macros: {}, micros: { vitamins: {}, minerals: {} }, calories: {} };
     }
+
+    customizedRecipe.nutritionDetails.calories = {
+      unit: customNutrition.calories?.unit || 'kcal',
+      quantity: customNutrition.calories?.quantity || 0
+    };
+
+    if (customNutrition.macros) {
+      Object.keys(customNutrition.macros).forEach(macroKey => {
+        const macroValue = customNutrition.macros[macroKey as keyof typeof customNutrition.macros];
+        if (macroValue) {
+          customizedRecipe.nutritionDetails.macros[macroKey] = {
+            unit: macroValue.unit,
+            quantity: macroValue.quantity
+          };
+        }
+      });
+    }
+
+    if (customNutrition.micros?.vitamins) {
+      if (!customizedRecipe.nutritionDetails.micros) {
+        customizedRecipe.nutritionDetails.micros = { vitamins: {}, minerals: {} };
+      }
+      customizedRecipe.nutritionDetails.micros.vitamins = customNutrition.micros.vitamins;
+    }
+
+    if (customNutrition.micros?.minerals) {
+      if (!customizedRecipe.nutritionDetails.micros) {
+        customizedRecipe.nutritionDetails.micros = { vitamins: {}, minerals: {} };
+      }
+      customizedRecipe.nutritionDetails.micros.minerals = customNutrition.micros.minerals;
+    }
+  }
+
+  // Apply nutritionServings multiplier
+  const servings = customizations.nutritionServings || customizations.servings || 1;
+  customizedRecipe.nutritionServings = servings;
+
+  if (servings !== 1) {
+    console.log(`📊 Multiplying manual recipe nutrition by ${servings} servings`);
+
+    // Multiply top-level nutrition fields
+    customizedRecipe.caloriesPerServing = (parseFloat(customizedRecipe.caloriesPerServing || 0) * servings).toString();
+    customizedRecipe.proteinPerServingG = (parseFloat(customizedRecipe.proteinPerServingG || 0) * servings).toString();
+    customizedRecipe.carbsPerServingG = (parseFloat(customizedRecipe.carbsPerServingG || 0) * servings).toString();
+    customizedRecipe.fatPerServingG = (parseFloat(customizedRecipe.fatPerServingG || 0) * servings).toString();
+    customizedRecipe.fiberPerServingG = (parseFloat(customizedRecipe.fiberPerServingG || 0) * servings).toString();
+    customizedRecipe.sugarPerServingG = (parseFloat(customizedRecipe.sugarPerServingG || 0) * servings).toString();
+    customizedRecipe.sodiumPerServingMg = (parseFloat(customizedRecipe.sodiumPerServingMg || 0) * servings).toString();
+
+    // Update "total" fields to match
+    customizedRecipe.totalCalories = customizedRecipe.caloriesPerServing;
+    customizedRecipe.totalProteinG = customizedRecipe.proteinPerServingG;
+    customizedRecipe.totalCarbsG = customizedRecipe.carbsPerServingG;
+    customizedRecipe.totalFatG = customizedRecipe.fatPerServingG;
+    customizedRecipe.totalFiberG = customizedRecipe.fiberPerServingG;
+    customizedRecipe.totalSugarG = customizedRecipe.sugarPerServingG;
+    customizedRecipe.totalSodiumMg = customizedRecipe.sodiumPerServingMg;
+
+    // Multiply nutritionDetails
+    if (customizedRecipe.nutritionDetails) {
+      if (customizedRecipe.nutritionDetails.calories) {
+        customizedRecipe.nutritionDetails.calories.quantity *= servings;
+      }
+
+      if (customizedRecipe.nutritionDetails.macros) {
+        Object.keys(customizedRecipe.nutritionDetails.macros).forEach(key => {
+          const macro = customizedRecipe.nutritionDetails.macros[key];
+          if (macro && typeof macro.quantity === 'number') {
+            macro.quantity *= servings;
+          }
+        });
+      }
+
+      if (customizedRecipe.nutritionDetails.micros) {
+        if (customizedRecipe.nutritionDetails.micros.vitamins) {
+          Object.keys(customizedRecipe.nutritionDetails.micros.vitamins).forEach(key => {
+            const vitamin = customizedRecipe.nutritionDetails.micros.vitamins[key];
+            if (vitamin && typeof vitamin.quantity === 'number') {
+              vitamin.quantity *= servings;
+            }
+          });
+        }
+        if (customizedRecipe.nutritionDetails.micros.minerals) {
+          Object.keys(customizedRecipe.nutritionDetails.micros.minerals).forEach(key => {
+            const mineral = customizedRecipe.nutritionDetails.micros.minerals[key];
+            if (mineral && typeof mineral.quantity === 'number') {
+              mineral.quantity *= servings;
+            }
+          });
+        }
+      }
+    }
+  }
+
+  // Prepare response with nutrition comparison
+  const nutritionComparison: any = {
+    macros: {
+      original: {
+        caloriesPerServing: baseRecipe.caloriesPerServing,
+        proteinPerServingG: baseRecipe.proteinPerServingG,
+        carbsPerServingG: baseRecipe.carbsPerServingG,
+        fatPerServingG: baseRecipe.fatPerServingG,
+        fiberPerServingG: baseRecipe.fiberPerServingG
+      },
+      customized: {
+        caloriesPerServing: customizedRecipe.caloriesPerServing,
+        proteinPerServingG: customizedRecipe.proteinPerServingG,
+        carbsPerServingG: customizedRecipe.carbsPerServingG,
+        fatPerServingG: customizedRecipe.fatPerServingG,
+        fiberPerServingG: customizedRecipe.fiberPerServingG
+      }
+    }
+  };
+
+  if (baseRecipe.nutritionDetails?.micros && customizedRecipe.nutritionDetails?.micros) {
+    nutritionComparison.micros = {
+      original: {
+        vitamins: baseRecipe.nutritionDetails.micros.vitamins || {},
+        minerals: baseRecipe.nutritionDetails.micros.minerals || {}
+      },
+      customized: {
+        vitamins: customizedRecipe.nutritionDetails.micros.vitamins || {},
+        minerals: customizedRecipe.nutritionDetails.micros.minerals || {}
+      }
+    };
+  }
+
+  // Add modifiedNutrition and originalNutrition for consistency with cache response
+  customizedRecipe.modifiedNutrition = customizedRecipe.nutritionDetails;
+  customizedRecipe.originalNutrition = baseRecipe.nutritionDetails;
+
+  return res.status(200).json({
+    success: true,
+    data: customizedRecipe,
+    hasCustomizations: true,
+    customizations: {
+      modifications: customizations.modifications || [],
+      customizationSummary: [],
+      appliedServings: servings,
+      nutritionServings: servings,
+      micronutrientsIncluded: !!(customizations.customNutrition?.micros),
+      nutritionComparison: nutritionComparison,
+      originalNutrition: {
+        caloriesPerServing: baseRecipe.caloriesPerServing,
+        proteinPerServingG: baseRecipe.proteinPerServingG,
+        carbsPerServingG: baseRecipe.carbsPerServingG,
+        fatPerServingG: baseRecipe.fatPerServingG,
+        fiberPerServingG: baseRecipe.fiberPerServingG
+      },
+      customizedNutrition: {
+        caloriesPerServing: customizedRecipe.caloriesPerServing,
+        proteinPerServingG: customizedRecipe.proteinPerServingG,
+        carbsPerServingG: customizedRecipe.carbsPerServingG,
+        fatPerServingG: customizedRecipe.fatPerServingG,
+        fiberPerServingG: customizedRecipe.fiberPerServingG
+      }
+    },
+    message: 'Customizations updated successfully',
+    autoCalculated: true
   });
 }
 

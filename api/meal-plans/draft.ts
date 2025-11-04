@@ -24,7 +24,7 @@ const selectRecipeSchema = Joi.object({
   recipeId: Joi.string().required(),
   customizations: Joi.object({
     recipeId: Joi.string().required(),
-    source: Joi.string().valid('edamam', 'spoonacular').required(),
+    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required(),
     modifications: Joi.array().items(
       Joi.object({
         type: Joi.string().valid('replace', 'omit', 'reduce', 'add').required(),
@@ -63,7 +63,7 @@ const updateCustomizationsSchema = Joi.object({
   autoCalculateNutrition: Joi.boolean().default(true).optional(), // Enable auto-calculation by default
   customizations: Joi.object({
     recipeId: Joi.string().required(),
-    source: Joi.string().valid('edamam', 'spoonacular').required(),
+    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required(),
     modifications: Joi.array().items(
       Joi.object({
         type: Joi.string().valid('replace', 'omit', 'add').required(),
@@ -135,7 +135,7 @@ const replaceIngredientInPlanSchema = Joi.object({
   recipeId: Joi.string().required(),
   originalIngredient: Joi.string().required(),
   newIngredient: Joi.string().required(),
-  source: Joi.string().valid('edamam', 'spoonacular').required()
+  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required()
 });
 
 const updateInstructionsSchema = Joi.object({
@@ -571,7 +571,51 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                       calories: { quantity: recipeCustomizations.customNutrition.calories?.quantity || recipeCustomizations.customNutrition.calories || 0, unit: 'kcal' }
                     };
                   }
-                  
+
+                  // Get nutritionServings for multiplication
+                  const nutritionServings = recipeCustomizations.nutritionServings || recipeCustomizations.servings || 1;
+
+                  // Multiply finalNutrition by nutritionServings if !== 1
+                  if (nutritionServings !== 1 && finalNutrition) {
+                    console.log(`  🔢 Multiplying nutrition by nutritionServings: ${nutritionServings}x`);
+                    finalNutrition = JSON.parse(JSON.stringify(finalNutrition)); // Deep clone
+
+                    // Multiply calories
+                    if (finalNutrition.calories) {
+                      finalNutrition.calories.quantity *= nutritionServings;
+                    }
+
+                    // Multiply macros
+                    if (finalNutrition.macros) {
+                      for (const [key, value] of Object.entries(finalNutrition.macros)) {
+                        const val = value as any;
+                        if (val && typeof val.quantity === 'number') {
+                          val.quantity *= nutritionServings;
+                        }
+                      }
+                    }
+
+                    // Multiply micros
+                    if (finalNutrition.micros) {
+                      if (finalNutrition.micros.vitamins) {
+                        for (const [key, value] of Object.entries(finalNutrition.micros.vitamins)) {
+                          const val = value as any;
+                          if (val && typeof val.quantity === 'number') {
+                            val.quantity *= nutritionServings;
+                          }
+                        }
+                      }
+                      if (finalNutrition.micros.minerals) {
+                        for (const [key, value] of Object.entries(finalNutrition.micros.minerals)) {
+                          const val = value as any;
+                          if (val && typeof val.quantity === 'number') {
+                            val.quantity *= nutritionServings;
+                          }
+                        }
+                      }
+                    }
+                  }
+
                   // Extract top-level nutrition fields from finalNutrition for UI display
                   const customizedTopLevel = {
                     calories: finalNutrition?.calories?.quantity || recipe.calories || 0,
@@ -580,7 +624,7 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                     fat: finalNutrition?.macros?.fat?.quantity || recipe.fat || 0,
                     fiber: finalNutrition?.macros?.fiber?.quantity || recipe.fiber || 0
                   };
-                  
+
                   return {
                     ...recipe,
                     // Update top-level fields with customized values
@@ -594,7 +638,7 @@ async function handleGetDraft(req: VercelRequest, res: VercelResponse, user: any
                     nutrition: finalNutrition,
                     micronutrients: finalMicronutrients,
                     hasCustomizations: true,
-                    nutritionServings: recipeCustomizations.nutritionServings || recipeCustomizations.servings || 1, // Portion size multiplier
+                    nutritionServings: nutritionServings, // Use the calculated value
                     customizationsSummary: {
                       modificationsCount: modificationsToUse.length,  // Use deduplicated count
                       modifications: modificationsToUse.map((m: any) => ({  // Use deduplicated mods
@@ -1094,12 +1138,12 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       });
     }
     
-    // Block customizations for Bon Appetit recipes
+    // Block ingredient modifications for Bon Appetit recipes (but allow servings changes)
     const recipeSource = customizations.source || recipe.source;
-    if (recipeSource === 'bonhappetee') {
+    if (recipeSource === 'bonhappetee' && customizations.modifications && customizations.modifications.length > 0) {
       return res.status(400).json({
-        error: 'Customization not supported',
-        message: 'Recipe customizations are not available for Bon Appetit recipes. Bon Appetit recipes come with fixed ingredients and nutrition information.',
+        error: 'Ingredient modifications not supported',
+        message: 'Ingredient modifications are not available for Bon Appetit recipes. However, you can still change the serving size (nutritionServings).',
         recipe: {
           id: recipeId,
           title: recipe.title,
@@ -1442,29 +1486,23 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
         });
         
-        // For simple ingredients: if nutritionServings parameter is provided and no modifications, 
-        // just multiply the nutrition by nutritionServings
+        // For simple ingredients: if nutritionServings parameter is provided and no modifications,
+        // just use the original nutrition (multiplication happens later)
         const requestedServings = customizations.nutritionServings || customizations.servings || 1;
         if (requestedServings !== 1 && (!customizations.modifications || customizations.modifications.length === 0)) {
-          console.log(`🔢 Simple ingredient servings adjustment: ${recipeServings} → ${requestedServings}`);
-          
-          // Import NutritionMappingService for multiplication
-          const { NutritionMappingService } = await import('../../lib/nutritionMappingService');
-          const multipliedNutrition = NutritionMappingService.multiplyNutrition(originalNutritionWithMicros, requestedServings);
-          
-          // Set customNutrition directly (skip modification-based calculation)
-          customizations.customNutrition = multipliedNutrition;
-          customizations.customizationsApplied = true;
-          
-          // Update recipe servings
-          recipeServings = requestedServings;
-          
-          console.log('✅ Applied servings multiplier:', {
+          console.log(`🔢 Simple ingredient with nutritionServings (no modifications) - using original nutrition`);
+
+          // Set customNutrition to original per-serving values
+          // The multiplication by nutritionServings happens in calculateMealTotalNutrition
+          customizations.customNutrition = JSON.parse(JSON.stringify(originalNutritionWithMicros));
+          customizations.customizationsApplied = requestedServings !== 1; // Mark as applied so calc uses customNutrition
+
+          console.log('✅ Set customNutrition to original per-serving values:', {
             servings: requestedServings,
             originalCalories: originalNutritionWithMicros.calories?.quantity,
-            newCalories: multipliedNutrition.calories?.quantity
+            customizationsApplied: customizations.customizationsApplied
           });
-          
+
           // Skip the normal modification calculation below since we already have customNutrition
         }
       } else {
@@ -1771,6 +1809,27 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         hasProtein: originalNutritionWithMicros.macros?.protein?.quantity,
         isValid: originalHasValues
       });
+
+      // Handle nutritionServings changes when there are NO modifications (for ALL recipes)
+      const hasModifications = customizations.modifications && customizations.modifications.length > 0;
+      if (!hasModifications && !customizations.customNutrition) {
+        console.log(`🔢 No modifications - using original nutrition (will be multiplied later by nutritionServings)`);
+
+        // Set customNutrition to original (per-serving) values
+        // The multiplication by nutritionServings happens in calculateMealTotalNutrition
+        customizations.customNutrition = JSON.parse(JSON.stringify(originalNutritionWithMicros));
+
+        // Mark as applied if nutritionServings != 1, so calculateMealTotalNutrition uses customNutrition
+        const nutritionServings = customizations.nutritionServings || customizations.servings || 1;
+        customizations.customizationsApplied = nutritionServings !== 1;
+
+        console.log('✅ Set customNutrition to original per-serving values:', {
+          calories: originalNutritionWithMicros.calories?.quantity,
+          protein: originalNutritionWithMicros.macros?.protein?.quantity,
+          nutritionServings,
+          customizationsApplied: customizations.customizationsApplied
+        });
+      }
 
       // Calculate new nutrition using the NEW micronutrient-aware service
       // Pass recipe servings so ingredient changes are correctly divided
@@ -2108,20 +2167,24 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     }
     
     // Format ingredients with proper image URLs (Spoonacular needs base URL prefix)
-    customizedRecipe.ingredients = customizedRecipe.ingredients.map((ing: any) => ({
-      id: ing.id,
-      name: ing.name || ing.food,
-      unit: ing.unit || '',
-      amount: ing.amount || 0,
-      image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
-      originalString: ing.original || ing.originalString || '',
-      aisle: ing.aisle || '',
-      meta: ing.meta || [],
-      measures: ing.measures || {
-        us: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' },
-        metric: { amount: ing.amount || 0, unitLong: ing.unit || '', unitShort: ing.unit || '' }
-      }
-    }));
+    // Note: Custom/manual recipes store as 'quantity', but API should return as 'amount' for consistency
+    customizedRecipe.ingredients = customizedRecipe.ingredients.map((ing: any) => {
+      const ingredientAmount = ing.amount || ing.quantity || 0;
+      return {
+        id: ing.id,
+        name: ing.name || ing.food,
+        unit: ing.unit || '',
+        amount: ingredientAmount,
+        image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : '',
+        originalString: ing.original || ing.originalString || '',
+        aisle: ing.aisle || '',
+        meta: ing.meta || [],
+        measures: ing.measures || {
+          us: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' },
+          metric: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' }
+        }
+      };
+    });
 
     // Apply custom nutrition (includes micronutrients!)
     if (customizations.customNutrition) {
@@ -2145,6 +2208,82 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         customizedRecipe.fatPerServingG = customNutrition.macros?.fat?.quantity?.toString();
         customizedRecipe.fiberPerServingG = customNutrition.macros?.fiber?.quantity?.toString();
       }
+    }
+
+    // Apply nutritionServings multiplier to response
+    const nutritionServings = customizations.nutritionServings || 1;
+
+    // Set nutritionServings on customizedRecipe (always, not just when !== 1)
+    customizedRecipe.nutritionServings = nutritionServings;
+
+    if (nutritionServings !== 1) {
+      // Multiply top-level fields
+      if (customizedRecipe.caloriesPerServing) {
+        customizedRecipe.caloriesPerServing = (parseFloat(customizedRecipe.caloriesPerServing) * nutritionServings).toString();
+      }
+      if (customizedRecipe.proteinPerServingG) {
+        customizedRecipe.proteinPerServingG = (parseFloat(customizedRecipe.proteinPerServingG) * nutritionServings).toString();
+      }
+      if (customizedRecipe.carbsPerServingG) {
+        customizedRecipe.carbsPerServingG = (parseFloat(customizedRecipe.carbsPerServingG) * nutritionServings).toString();
+      }
+      if (customizedRecipe.fatPerServingG) {
+        customizedRecipe.fatPerServingG = (parseFloat(customizedRecipe.fatPerServingG) * nutritionServings).toString();
+      }
+      if (customizedRecipe.fiberPerServingG) {
+        customizedRecipe.fiberPerServingG = (parseFloat(customizedRecipe.fiberPerServingG) * nutritionServings).toString();
+      }
+      if (customizedRecipe.sugarPerServingG) {
+        customizedRecipe.sugarPerServingG = (parseFloat(customizedRecipe.sugarPerServingG || 0) * nutritionServings).toString();
+      }
+      if (customizedRecipe.sodiumPerServingMg) {
+        customizedRecipe.sodiumPerServingMg = (parseFloat(customizedRecipe.sodiumPerServingMg || 0) * nutritionServings).toString();
+      }
+
+      // Update "total" fields to match the multiplied "PerServing" fields
+      customizedRecipe.totalCalories = customizedRecipe.caloriesPerServing;
+      customizedRecipe.totalProteinG = customizedRecipe.proteinPerServingG;
+      customizedRecipe.totalCarbsG = customizedRecipe.carbsPerServingG;
+      customizedRecipe.totalFatG = customizedRecipe.fatPerServingG;
+      customizedRecipe.totalFiberG = customizedRecipe.fiberPerServingG;
+      customizedRecipe.totalSugarG = customizedRecipe.sugarPerServingG;
+      customizedRecipe.totalSodiumMg = customizedRecipe.sodiumPerServingMg;
+
+      // Multiply nutritionDetails
+      if (customizedRecipe.nutritionDetails) {
+        if (customizedRecipe.nutritionDetails.calories) {
+          customizedRecipe.nutritionDetails.calories.quantity *= nutritionServings;
+        }
+        if (customizedRecipe.nutritionDetails.macros) {
+          Object.keys(customizedRecipe.nutritionDetails.macros).forEach(key => {
+            const macro = customizedRecipe.nutritionDetails.macros[key];
+            if (macro && typeof macro.quantity === 'number') {
+              macro.quantity *= nutritionServings;
+            }
+          });
+        }
+        if (customizedRecipe.nutritionDetails.micros) {
+          if (customizedRecipe.nutritionDetails.micros.vitamins) {
+            Object.keys(customizedRecipe.nutritionDetails.micros.vitamins).forEach(key => {
+              const vitamin = customizedRecipe.nutritionDetails.micros.vitamins[key];
+              if (vitamin && typeof vitamin.quantity === 'number') {
+                vitamin.quantity *= nutritionServings;
+              }
+            });
+          }
+          if (customizedRecipe.nutritionDetails.micros.minerals) {
+            Object.keys(customizedRecipe.nutritionDetails.micros.minerals).forEach(key => {
+              const mineral = customizedRecipe.nutritionDetails.micros.minerals[key];
+              if (mineral && typeof mineral.quantity === 'number') {
+                mineral.quantity *= nutritionServings;
+              }
+            });
+          }
+        }
+      }
+
+      // Don't multiply customizations.customNutrition - it stays as per-serving for storage
+      // The multiplied version is already in customizedRecipe.nutritionDetails
     }
 
     // Prepare nutrition comparison
@@ -2198,7 +2337,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       success: true,
       data: {
         ...customizedRecipe,
-        modifiedNutrition: customizations.customNutrition || null, // Full nutrition with micros
+        modifiedNutrition: customizedRecipe.nutritionDetails || null, // Already multiplied by nutritionServings
         originalNutrition: originalNutritionWithMicros || null
       },
       hasCustomizations: true,
@@ -2225,50 +2364,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         }
       },
       message: 'Customizations updated successfully',
-      autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition,
-      // TEMPORARY DEBUG INFO - Remove after debugging
-      _debug: {
-        smartMerge: debugSmartMerge,
-        cacheLookup: debugCacheLookup,
-        step1_originalNutritionBeforeCheck: debugOriginalNutritionBeforeCheck,
-        step2_originalNutritionAfterCheck: debugOriginalNutritionAfterCheck,
-        step3_calculatedCustomNutrition: customizations.customNutrition,
-        step4_baseRecipeNutrition: {
-          calories: baseRecipe.caloriesPerServing,
-          protein: baseRecipe.proteinPerServingG,
-          carbs: baseRecipe.carbsPerServingG,
-          fat: baseRecipe.fatPerServingG,
-          fiber: baseRecipe.fiberPerServingG
-        },
-        step5_recipeFromDraft: {
-          calories: recipe.calories,
-          protein: recipe.protein,
-          carbs: recipe.carbs,
-          fat: recipe.fat,
-          fiber: recipe.fiber
-        },
-        step6_baseRecipeIngredients: {
-          count: baseRecipe.ingredients?.length || 0,
-          sample: baseRecipe.ingredients?.slice(0, 3).map((i: any) => i.name || i.food) || []
-        },
-        step7_customizedRecipeIngredients: {
-          count: customizedRecipe.ingredients?.length || 0,
-          sample: customizedRecipe.ingredients?.slice(0, 3).map((i: any) => i.name || i.food) || []
-        },
-        servingsDebug: {
-          recipeFromDraft: recipe.servings,
-          recipeServingsVariable: typeof recipeServings !== 'undefined' ? recipeServings : 'NOT_DEFINED',
-          finalServings: finalServings,
-          baseRecipe: baseRecipe.servings
-        },
-        nutritionSource: hadStoredCustomNutrition ? 'STORED_FROM_PREVIOUS' : 'FRESHLY_CALCULATED',
-        calculationDebug: (customizations.customNutrition as any)?._calculationDebug || [],
-        modificationsApplied: customizations.modifications,
-        modificationsCount: customizations.modifications?.length || 0,
-        source: customizations.source,
-        expectedResult: `${recipe.calories} + ~2756 = ${(recipe.calories || 0) + 2756}`,
-        allModificationTypes: customizations.modifications?.map((m: any) => m.type) || []
-      }
+      autoCalculated: autoCalculateNutrition && !req.body.customizations.customNutrition
     });
   } catch (error) {
     console.error('❌ Error updating customizations:', error);

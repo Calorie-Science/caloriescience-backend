@@ -425,6 +425,14 @@ export class ManualMealPlanService {
     // Note: params.servings is DEPRECATED - do not use as fallback
     const nutritionServings = params.nutritionServings || 1;
 
+    // Transform ingredients to use 'amount' instead of 'quantity' (custom/manual recipes use 'quantity')
+    const transformedIngredients = (recipe.ingredients || []).map((ing: any) => ({
+      ...ing,
+      amount: ing.amount || ing.quantity || 0,
+      // Remove quantity field if it exists
+      quantity: undefined
+    }));
+
     // Convert recipe to the format used in meal plans (matching automated meal plan format)
     const recipeForPlan = {
       id: recipe.external_recipe_id || recipe.id,
@@ -453,7 +461,7 @@ export class ManualMealPlanService {
         },
         micros: { vitamins: {}, minerals: {} }
       },
-      ingredients: recipe.ingredients || [],
+      ingredients: transformedIngredients,
       instructions: recipe.instructions || [],
       healthLabels: recipe.health_labels || [],
       dietLabels: recipe.diet_labels || [],
@@ -1599,7 +1607,7 @@ export class ManualMealPlanService {
   /**
    * Create a new meal slot with target calories
    */
-  async createMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number }): Promise<void> {
+  async createMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number | null }): Promise<void> {
     console.log('➕ Creating meal slot:', params);
 
     const { data: draft, error: draftError } = await supabase
@@ -1633,7 +1641,7 @@ export class ManualMealPlanService {
       recipes: [],
       customizations: {},
       mealTime: params.mealTime || undefined,
-      targetCalories: params.targetCalories || undefined
+      targetCalories: params.targetCalories === null ? undefined : params.targetCalories
     };
 
     // Update the draft
@@ -1655,7 +1663,7 @@ export class ManualMealPlanService {
   /**
    * Update meal slot properties (mealTime, targetCalories)
    */
-  async updateMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number }): Promise<void> {
+  async updateMealSlot(params: { draftId: string; day: number; mealName: string; mealTime?: string; targetCalories?: number | null }): Promise<void> {
     console.log('✏️ Updating meal slot:', params);
 
     const { data: draft, error: draftError } = await supabase
@@ -1689,7 +1697,8 @@ export class ManualMealPlanService {
       dayPlan.meals[mealKey].mealTime = params.mealTime;
     }
     if (params.targetCalories !== undefined) {
-      dayPlan.meals[mealKey].targetCalories = params.targetCalories;
+      // null means remove the targetCalories field
+      dayPlan.meals[mealKey].targetCalories = params.targetCalories === null ? undefined : params.targetCalories;
     }
 
     // Update the draft

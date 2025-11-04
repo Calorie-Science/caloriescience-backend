@@ -341,7 +341,7 @@ export class RecipeResponseStandardizationService {
         id: ing.id?.toString(),
         name: ing.name || '',
         unit: normalizedUnit,
-        amount: ing.amount || 0,
+        amount: ing.amount || ing.quantity || 0,
         image: imageUrl,
         originalString: ing.originalString || ing.original || '',
         aisle: ing.aisle,

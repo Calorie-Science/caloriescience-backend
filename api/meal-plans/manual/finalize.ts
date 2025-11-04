@@ -69,6 +69,23 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
+    // Check if plan name is already in use by this nutritionist
+    const { data: existingPlan, error: checkError } = await require('../../../lib/supabase').supabase
+      .from('meal_plan_drafts')
+      .select('id, plan_name')
+      .eq('nutritionist_id', user.id)
+      .eq('plan_name', planName)
+      .neq('id', draftId)
+      .single();
+
+    if (existingPlan) {
+      return res.status(409).json({
+        error: 'Duplicate plan name',
+        message: `You already have a meal plan named "${planName}". Please choose a different name.`,
+        existingPlanId: existingPlan.id
+      });
+    }
+
     // Finalize the plan
     await manualMealPlanService.finalize(draftId, planName);
 
