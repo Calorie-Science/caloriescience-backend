@@ -11,7 +11,9 @@ declare global {
       OPENAI_MODEL?: string;
       OPENAI_MAX_TOKENS?: string;
       OPENAI_ASSISTANT_ID?: string;
-      ANTHROPIC_API_KEY: string;
+      CLAUDE_API_KEY_V2: string;
+      GROK_API_KEY?: string;
+      GEMINI_API_KEY?: string;
       
       // JWT
       JWT_SECRET?: string;

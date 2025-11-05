@@ -79,6 +79,10 @@ const mealPlanGenerationSchema = Joi.object({
     .messages({
       'string.pattern.base': 'Start date must be in YYYY-MM-DD format (e.g., 2025-09-30)'
     }),
+  // Top-level dietary preferences (convenience fields)
+  allergies: Joi.array().items(Joi.string()).optional(),
+  cuisineTypes: Joi.array().items(Joi.string()).optional(),
+  preferences: Joi.array().items(Joi.string()).optional(),
   overrideClientGoals: Joi.object({
     eerGoalCalories: Joi.number().min(500).max(5000).required(),
     proteinGoalMin: Joi.number().min(0).max(500).required(),
@@ -222,10 +226,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      const { 
-        clientId, 
-        days = 7, 
-        startDate, 
+      const {
+        clientId,
+        days = 7,
+        startDate,
+        allergies,
+        cuisineTypes,
+        preferences,
         overrideClientGoals,
         overrideMealProgram
       } = validatedData;
@@ -254,10 +261,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // Step 1: Get client data and goals
       const { client, clientGoals, mealProgram, dietaryPreferences } = await getClientData(
-        clientId, 
-        user.id, 
+        clientId,
+        user.id,
         overrideClientGoals,
-        overrideMealProgram
+        overrideMealProgram,
+        allergies,
+        cuisineTypes,
+        preferences
       );
       
       console.log('🔍 Client data fetched:', {
@@ -363,8 +373,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 }
 
 async function getClientData(
-  clientId: string, 
-  nutritionistId: string, 
+  clientId: string,
+  nutritionistId: string,
   overrideClientGoals?: {
     eerGoalCalories: number;
     proteinGoalMin: number;
@@ -385,7 +395,10 @@ async function getClientData(
       targetCalories: number;
       mealType: string;
     }>;
-  }
+  },
+  topLevelAllergies?: string[],
+  topLevelCuisineTypes?: string[],
+  topLevelPreferences?: string[]
 ) {
   // Get client basic info
   const { data: client, error: clientError } = await supabase
@@ -502,11 +515,14 @@ async function getClientData(
     console.log('ℹ️ No client goals found - proceeding without dietary preferences');
   }
 
-  // Apply dietary overrides if provided, but proceed without them if missing
+  // Apply dietary preferences in priority order:
+  // 1. Top-level params (from request body)
+  // 2. overrideClientGoals (for full override scenarios)
+  // 3. Saved client goals from database
   const dietaryPreferences = {
-    allergies: overrideClientGoals?.allergies || clientGoal?.allergies || [],
-    dietaryPreferences: overrideClientGoals?.preferences || clientGoal?.preferences || [],
-    cuisineTypes: overrideClientGoals?.cuisineTypes || clientGoal?.cuisine_types || []
+    allergies: topLevelAllergies || overrideClientGoals?.allergies || clientGoal?.allergies || [],
+    dietaryPreferences: topLevelPreferences || overrideClientGoals?.preferences || clientGoal?.preferences || [],
+    cuisineTypes: topLevelCuisineTypes || overrideClientGoals?.cuisineTypes || clientGoal?.cuisine_types || []
   };
 
   // Apply goal overrides if provided, fall back to nutritional guidelines if missing

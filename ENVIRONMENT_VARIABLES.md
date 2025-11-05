@@ -11,9 +11,12 @@ OPENAI_API_KEY=sk-your-openai-api-key-here
 OPENAI_ASSISTANT_ID=asst_your-custom-assistant-id
 
 # Required for Claude meal plan generation
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-api-key-here
+CLAUDE_API_KEY_V2=sk-ant-your-anthropic-api-key-here
 
-# Required for Gemini meal plan generation
+# Optional: Grok meal plan generation
+GROK_API_KEY=xai-your-grok-api-key-here
+
+# Optional: Gemini meal plan generation
 GEMINI_API_KEY=AIza-your-gemini-api-key-here
 ```
 
@@ -84,12 +87,17 @@ MAX_FILE_SIZE=10485760
    - Create a new API key
    - Add it to `OPENAI_API_KEY`
 
-3. **Get Anthropic API Key**:
+3. **Get Anthropic API Key (Claude)**:
    - Go to https://console.anthropic.com/
    - Create a new API key
-   - Add it to `ANTHROPIC_API_KEY`
+   - Add it to `CLAUDE_API_KEY_V2`
 
-4. **Get Gemini API Key**:
+4. **Get Grok API Key** (Optional):
+   - Go to https://x.ai/
+   - Create a new API key
+   - Add it to `GROK_API_KEY`
+
+5. **Get Gemini API Key** (Optional):
    - Go to https://ai.google.dev/
    - Create a new API key
    - Add it to `GEMINI_API_KEY`

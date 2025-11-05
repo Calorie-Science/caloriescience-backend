@@ -7,7 +7,18 @@ const createDraftSchema = Joi.object({
   clientId: Joi.string().uuid().required(),
   mealProgramId: Joi.string().uuid().optional(),
   planDate: Joi.string().isoDate().required(),
-  durationDays: Joi.number().integer().min(1).max(30).required()
+  durationDays: Joi.number().integer().min(1).max(30).required(),
+  // Optional meal structure configuration
+  mealsPerDay: Joi.number().integer().min(1).max(10).optional(),
+  customMealSlots: Joi.array().items(
+    Joi.object({
+      mealName: Joi.string().required(),
+      mealTime: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+      targetCalories: Joi.number().min(0).optional()
+    })
+  ).optional(),
+  // Optional defaults
+  defaultNutritionServings: Joi.number().min(0.1).max(10).optional()
 });
 
 /**
@@ -47,14 +58,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { clientId, mealProgramId, planDate, durationDays } = value;
+    const { clientId, mealProgramId, planDate, durationDays, mealsPerDay, customMealSlots, defaultNutritionServings } = value;
 
     console.log('📝 Creating manual meal plan draft:', {
       nutritionist: user.email,
       clientId,
       mealProgramId,
       planDate,
-      durationDays
+      durationDays,
+      mealsPerDay,
+      hasCustomMealSlots: !!customMealSlots,
+      defaultNutritionServings
     });
 
     // Create the draft
@@ -63,7 +77,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       nutritionistId: user.id,
       mealProgramId,
       planDate,
-      durationDays
+      durationDays,
+      mealsPerDay,
+      customMealSlots,
+      defaultNutritionServings
     });
 
     // Calculate expiration date

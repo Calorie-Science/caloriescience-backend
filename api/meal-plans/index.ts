@@ -170,14 +170,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           });
         }
 
-        // Get AI model from request body, default to Claude
-        const aiModel = (req.body.aiModel as 'openai' | 'claude' | 'gemini' | 'grok') || 'claude';
+        // Get AI model from request body (support both aiModel and aiProvider for backwards compatibility)
+        // Prefer aiModel if both are provided
+        const aiModel = (req.body.aiModel || req.body.aiProvider || 'claude') as 'openai' | 'claude' | 'gemini' | 'grok';
 
         // Validate AI model
         if (!['openai', 'claude', 'gemini', 'grok'].includes(aiModel)) {
           return res.status(400).json({
             error: 'Invalid AI model',
-            message: 'aiModel must be one of: openai, claude, gemini, grok'
+            message: 'aiModel/aiProvider must be one of: openai, claude, gemini, grok'
           });
         }
 

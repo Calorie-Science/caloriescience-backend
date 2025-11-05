@@ -963,6 +963,19 @@ export class AsyncMealPlanService {
           days,
           startDate: planStartDate,
           clientGoals: {
+            calories: clientGoals.eerGoalCalories || 0,
+            protein: clientGoals.proteinGoalMin || 0,
+            carbs: clientGoals.carbsGoalMin || 0,
+            fat: clientGoals.fatGoalMin || 0,
+            fiber: clientGoals.fiberGoalGrams || 0
+          },
+          mealProgram: mealProgramData,
+          dietaryPreferences: {
+            allergies: clientGoals.allergies || [],
+            cuisineTypes: clientGoals.cuisineTypes || [],
+            dietaryPreferences: clientGoals.preferences || []
+          },
+          overrideClientGoals: {
             eerGoalCalories: clientGoals.eerGoalCalories,
             proteinGoalMin: clientGoals.proteinGoalMin,
             proteinGoalMax: clientGoals.proteinGoalMax,
@@ -971,9 +984,7 @@ export class AsyncMealPlanService {
             fatGoalMin: clientGoals.fatGoalMin,
             fatGoalMax: clientGoals.fatGoalMax,
             fiberGoalGrams: clientGoals.fiberGoalGrams,
-            waterGoalLiters: clientGoals.waterGoalLiters
-          },
-          dietaryPreferences: {
+            waterGoalLiters: clientGoals.waterGoalLiters,
             allergies: clientGoals.allergies || [],
             preferences: clientGoals.preferences || [],
             cuisineTypes: clientGoals.cuisineTypes || []

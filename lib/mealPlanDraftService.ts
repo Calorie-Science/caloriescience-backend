@@ -1349,6 +1349,10 @@ export class MealPlanDraftService {
     // Allow finalization even with no selections (empty meal plan)
     // This gives nutritionists flexibility to finalize partial plans
 
+    // Generate a unique plan name if not provided
+    // Format: "Meal Plan YYYY-MM-DD HH:MM" to ensure uniqueness
+    const defaultPlanName = planName || `Meal Plan ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+
     // Update the draft to finalized status
     // Use existing searchParams.startDate, no need for separate planDate
     const { error } = await supabase
@@ -1356,7 +1360,7 @@ export class MealPlanDraftService {
       .update({
         status: 'finalized',
         suggestions: finalizedSuggestions,
-        plan_name: planName || `Meal Plan ${new Date().toLocaleDateString()}`,
+        plan_name: defaultPlanName,
         finalized_at: new Date().toISOString(),
         expires_at: null, // Remove expiration for finalized plans
         updated_at: new Date().toISOString()

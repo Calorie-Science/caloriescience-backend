@@ -21,11 +21,10 @@ export class ClaudeService {
   private anthropic: Anthropic;
 
   constructor() {
-    // TODO: REMOVE THIS HARDCODED KEY IMMEDIATELY AFTER TESTING!!!
-    // TEMPORARY: Hardcoded for testing environment variable issues
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    // Using CLAUDE_API_KEY_V2 as the environment variable name
+    const apiKey = process.env.CLAUDE_API_KEY_V2;
     if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is required');
+      throw new Error('CLAUDE_API_KEY_V2 environment variable is required');
     }
 
     this.anthropic = new Anthropic({

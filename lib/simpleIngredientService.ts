@@ -209,7 +209,7 @@ const COMMON_INGREDIENTS: SimpleIngredient[] = [
 export class SimpleIngredientService {
   private ingredientsCache: SimpleIngredient[] | null = null;
   private cacheTimestamp: number = 0;
-  private cacheTTL: number = 5 * 60 * 1000; // 5 minutes
+  private cacheTTL: number = 60 * 1000; // 1 minute - short TTL for production to show new ingredients quickly
 
   /**
    * Get all ingredients from database with caching
@@ -282,9 +282,9 @@ export class SimpleIngredientService {
    * @param categoryFilter - Optional category filter
    */
   async searchIngredients(
-    query: string, 
-    maxResults: number = 50, 
-    allergenFilters?: string[], 
+    query: string,
+    maxResults: number = 50,
+    allergenFilters?: string[],
     categoryFilter?: string
   ): Promise<any[]> {
     if (!query || query.trim().length < 2) {
@@ -292,70 +292,103 @@ export class SimpleIngredientService {
     }
 
     const searchTerm = query.trim().toLowerCase();
-    
-    // Get ingredients from database (or cache)
-    const allIngredients = await this.getIngredients();
-    
-    // Check if search term matches a category keyword
-    const categoryExpansion = this.getCategoryExpansion(searchTerm);
-    
-    // Find matching ingredients
-    let matches: SimpleIngredient[];
-    
-    if (categoryExpansion) {
-      // Expand search to include all items in matching categories
-      console.log(`🔍 Expanding search "${searchTerm}" to categories: ${categoryExpansion.join(', ')}`);
-      
-      // For fish/seafood searches, include all protein items that are fish
-      const isFishSearch = searchTerm === 'fish' || searchTerm === 'seafood';
-      
-      matches = allIngredients.filter(ing => {
-        // Match by category OR by name
-        const matchesCategory = categoryExpansion.includes(ing.category);
-        const matchesName = ing.name.toLowerCase().includes(searchTerm);
-        
-        // For fish searches, check if ingredient is a type of fish
-        if (isFishSearch && ing.category === 'protein') {
-          const isFishType = this.isFishOrSeafood(ing.name);
-          if (isFishType) return true;
-        }
-        
-        return matchesCategory || matchesName;
-      });
-      
-      // Sort: prioritize exact name matches, then fish types, then others
-      matches.sort((a, b) => {
-        const aNameMatch = a.name.toLowerCase().includes(searchTerm);
-        const bNameMatch = b.name.toLowerCase().includes(searchTerm);
-        if (aNameMatch && !bNameMatch) return -1;
-        if (!aNameMatch && bNameMatch) return 1;
-        return 0;
-      });
+
+    console.log(`🔍 Searching database for: "${searchTerm}"`);
+
+    // Check if search term matches a category name
+    const categoryMap: { [key: string]: string } = {
+      'vegetable': 'vegetable',
+      'vegetables': 'vegetable',
+      'veggie': 'vegetable',
+      'veggies': 'vegetable',
+      'fruit': 'fruit',
+      'fruits': 'fruit',
+      'protein': 'protein',
+      'proteins': 'protein',
+      'meat': 'protein',
+      'meats': 'protein',
+      'grain': 'grain',
+      'grains': 'grain',
+      'dairy': 'dairy',
+      'nut': 'nuts',
+      'nuts': 'nuts',
+      'legume': 'legume',
+      'legumes': 'legume',
+      'bean': 'legume',
+      'beans': 'legume'
+    };
+
+    const categoryMatch = categoryMap[searchTerm];
+
+    // Build query to search database directly (no caching)
+    let dbQuery = supabase
+      .from('simple_ingredients')
+      .select('*')
+      .eq('is_active', true);
+
+    if (categoryMatch) {
+      // If search term is a category, search by category
+      console.log(`🔍 Category search detected: "${searchTerm}" -> category: "${categoryMatch}"`);
+      dbQuery = dbQuery.eq('category', categoryMatch);
+    } else if (categoryFilter) {
+      // If explicit category filter provided, use it and search name
+      dbQuery = dbQuery.eq('category', categoryFilter).ilike('name', `%${searchTerm}%`);
     } else {
-      // Regular name-based search
-      matches = allIngredients.filter(ing => 
-        ing.name.toLowerCase().includes(searchTerm) || searchTerm.includes(ing.name.toLowerCase())
-      );
+      // Regular name search OR category match
+      // Use OR condition: name ILIKE '%term%' OR category ILIKE '%term%'
+      dbQuery = dbQuery.or(`name.ilike.%${searchTerm}%,category.ilike.%${searchTerm}%`);
     }
 
-    // Filter by category if provided
-    if (categoryFilter) {
-      matches = matches.filter(ing => ing.category === categoryFilter);
+    // Order by name and limit
+    dbQuery = dbQuery.order('name').limit(maxResults);
+
+    const { data, error } = await dbQuery;
+
+    if (error) {
+      console.error('❌ Error searching ingredients:', error);
+      return [];
     }
 
-    // Filter by allergens if provided
+    if (!data || data.length === 0) {
+      console.log(`📭 No ingredients found for: "${searchTerm}"`);
+      return [];
+    }
+
+    console.log(`✅ Found ${data.length} ingredients in database`);
+
+    // Map database format to SimpleIngredient interface
+    let matches: SimpleIngredient[] = data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      servingSize: { quantity: row.serving_quantity, unit: row.serving_unit },
+      calories: row.calories,
+      protein: row.protein_g,
+      carbs: row.carbs_g,
+      fat: row.fat_g,
+      fiber: row.fiber_g,
+      sugar: row.sugar_g,
+      sodium: row.sodium_mg,
+      category: row.category,
+      vitaminC: row.vitamin_c_mg,
+      vitaminA: row.vitamin_a_mcg,
+      calcium: row.calcium_mg,
+      iron: row.iron_mg,
+      potassium: row.potassium_mg,
+      healthLabels: row.health_labels || [],
+      dietLabels: row.diet_labels || [],
+      allergens: row.allergens || []
+    }));
+
+    // Filter by allergens if provided (post-processing)
     if (allergenFilters && allergenFilters.length > 0) {
       matches = matches.filter(ing => {
         const ingredientAllergens = ing.allergens || this.getAllergens(ing.name);
         const healthLabels = ing.healthLabels || this.getHealthLabels(ing.category, ing.name);
-        
+
         // Check for allergen conflicts
         return !this.hasAllergenConflict(ingredientAllergens, healthLabels, allergenFilters);
       });
     }
-
-    // Limit results
-    matches = matches.slice(0, maxResults);
 
     // Return formatted ingredient data (matching recipe API format)
     return matches.map(ing => {
@@ -709,103 +742,6 @@ export class SimpleIngredientService {
     }
     
     return labels;
-  }
-
-  /**
-   * Get category expansion for generic search terms
-   * Returns categories to include when user searches for generic terms
-   */
-  private getCategoryExpansion(searchTerm: string): string[] | null {
-    const expansionMap: { [key: string]: string[] } = {
-      // Fish/Seafood
-      'fish': ['protein'],
-      'seafood': ['protein'],
-      
-      // Vegetables
-      'vegetable': ['vegetable'],
-      'vegetables': ['vegetable'],
-      'veggie': ['vegetable'],
-      'veggies': ['vegetable'],
-      
-      // Fruits
-      'fruit': ['fruit'],
-      'fruits': ['fruit'],
-      
-      // Proteins
-      'protein': ['protein'],
-      'proteins': ['protein'],
-      'meat': ['protein'],
-      'meats': ['protein'],
-      
-      // Grains
-      'grain': ['grain'],
-      'grains': ['grain'],
-      'rice': ['grain'],
-      
-      // Dairy
-      'dairy': ['dairy'],
-      'milk': ['dairy'],
-      
-      // Nuts
-      'nut': ['nuts'],
-      'nuts': ['nuts'],
-      
-      // Legumes
-      'legume': ['legume'],
-      'legumes': ['legume'],
-      'bean': ['legume'],
-      'beans': ['legume'],
-      
-      // Herbs
-      'herb': ['herb'],
-      'herbs': ['herb'],
-      
-      // Spices
-      'spice': ['spice'],
-      'spices': ['spice']
-    };
-    
-    return expansionMap[searchTerm] || null;
-  }
-  
-  /**
-   * Get keywords associated with a category for matching
-   */
-  private getCategoryKeywords(category: string): string[] {
-    const keywordMap: { [key: string]: string[] } = {
-      'protein': ['fish', 'seafood', 'meat', 'chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'salmon', 'tuna', 'tilapia', 'shrimp', 'prawn', 'crab', 'tofu', 'tempeh', 'seitan', 'egg', 'paneer'],
-      'vegetable': ['vegetable', 'veggie', 'greens'],
-      'fruit': ['fruit'],
-      'grain': ['grain', 'rice', 'wheat', 'oat', 'quinoa', 'barley'],
-      'dairy': ['milk', 'cheese', 'yogurt', 'butter'],
-      'nuts': ['nut', 'almond', 'walnut', 'cashew', 'peanut'],
-      'legume': ['bean', 'lentil', 'chickpea', 'pea'],
-      'herb': ['herb'],
-      'spice': ['spice']
-    };
-    
-    return keywordMap[category] || [];
-  }
-  
-  /**
-   * Check if an ingredient name is a fish or seafood type
-   */
-  private isFishOrSeafood(name: string): boolean {
-    const fishTypes = [
-      'salmon', 'tuna', 'tilapia', 'cod', 'bass', 'trout', 'halibut', 
-      'mackerel', 'sardine', 'anchovy', 'catfish', 'flounder', 'haddock',
-      'mahi', 'snapper', 'swordfish', 'pollock'
-    ];
-    
-    const seafoodTypes = [
-      'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'oyster', 
-      'mussel', 'clam', 'squid', 'octopus', 'crayfish'
-    ];
-    
-    const allAquatic = [...fishTypes, ...seafoodTypes];
-    const lowerName = name.toLowerCase();
-    
-    return allAquatic.some(type => lowerName.includes(type));
   }
 
   private getAllergens(name: string): string[] {

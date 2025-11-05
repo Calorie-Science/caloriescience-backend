@@ -189,7 +189,13 @@ OPENAI_API_KEY=sk-your-openai-api-key-here
 OPENAI_ASSISTANT_ID=asst_your-custom-assistant-id
 
 # Required for Claude
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-api-key-here
+CLAUDE_API_KEY_V2=sk-ant-your-anthropic-api-key-here
+
+# Optional for Grok
+GROK_API_KEY=xai-your-grok-api-key-here
+
+# Optional for Gemini
+GEMINI_API_KEY=AIza-your-gemini-api-key-here
 ```
 
 ## AI Model Differences

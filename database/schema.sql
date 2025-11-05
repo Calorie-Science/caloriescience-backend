@@ -600,7 +600,7 @@ CREATE TABLE async_meal_plans (
   
   -- Constraints
   CHECK (status IN ('pending', 'completed', 'failed')),
-  CHECK (ai_model IN ('openai', 'claude', 'gemini')),
+  CHECK (ai_model IN ('openai', 'claude', 'gemini', 'grok')),
   UNIQUE (thread_id, run_id, ai_model)
 );
 

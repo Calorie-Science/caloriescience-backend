@@ -58,7 +58,7 @@ export class GrokService {
             'Authorization': `Bearer ${this.apiKey}`
           },
           body: JSON.stringify({
-            model: 'grok-beta',
+            model: 'grok-3',
             messages: [
               {
                 role: 'system',

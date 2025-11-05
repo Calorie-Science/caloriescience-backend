@@ -14,6 +14,10 @@ export interface CreateManualDraftParams {
   mealProgramId?: string;
   planDate: string;
   durationDays: number;
+  // Optional configuration
+  mealsPerDay?: number;
+  customMealSlots?: MealSlot[];
+  defaultNutritionServings?: number;
 }
 
 export interface AddRecipeParams {
@@ -100,44 +104,82 @@ export class ManualMealPlanService {
       throw new Error('Duration must be between 1 and 30 days');
     }
 
-    // Fetch meal program if provided (as template)
+    // Determine meal slots to use (priority: customMealSlots > explicit mealProgramId > client's active meal program > mealsPerDay > defaults)
     let mealSlots: MealSlot[] = [];
-    if (params.mealProgramId) {
-      const { data: mealProgram, error: programError } = await supabase
-        .from('meal_programs')
-        .select(`
-          id,
-          client_id,
-          meal_program_meals(
-            meal_name,
-            meal_time,
-            target_calories,
-            meal_order
-          )
-        `)
-        .eq('id', params.mealProgramId)
-        .single();
+    let usedMealProgramId: string | null = null;
 
-      if (programError || !mealProgram) {
-        throw new Error('Meal program not found');
+    if (params.customMealSlots && params.customMealSlots.length > 0) {
+      // Use custom meal slots provided by the UI
+      mealSlots = params.customMealSlots;
+      console.log(`✅ Using ${mealSlots.length} custom meal slots from request`);
+    } else {
+      // Determine which meal program to use
+      let mealProgramIdToUse = params.mealProgramId;
+
+      if (!mealProgramIdToUse) {
+        // No explicit mealProgramId provided - try to find client's active meal program
+        console.log(`🔍 No meal program specified, checking for client's active meal program...`);
+        const { data: activeMealProgram } = await supabase
+          .from('meal_programs')
+          .select('id')
+          .eq('client_id', params.clientId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (activeMealProgram) {
+          mealProgramIdToUse = activeMealProgram.id;
+          console.log(`✅ Found active meal program: ${mealProgramIdToUse}`);
+        } else {
+          console.log(`ℹ️ No active meal program found for client`);
+        }
       }
 
-      if (mealProgram.client_id !== params.clientId) {
-        throw new Error('Meal program does not belong to this client');
+      // Fetch and use meal program if we have an ID
+      if (mealProgramIdToUse) {
+        const { data: mealProgram, error: programError } = await supabase
+          .from('meal_programs')
+          .select(`
+            id,
+            client_id,
+            meal_program_meals(
+              meal_name,
+              meal_time,
+              target_calories,
+              meal_order
+            )
+          `)
+          .eq('id', mealProgramIdToUse)
+          .single();
+
+        if (programError || !mealProgram) {
+          console.warn(`⚠️ Meal program ${mealProgramIdToUse} not found, will use defaults`);
+        } else if (mealProgram.client_id !== params.clientId) {
+          console.warn(`⚠️ Meal program ${mealProgramIdToUse} does not belong to this client, will use defaults`);
+        } else {
+          // Extract meal slots from meal program
+          const meals = (mealProgram as any).meal_program_meals || [];
+          mealSlots = meals
+            .sort((a: any, b: any) => a.meal_order - b.meal_order)
+            .map((meal: any) => ({
+              mealName: meal.meal_name,
+              mealTime: meal.meal_time,
+              targetCalories: meal.target_calories
+            }));
+
+          usedMealProgramId = mealProgramIdToUse;
+          console.log(`✅ Using meal program template with ${mealSlots.length} meal slots`);
+        }
       }
 
-      // Extract meal slots from meal program
-      const meals = (mealProgram as any).meal_program_meals || [];
-      mealSlots = meals
-        .sort((a: any, b: any) => a.meal_order - b.meal_order)
-        .map((meal: any) => ({
-          mealName: meal.meal_name,
-          mealTime: meal.meal_time,
-          targetCalories: meal.target_calories
-        }));
-
-      console.log(`✅ Using meal program template with ${mealSlots.length} meal slots`);
+      // If no meal program found/used, try mealsPerDay parameter
+      if (mealSlots.length === 0 && params.mealsPerDay) {
+        mealSlots = this.generateSimpleMealSlots(params.mealsPerDay);
+        console.log(`✅ Generated ${mealSlots.length} default meal slots for ${params.mealsPerDay} meals/day`);
+      }
     }
+    // If none provided, generateMealStructure will use default 4-meal structure
 
     // Generate draft structure
     const suggestions = this.generateMealStructure(
@@ -150,13 +192,23 @@ export class ManualMealPlanService {
     const timestamp = Date.now();
     const draftId = `manual-${params.clientId}-${timestamp}`;
 
+    // Generate unique plan name to avoid constraint violation
+    // Format: "Manual Plan - YYYY-MM-DD HH:MM"
+    const planDate = new Date(params.planDate);
+    const now = new Date();
+    const dateStr = planDate.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+    const defaultPlanName = `Manual Plan - ${dateStr} ${timeStr}`;
+
     // Create search params
     const searchParams = {
       creation_method: 'manual',
       client_id: params.clientId,
       plan_date: params.planDate,
       duration_days: params.durationDays,
-      meal_program_template: params.mealProgramId ? true : false
+      meal_program_template: usedMealProgramId ? true : false,
+      meal_program_id: usedMealProgramId || undefined,
+      meal_program_auto_detected: usedMealProgramId && !params.mealProgramId ? true : false
     };
 
     // Calculate expiration (7 days from now)
@@ -172,6 +224,7 @@ export class ManualMealPlanService {
         nutritionist_id: params.nutritionistId,
         status: 'draft',
         creation_method: 'manual',
+        plan_name: defaultPlanName,
         search_params: searchParams,
         suggestions: suggestions,
         plan_date: params.planDate,
@@ -1138,6 +1191,23 @@ export class ManualMealPlanService {
       .eq('id', recipeId);
 
     return recipe;
+  }
+
+  /**
+   * Generate simple meal slots based on number of meals per day
+   */
+  private generateSimpleMealSlots(mealsPerDay: number): MealSlot[] {
+    const mealTemplates = [
+      { mealName: 'breakfast', mealTime: '08:00', targetCalories: 500 },
+      { mealName: 'snack-1', mealTime: '10:30', targetCalories: 150 },
+      { mealName: 'lunch', mealTime: '12:30', targetCalories: 600 },
+      { mealName: 'snack-2', mealTime: '15:00', targetCalories: 150 },
+      { mealName: 'dinner', mealTime: '19:00', targetCalories: 600 },
+      { mealName: 'snack-3', mealTime: '21:00', targetCalories: 100 }
+    ];
+
+    // Return the requested number of meals
+    return mealTemplates.slice(0, mealsPerDay);
   }
 
   /**
