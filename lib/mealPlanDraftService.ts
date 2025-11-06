@@ -265,6 +265,10 @@ export class MealPlanDraftService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
+    // Generate a unique plan name for the draft
+    // Format: "Draft YYYY-MM-DD HH:MM:SS" to ensure uniqueness across multiple drafts
+    const uniquePlanName = `Draft ${now.toISOString().slice(0, 19).replace('T', ' ')}`;
+
     const draft: MealPlanDraft = {
       id: draftId,
       clientId,
@@ -285,6 +289,7 @@ export class MealPlanDraftService {
         client_id: clientId,
         nutritionist_id: nutritionistId,
         status: 'draft',
+        plan_name: uniquePlanName,
         search_params: searchParams,
         suggestions: draft.suggestions,
         created_at: now.toISOString(),
@@ -496,7 +501,7 @@ export class MealPlanDraftService {
 
       // If not in cache or incomplete, fetch from API
       console.log(`🔄 Fetching recipe from ${source} API`);
-      const recipeDetails = await multiProviderService.getRecipeDetails(recipeId);
+      const recipeDetails = await multiProviderService.getRecipeDetails(recipeId, source);
       
       if (recipeDetails) {
         // Normalize ingredients and instructions before storing

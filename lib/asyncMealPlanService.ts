@@ -939,10 +939,9 @@ export class AsyncMealPlanService {
       } : null;
 
       // Generate unique plan name with timestamp to avoid duplicates
+      // Format: "AI Meal Plan - YYYY-MM-DD HH:MM:SS" for guaranteed uniqueness
       const now = new Date();
-      const dateStr = now.toLocaleDateString();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const uniquePlanName = `AI Meal Plan - ${dateStr} ${timeStr}`;
+      const uniquePlanName = `AI Meal Plan - ${now.toISOString().slice(0, 19).replace('T', ' ')}`;
 
       // Return the Claude response with top-level wrapper fields
       return {

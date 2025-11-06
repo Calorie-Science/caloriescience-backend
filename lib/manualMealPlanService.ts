@@ -193,11 +193,11 @@ export class ManualMealPlanService {
     const draftId = `manual-${params.clientId}-${timestamp}`;
 
     // Generate unique plan name to avoid constraint violation
-    // Format: "Manual Plan - YYYY-MM-DD HH:MM"
+    // Format: "Manual Plan - YYYY-MM-DD HH:MM:SS" for guaranteed uniqueness
     const planDate = new Date(params.planDate);
     const now = new Date();
     const dateStr = planDate.toISOString().split('T')[0];
-    const timeStr = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+    const timeStr = now.toISOString().split('T')[1].substring(0, 8); // HH:MM:SS
     const defaultPlanName = `Manual Plan - ${dateStr} ${timeStr}`;
 
     // Create search params
@@ -271,10 +271,25 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Handle simple ingredient recipes (check isSimpleIngredient flag)
+    // Handle simple ingredient recipes (check isSimpleIngredient flag OR auto-detect)
     let recipe: any;
-    const isSimpleIngredient = params.isSimpleIngredient === true;
-    
+    let isSimpleIngredient = params.isSimpleIngredient === true;
+
+    // Auto-detect simple ingredients if not explicitly flagged
+    if (!isSimpleIngredient) {
+      // Check if this UUID exists in simple_ingredients table
+      const { data: ingredientCheck } = await supabase
+        .from('simple_ingredients')
+        .select('id')
+        .eq('id', params.recipeId)
+        .single();
+
+      if (ingredientCheck) {
+        console.log(`📦 Auto-detected simple ingredient: ${params.recipeId}`);
+        isSimpleIngredient = true;
+      }
+    }
+
     if (isSimpleIngredient) {
       // Get simple ingredient recipe by UUID from database
       recipe = await this.getIngredientRecipe(params.recipeId);
@@ -358,10 +373,25 @@ export class ManualMealPlanService {
       throw new Error(`Day must be between 1 and ${draft.plan_duration_days}`);
     }
 
-    // Handle simple ingredient recipes (check isSimpleIngredient flag)
+    // Handle simple ingredient recipes (check isSimpleIngredient flag OR auto-detect)
     let recipe: any;
-    const isSimpleIngredient = params.isSimpleIngredient === true;
-    
+    let isSimpleIngredient = params.isSimpleIngredient === true;
+
+    // Auto-detect simple ingredients if not explicitly flagged
+    if (!isSimpleIngredient) {
+      // Check if this UUID exists in simple_ingredients table
+      const { data: ingredientCheck } = await supabase
+        .from('simple_ingredients')
+        .select('id')
+        .eq('id', params.recipeId)
+        .single();
+
+      if (ingredientCheck) {
+        console.log(`📦 Auto-detected simple ingredient: ${params.recipeId}`);
+        isSimpleIngredient = true;
+      }
+    }
+
     if (isSimpleIngredient) {
       // Get simple ingredient recipe by UUID from database
       recipe = await this.getIngredientRecipe(params.recipeId);
@@ -974,8 +1004,14 @@ export class ManualMealPlanService {
       clientGoals: {
         calories: clientGoal?.eer_goal_calories || nutritionReq?.eer_calories || 0,
         protein: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+        proteinMin: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+        proteinMax: clientGoal?.protein_goal_max || nutritionReq?.protein_grams || 0,
         carbs: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+        carbsMin: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+        carbsMax: clientGoal?.carbs_goal_max || nutritionReq?.carbs_grams || 0,
         fat: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+        fatMin: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+        fatMax: clientGoal?.fat_goal_max || nutritionReq?.fat_grams || 0,
         fiber: clientGoal?.fiber_goal_grams || nutritionReq?.fiber_grams || 0
       },
       dietaryPreferences: {
@@ -1022,10 +1058,28 @@ export class ManualMealPlanService {
   private async fetchAndCacheRecipe(recipeId: string, provider: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
     console.log(`🔍 Fetching recipe ${recipeId} from ${provider}`);
 
+    // Check if recipeId is a UUID (our internal cache ID) - if so, get from cache instead
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
+
+    if (isUUID) {
+      console.log(`📦 Recipe ID is a UUID - attempting to get from cache instead of API`);
+      // This is our internal cache ID, not an external recipe ID
+      // Try to get from cache first
+      try {
+        const cachedRecipe = await this.getRecipeFromCache(recipeId, provider);
+        if (cachedRecipe) {
+          console.log(`✅ Found recipe in cache by UUID: ${recipeId}`);
+          return cachedRecipe;
+        }
+      } catch (error) {
+        console.warn(`⚠️ UUID lookup failed, will try API: ${error}`);
+      }
+    }
+
     // Get the full recipe details from provider
-    // Note: getRecipeDetails auto-detects provider from ID format
-    const recipe = await recipeSearchService.getRecipeDetails(recipeId);
-    
+    // Pass provider explicitly to avoid auto-detection issues (e.g., UUID Spoonacular recipes)
+    const recipe = await recipeSearchService.getRecipeDetails(recipeId, provider);
+
     if (!recipe) {
       throw new Error('Recipe not found');
     }
@@ -1162,7 +1216,7 @@ export class ManualMealPlanService {
         // originalApiResponse is empty, fetch fresh data from API
         console.log('  ⚠️ originalApiResponse is empty, fetching fresh health labels from Spoonacular API...');
         try {
-          const freshRecipeDetails = await recipeSearchService.getRecipeDetails(recipe.external_recipe_id);
+          const freshRecipeDetails = await recipeSearchService.getRecipeDetails(recipe.external_recipe_id, provider);
           if (freshRecipeDetails && freshRecipeDetails.healthLabels) {
             recipe.health_labels = freshRecipeDetails.healthLabels;
             console.log(`  ✅ Fetched ${recipe.health_labels.length} health labels from fresh API call:`, recipe.health_labels);

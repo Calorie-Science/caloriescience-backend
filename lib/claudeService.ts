@@ -56,7 +56,7 @@ export class ClaudeService {
 
         const stream = await this.anthropic.messages.stream({
           model: 'claude-opus-4-1-20250805',
-          max_tokens: 32000, // Increased to 32K to handle multi-day plans with full nutrition data
+          max_tokens: 64000, // Increased to 32K to handle multi-day plans with full nutrition data
           temperature: 0.7,
           messages: [
             {

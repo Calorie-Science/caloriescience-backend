@@ -70,7 +70,7 @@ export class GrokService {
               }
             ],
             temperature: 0.7,
-            max_tokens: 32000,
+            max_tokens: 100000,
             stream: false
           })
         });

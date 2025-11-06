@@ -1,0 +1,736 @@
+{
+  "metadata": {
+    "source": "USDA FoodData Central + FNDDS 2021-2023",
+    "description": "Comprehensive USDA-compliant food categories with standard portion sizes",
+    "generated_date": "2025-11-06",
+    "references": [
+      "USDA FoodData Central API",
+      "FNDDS 2021-2023 (Food and Nutrient Database for Dietary Studies)",
+      "USDA Standard Reference Legacy",
+      "USDA Measurement Conversion Tables"
+    ],
+    "total_categories": 50,
+    "compliance": "USDA-compliant portion sizes and measurement units"
+  },
+  "standard_usda_units": {
+    "weight": [
+      "g",
+      "gram",
+      "grams",
+      "kg",
+      "kilogram",
+      "oz",
+      "ounce",
+      "ounces",
+      "lb",
+      "pound",
+      "pounds",
+      "mg",
+      "milligram"
+    ],
+    "volume": [
+      "ml",
+      "milliliter",
+      "milliliters",
+      "liter",
+      "liters",
+      "cup",
+      "cups",
+      "fl oz",
+      "fluid ounce",
+      "fluid ounces",
+      "tbsp",
+      "tablespoon",
+      "tablespoons",
+      "tsp",
+      "teaspoon",
+      "teaspoons",
+      "pint",
+      "pints",
+      "quart",
+      "quarts",
+      "gallon",
+      "gallons"
+    ],
+    "count_and_descriptive": [
+      "piece",
+      "pieces",
+      "slice",
+      "slices",
+      "serving",
+      "servings",
+      "whole",
+      "half",
+      "quarter",
+      "large",
+      "medium",
+      "small",
+      "extra large",
+      "fillet",
+      "breast",
+      "thigh",
+      "drumstick",
+      "wing",
+      "clove",
+      "head",
+      "stalk",
+      "sprig",
+      "leaf",
+      "leaves"
+    ],
+    "container_and_package": [
+      "can",
+      "bottle",
+      "container",
+      "package",
+      "bag",
+      "box",
+      "carton",
+      "jar"
+    ],
+    "serving_descriptors": [
+      "bowl",
+      "glass",
+      "scoop",
+      "handful",
+      "pat",
+      "stick",
+      "cube",
+      "wedge",
+      "strip",
+      "round"
+    ]
+  },
+  "food_categories": {
+    "Beverages": {
+      "description": "All drinks including coffee, tea, juice, soda, alcohol",
+      "common_portions": [
+        "cup",
+        "fl oz",
+        "ml",
+        "liter",
+        "glass",
+        "bottle",
+        "can",
+        "serving"
+      ]
+    },
+    "Dairy and Egg Products": {
+      "description": "Milk, cheese, yogurt, eggs, cream, butter",
+      "common_portions": [
+        "cup",
+        "fl oz",
+        "ml",
+        "g",
+        "oz",
+        "tbsp",
+        "tsp",
+        "slice",
+        "piece",
+        "serving",
+        "large",
+        "medium",
+        "small",
+        "stick",
+        "pat"
+      ]
+    },
+    "Spices and Herbs": {
+      "description": "Seasonings, dried herbs, salt, pepper",
+      "common_portions": [
+        "tsp",
+        "tbsp",
+        "g",
+        "oz",
+        "pinch",
+        "dash",
+        "sprig",
+        "leaf",
+        "leaves"
+      ]
+    },
+    "Fats and Oils": {
+      "description": "Cooking oils, butter, margarine, lard",
+      "common_portions": [
+        "tbsp",
+        "tsp",
+        "cup",
+        "ml",
+        "g",
+        "oz",
+        "serving",
+        "pat",
+        "stick"
+      ]
+    },
+    "Poultry Products": {
+      "description": "Chicken, turkey, duck, and other poultry",
+      "common_portions": [
+        "g",
+        "oz",
+        "lb",
+        "piece",
+        "breast",
+        "thigh",
+        "drumstick",
+        "wing",
+        "whole",
+        "half",
+        "serving",
+        "fillet"
+      ]
+    },
+    "Soups, Sauces, and Gravies": {
+      "description": "All types of soups, sauces, and gravies",
+      "common_portions": [
+        "cup",
+        "bowl",
+        "fl oz",
+        "ml",
+        "tbsp",
+        "tsp",
+        "g",
+        "serving",
+        "can",
+        "container"
+      ]
+    },
+    "Sausages and Luncheon Meats": {
+      "description": "Deli meats, hot dogs, sausages, bacon",
+      "common_portions": [
+        "g",
+        "oz",
+        "slice",
+        "slices",
+        "piece",
+        "link",
+        "patty",
+        "serving",
+        "package"
+      ]
+    },
+    "Breakfast Cereals": {
+      "description": "Ready-to-eat and cooked cereals",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "bowl"
+      ]
+    },
+    "Fruits and Fruit Juices": {
+      "description": "Fresh, frozen, canned, and dried fruits",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "piece",
+        "whole",
+        "slice",
+        "large",
+        "medium",
+        "small",
+        "serving",
+        "wedge",
+        "half"
+      ]
+    },
+    "Pork Products": {
+      "description": "All pork products including chops, roasts, ham",
+      "common_portions": [
+        "g",
+        "oz",
+        "lb",
+        "piece",
+        "slice",
+        "chop",
+        "serving"
+      ]
+    },
+    "Vegetables and Vegetable Products": {
+      "description": "Fresh, frozen, canned, and dried vegetables",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "piece",
+        "whole",
+        "slice",
+        "large",
+        "medium",
+        "small",
+        "serving",
+        "stalk",
+        "head",
+        "clove",
+        "leaf",
+        "leaves"
+      ]
+    },
+    "Nut and Seed Products": {
+      "description": "Nuts, seeds, and nut butters",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "tbsp",
+        "tsp",
+        "handful",
+        "piece",
+        "serving"
+      ]
+    },
+    "Beef Products": {
+      "description": "All beef cuts and ground beef",
+      "common_portions": [
+        "g",
+        "oz",
+        "lb",
+        "piece",
+        "slice",
+        "patty",
+        "serving",
+        "steak"
+      ]
+    },
+    "Finfish and Shellfish Products": {
+      "description": "Fish, shrimp, crab, lobster, and other seafood",
+      "common_portions": [
+        "g",
+        "oz",
+        "lb",
+        "piece",
+        "fillet",
+        "whole",
+        "large",
+        "medium",
+        "small",
+        "serving"
+      ]
+    },
+    "Legumes and Legume Products": {
+      "description": "Beans, lentils, peas, tofu, tempeh",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "tbsp",
+        "serving",
+        "piece",
+        "can"
+      ]
+    },
+    "Lamb, Veal, and Game Products": {
+      "description": "Lamb, veal, venison, and other game meats",
+      "common_portions": [
+        "g",
+        "oz",
+        "lb",
+        "piece",
+        "chop",
+        "serving"
+      ]
+    },
+    "Baked Products": {
+      "description": "Bread, rolls, muffins, cakes, cookies, pastries",
+      "common_portions": [
+        "slice",
+        "piece",
+        "g",
+        "oz",
+        "serving",
+        "roll",
+        "muffin",
+        "cookie",
+        "whole"
+      ]
+    },
+    "Sweets": {
+      "description": "Candy, chocolate, sugar, honey, syrups",
+      "common_portions": [
+        "piece",
+        "g",
+        "oz",
+        "tbsp",
+        "tsp",
+        "cup",
+        "serving",
+        "bar",
+        "square"
+      ]
+    },
+    "Cereal Grains and Pasta": {
+      "description": "Rice, pasta, quinoa, and other grains",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "piece"
+      ]
+    },
+    "Fast Foods": {
+      "description": "Restaurant and fast food items",
+      "common_portions": [
+        "piece",
+        "serving",
+        "g",
+        "oz",
+        "sandwich",
+        "burger",
+        "slice",
+        "order"
+      ]
+    },
+    "Snacks": {
+      "description": "Chips, crackers, popcorn, pretzels",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "piece",
+        "serving",
+        "bag",
+        "handful"
+      ]
+    },
+    "Meals, Entrees, and Side Dishes": {
+      "description": "Prepared meals and frozen dinners",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "piece",
+        "container",
+        "package",
+        "tray"
+      ]
+    },
+    "Baby Foods": {
+      "description": "Infant formulas and baby food products",
+      "common_portions": [
+        "jar",
+        "container",
+        "fl oz",
+        "ml",
+        "tbsp",
+        "serving",
+        "pouch"
+      ]
+    },
+    "Restaurant Foods": {
+      "description": "Full-service restaurant dishes",
+      "common_portions": [
+        "serving",
+        "piece",
+        "g",
+        "oz",
+        "cup",
+        "bowl",
+        "plate"
+      ]
+    },
+    "Salad Dressings and Condiments": {
+      "description": "Ketchup, mustard, mayo, salad dressings",
+      "common_portions": [
+        "tbsp",
+        "tsp",
+        "cup",
+        "ml",
+        "g",
+        "oz",
+        "serving",
+        "packet"
+      ]
+    },
+    "Bread and Grain Products": {
+      "description": "Tortillas, bagels, English muffins, pita",
+      "common_portions": [
+        "piece",
+        "slice",
+        "g",
+        "oz",
+        "serving",
+        "whole"
+      ]
+    },
+    "Pizza": {
+      "description": "All types of pizza",
+      "common_portions": [
+        "slice",
+        "piece",
+        "g",
+        "oz",
+        "serving",
+        "whole",
+        "half"
+      ]
+    },
+    "Sandwiches and Burgers": {
+      "description": "All sandwich types",
+      "common_portions": [
+        "piece",
+        "whole",
+        "half",
+        "g",
+        "oz",
+        "serving"
+      ]
+    },
+    "Frozen Desserts": {
+      "description": "Ice cream, frozen yogurt, popsicles",
+      "common_portions": [
+        "cup",
+        "scoop",
+        "g",
+        "oz",
+        "serving",
+        "piece",
+        "bar",
+        "container"
+      ]
+    },
+    "Alcoholic Beverages": {
+      "description": "Beer, wine, spirits, cocktails",
+      "common_portions": [
+        "fl oz",
+        "ml",
+        "cup",
+        "glass",
+        "bottle",
+        "can",
+        "shot",
+        "serving"
+      ]
+    },
+    "Non-Alcoholic Beverages": {
+      "description": "Soda, juice, coffee, tea, water",
+      "common_portions": [
+        "cup",
+        "fl oz",
+        "ml",
+        "liter",
+        "glass",
+        "bottle",
+        "can",
+        "serving"
+      ]
+    },
+    "Breakfast Items": {
+      "description": "Pancakes, waffles, french toast, breakfast sandwiches",
+      "common_portions": [
+        "piece",
+        "serving",
+        "g",
+        "oz",
+        "stack"
+      ]
+    },
+    "Salads": {
+      "description": "All types of salads",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "bowl",
+        "plate"
+      ]
+    },
+    "Grains and Starches": {
+      "description": "Cooked grains, potatoes, rice dishes",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "piece",
+        "whole",
+        "large",
+        "medium",
+        "small"
+      ]
+    },
+    "Protein Foods": {
+      "description": "Mixed protein sources and meat alternatives",
+      "common_portions": [
+        "g",
+        "oz",
+        "piece",
+        "serving",
+        "cup",
+        "patty"
+      ]
+    },
+    "Mixed Dishes": {
+      "description": "Casseroles, stir-fries, curries, stews",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "bowl",
+        "piece"
+      ]
+    },
+    "Ethnic Foods - Mexican": {
+      "description": "Tacos, burritos, enchiladas, quesadillas",
+      "common_portions": [
+        "piece",
+        "serving",
+        "g",
+        "oz",
+        "whole"
+      ]
+    },
+    "Ethnic Foods - Asian": {
+      "description": "Sushi, dumplings, noodle dishes, rice bowls",
+      "common_portions": [
+        "cup",
+        "bowl",
+        "piece",
+        "serving",
+        "g",
+        "oz",
+        "roll"
+      ]
+    },
+    "Ethnic Foods - Italian": {
+      "description": "Pasta dishes, risotto, lasagna",
+      "common_portions": [
+        "cup",
+        "piece",
+        "serving",
+        "g",
+        "oz",
+        "plate"
+      ]
+    },
+    "Ethnic Foods - Indian": {
+      "description": "Curry, naan, rice dishes, dal",
+      "common_portions": [
+        "cup",
+        "bowl",
+        "piece",
+        "serving",
+        "g",
+        "oz"
+      ]
+    },
+    "Smoothies and Shakes": {
+      "description": "Blended drinks and protein shakes",
+      "common_portions": [
+        "cup",
+        "fl oz",
+        "ml",
+        "serving",
+        "bottle",
+        "glass",
+        "scoop"
+      ]
+    },
+    "Dried Fruits": {
+      "description": "Raisins, dates, dried cranberries, etc.",
+      "common_portions": [
+        "cup",
+        "g",
+        "oz",
+        "tbsp",
+        "piece",
+        "serving",
+        "handful"
+      ]
+    },
+    "Pickles and Olives": {
+      "description": "Pickled vegetables and olives",
+      "common_portions": [
+        "piece",
+        "g",
+        "oz",
+        "tbsp",
+        "cup",
+        "serving",
+        "spear",
+        "whole"
+      ]
+    },
+    "Meat Substitutes": {
+      "description": "Plant-based meats, veggie burgers, seitan",
+      "common_portions": [
+        "g",
+        "oz",
+        "piece",
+        "patty",
+        "serving",
+        "link",
+        "slice"
+      ]
+    },
+    "Energy and Protein Bars": {
+      "description": "Granola bars, protein bars, energy bars",
+      "common_portions": [
+        "bar",
+        "piece",
+        "g",
+        "oz",
+        "serving"
+      ]
+    },
+    "Spreads": {
+      "description": "Jam, jelly, nut butters, cream cheese",
+      "common_portions": [
+        "tbsp",
+        "tsp",
+        "g",
+        "oz",
+        "serving",
+        "packet"
+      ]
+    },
+    "Dips and Spreads": {
+      "description": "Hummus, guacamole, salsa, dips",
+      "common_portions": [
+        "tbsp",
+        "cup",
+        "g",
+        "oz",
+        "serving",
+        "container"
+      ]
+    },
+    "Supplement and Fortified Foods": {
+      "description": "Protein powders, fortified foods, supplements",
+      "common_portions": [
+        "scoop",
+        "tbsp",
+        "g",
+        "serving",
+        "piece"
+      ]
+    },
+    "Cooking Ingredients": {
+      "description": "Flour, baking powder, yeast, cornstarch",
+      "common_portions": [
+        "cup",
+        "tbsp",
+        "tsp",
+        "g",
+        "oz",
+        "lb"
+      ]
+    },
+    "Water and Hydration": {
+      "description": "Plain water, flavored water, electrolyte drinks",
+      "common_portions": [
+        "cup",
+        "fl oz",
+        "ml",
+        "liter",
+        "glass",
+        "bottle"
+      ]
+    }
+  }
+}

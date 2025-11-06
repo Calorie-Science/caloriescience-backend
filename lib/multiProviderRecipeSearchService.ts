@@ -1374,7 +1374,7 @@ export class MultiProviderRecipeSearchService {
   /**
    * Get detailed recipe information by ID
    */
-  async getRecipeDetails(recipeId: string): Promise<any> {
+  async getRecipeDetails(recipeId: string, provider?: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
     try {
       // Check if this is a simple ingredient (from simpleIngredientService)
       // These are locally generated and should not be fetched from external APIs
@@ -1382,14 +1382,27 @@ export class MultiProviderRecipeSearchService {
         console.log(`⚠️ Attempted to fetch simple ingredient ${recipeId} from external API - returning null`);
         return null;
       }
-      
-      // Determine provider from recipe ID format
+
+      // If provider is explicitly specified, use it (fixes UUID Spoonacular recipes)
+      if (provider) {
+        console.log(`🔍 Using explicit provider: ${provider} for recipe ${recipeId}`);
+        if (provider === 'bonhappetee') {
+          return await this.getBonHappeteeRecipeDetails(recipeId);
+        } else if (provider === 'edamam') {
+          return await this.getEdamamRecipeDetails(recipeId);
+        } else if (provider === 'spoonacular') {
+          return await this.getSpoonacularRecipeDetails(recipeId);
+        }
+      }
+
+      // Fallback: Determine provider from recipe ID format
       // Edamam: starts with 'recipe_'
       // Spoonacular: numeric string
       // Bon Happetee: UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      console.log(`🔍 Auto-detecting provider from recipe ID format: ${recipeId}`);
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
       const isEdamam = recipeId.startsWith('recipe_');
-      
+
       if (isUUID) {
         return await this.getBonHappeteeRecipeDetails(recipeId);
       } else if (isEdamam) {
@@ -2035,14 +2048,14 @@ Return a JSON object where each key is an ingredient name and the value is an ar
   ): Promise<ClientAwareSearchResponse> {
     console.log('🔍 searchRecipesForClient called with params:', params);
 
-    // 1. Get client profile with active goals
+    // 1. Get client profile (allow searching even without active goals)
     const { data: client, error: clientError } = await supabase
       .from('clients')
       .select(`
-        id, 
-        first_name, 
+        id,
+        first_name,
         last_name,
-        client_goals!inner(
+        client_goals(
           id,
           allergies,
           preferences,
@@ -2051,24 +2064,27 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         )
       `)
       .eq('id', params.clientId)
-      .eq('client_goals.is_active', true)
       .single();
 
     if (clientError || !client) {
-      console.error('❌ Client not found or no active goals:', clientError);
-      throw new Error('Client not found or no active goals');
+      console.error('❌ Client not found:', clientError);
+      throw new Error('Client not found');
     }
 
     const clientFullName = `${client.first_name} ${client.last_name || ''}`.trim();
-    
-    // Get allergies, preferences, and cuisine types from active client_goals
-    const activeGoal = Array.isArray(client.client_goals) 
-      ? client.client_goals[0] 
-      : client.client_goals;
-    
+
+    // Get allergies, preferences, and cuisine types from active client_goals (if any)
+    const activeGoal = Array.isArray(client.client_goals)
+      ? client.client_goals.find((g: any) => g.is_active)
+      : null;
+
     const clientAllergies = activeGoal?.allergies || [];
     const clientPreferences = activeGoal?.preferences || [];
     const clientCuisineTypes = activeGoal?.cuisine_types || [];
+
+    if (!activeGoal) {
+      console.log('ℹ️ No active goals found for client - searching without dietary restrictions');
+    }
 
     console.log(`👤 Client: ${clientFullName}`);
     console.log(`⚠️ Client allergies:`, clientAllergies);

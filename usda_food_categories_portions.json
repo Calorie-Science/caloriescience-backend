@@ -1,0 +1,114 @@
+{
+  "metadata": {
+    "source": "USDA FoodData Central",
+    "api_version": "v1",
+    "generated_date": "2025-11-06",
+    "total_categories": 19,
+    "total_portion_units": 16
+  },
+  "all_portion_units": [
+    "container",
+    "cup",
+    "cups",
+    "g",
+    "grm",
+    "mg",
+    "ml",
+    "oz",
+    "package",
+    "piece",
+    "pieces",
+    "serving",
+    "slice",
+    "slices",
+    "tbsp",
+    "tsp"
+  ],
+  "categories": {
+    "Candy": [
+      "g",
+      "grm"
+    ],
+    "Canned Meat": [
+      "g",
+      "grm",
+      "mg",
+      "oz"
+    ],
+    "Canned Soup": [
+      "cup",
+      "cups",
+      "g",
+      "ml"
+    ],
+    "Chili & Stew": [
+      "cup",
+      "g"
+    ],
+    "Chocolate": [
+      "g",
+      "mg"
+    ],
+    "Eggs & Egg Substitutes": [
+      "g"
+    ],
+    "Entrees, Sides & Small Meals": [
+      "g",
+      "grm",
+      "mg",
+      "serving"
+    ],
+    "Fish & Seafood": [
+      "g"
+    ],
+    "Frozen Fish & Seafood": [
+      "g",
+      "piece",
+      "pieces"
+    ],
+    "Other Deli": [
+      "container",
+      "g",
+      "package"
+    ],
+    "Other Meats": [
+      "g",
+      "grm",
+      "oz"
+    ],
+    "Pasta Dinners": [
+      "g",
+      "grm",
+      "oz"
+    ],
+    "Pepperoni, Salami & Cold Cuts": [
+      "g",
+      "package",
+      "slice",
+      "slices"
+    ],
+    "Poultry, Chicken & Turkey": [
+      "g"
+    ],
+    "Prepared Subs & Sandwiches": [
+      "g"
+    ],
+    "Prepared Wraps and Burittos": [
+      "g"
+    ],
+    "Sausages, Hotdogs & Brats": [
+      "g",
+      "grm"
+    ],
+    "Seasoning Mixes, Salts, Marinades & Tenderizers": [
+      "g",
+      "tbsp",
+      "tsp"
+    ],
+    "Vegetarian Frozen Meats": [
+      "g",
+      "slice",
+      "slices"
+    ]
+  }
+}
