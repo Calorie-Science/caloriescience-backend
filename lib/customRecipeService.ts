@@ -83,6 +83,7 @@ export class CustomRecipeService {
 
         // Servings & Time
         servings: input.servings,
+        food_category: input.foodCategory || null,
         default_portion_size_id: input.portionSizeId || null,
         prep_time_minutes: input.prepTimeMinutes,
         cook_time_minutes: input.cookTimeMinutes,
@@ -132,7 +133,7 @@ export class CustomRecipeService {
       throw new Error(`Failed to create custom recipe: ${error.message}`);
     }
 
-    return this.mapToOutput(data);
+    return this.mapToOutputAsync(data);
   }
 
   /**
@@ -166,6 +167,7 @@ export class CustomRecipeService {
     if (input.dietLabels) updateData.diet_labels = input.dietLabels;
     if (input.allergens) updateData.allergens = input.allergens;
     if (input.servings) updateData.servings = input.servings;
+    if (input.foodCategory !== undefined) updateData.food_category = input.foodCategory;
     if (input.prepTimeMinutes !== undefined) updateData.prep_time_minutes = input.prepTimeMinutes;
     if (input.cookTimeMinutes !== undefined) updateData.cook_time_minutes = input.cookTimeMinutes;
     if (input.totalTimeMinutes !== undefined) updateData.total_time_minutes = input.totalTimeMinutes;
@@ -220,7 +222,7 @@ export class CustomRecipeService {
       throw new Error(`Failed to update custom recipe: ${error.message}`);
     }
 
-    return this.mapToOutput(data);
+    return this.mapToOutputAsync(data);
   }
 
   /**
@@ -245,6 +247,7 @@ export class CustomRecipeService {
     if (input.description !== undefined) updateData.recipe_description = input.description;
     if (input.imageUrl !== undefined) updateData.recipe_image_url = input.imageUrl;
     if (input.servings !== undefined) updateData.servings = input.servings;
+    if (input.foodCategory !== undefined) updateData.food_category = input.foodCategory;
     if (input.prepTimeMinutes !== undefined) updateData.prep_time_minutes = input.prepTimeMinutes;
     if (input.cookTimeMinutes !== undefined) updateData.cook_time_minutes = input.cookTimeMinutes;
     if (input.totalTimeMinutes !== undefined) {
@@ -286,7 +289,7 @@ export class CustomRecipeService {
       throw new Error(`Failed to update basic details: ${error.message}`);
     }
 
-    return this.mapToOutput(data);
+    return this.mapToOutputAsync(data);
   }
 
   /**
@@ -331,7 +334,7 @@ export class CustomRecipeService {
       throw new Error('Access denied: You do not have permission to view this recipe');
     }
 
-    return this.mapToOutput(data);
+    return this.mapToOutputAsync(data);
   }
 
   /**
@@ -407,8 +410,11 @@ export class CustomRecipeService {
       throw new Error(`Failed to list custom recipes: ${error.message}`);
     }
 
+    // Map recipes with portion sizes (async)
+    const recipes = await Promise.all((data || []).map(r => this.mapToOutputAsync(r)));
+
     return {
-      recipes: (data || []).map(r => this.mapToOutput(r)),
+      recipes,
       totalCount: count || 0,
       page,
       limit
@@ -634,6 +640,7 @@ export class CustomRecipeService {
       servings: data.servings,
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
       defaultPortionSizeId: data.default_portion_size_id || undefined,
+      foodCategory: data.food_category || undefined,
 
       // Nutrition data (per serving)
       calories: data.calories_per_serving,
@@ -714,7 +721,8 @@ export class CustomRecipeService {
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
       portionSize: portionSize || undefined,
       defaultPortionSizeId: data.default_portion_size_id || undefined,
-      
+      foodCategory: data.food_category || undefined,
+
       // Nutrition data (per serving)
       calories: data.calories_per_serving,
       protein: data.protein_per_serving_g,

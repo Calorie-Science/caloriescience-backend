@@ -2,6 +2,8 @@
  * Type definitions for custom recipe creation feature
  */
 
+import { FoodCategory } from './foodCategory';
+
 /**
  * Portion Size - represents standard serving sizes
  */
@@ -9,7 +11,8 @@ export interface PortionSize {
   id: string;
   name: string; // e.g., "Small Cup", "Large Cup", "Medium Plate", "Small Bowl"
   description?: string;
-  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'other';
+  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'piece' | 'handful' | 'scoop' | 'slice' | 'other';
+  foodCategory?: FoodCategory; // Specific food category this portion size is designed for
   volumeMl?: number; // Volume in milliliters (for liquids)
   weightG?: number; // Weight in grams (for solids)
   multiplier: number; // Multiplier for nutrition values (base serving = 1.0)
@@ -21,7 +24,8 @@ export interface PortionSize {
 export interface CreatePortionSizeInput {
   name: string;
   description?: string;
-  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'other';
+  category: 'cup' | 'plate' | 'bowl' | 'glass' | 'serving' | 'piece' | 'handful' | 'scoop' | 'slice' | 'other';
+  foodCategory?: FoodCategory;
   volumeMl?: number;
   weightG?: number;
   multiplier: number;
@@ -96,6 +100,7 @@ export interface CreateCustomRecipeInput {
   description?: string;
   ingredients: CustomRecipeIngredient[];
   servings: number;
+  foodCategory?: FoodCategory; // Food category for portion size recommendations
   portionSizeId?: string; // Reference to default portion size
   instructions?: string[];
   customNotes?: string;
@@ -122,6 +127,7 @@ export interface EditCustomRecipeBasicDetailsInput {
   description?: string;
   imageUrl?: string;
   servings?: number;
+  foodCategory?: FoodCategory; // Food category for portion size recommendations
   prepTimeMinutes?: number;
   cookTimeMinutes?: number;
   totalTimeMinutes?: number;
@@ -154,14 +160,15 @@ export interface CustomRecipeOutput {
   nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   portionSize?: PortionSize; // Current portion size
   defaultPortionSizeId?: string; // Reference to default portion size
-  
+  foodCategory?: FoodCategory; // Food category for portion size recommendations
+
   // Nutrition data (per serving) - standard format
   calories?: number;
   protein?: number;
   carbs?: number;
   fat?: number;
   fiber?: number;
-  
+
   // Metadata for filtering - standard format
   healthLabels?: string[];
   dietLabels?: string[];
@@ -169,7 +176,7 @@ export interface CustomRecipeOutput {
   dishType?: string[];
   mealType?: string[];
   allergens?: string[];
-  
+
   // Ingredients for allergen checking
   ingredients?: Array<{
     name?: string;
@@ -180,12 +187,12 @@ export interface CustomRecipeOutput {
     nutrition?: any;
     [key: string]: any;
   }>;
-  
+
   // Custom recipe metadata
   isCustom?: boolean;
   createdBy?: string;
   isPublic?: boolean;
-  
+
   // Additional fields for detailed view (backward compatible)
   description?: string;
   prepTimeMinutes?: number;
@@ -196,7 +203,7 @@ export interface CustomRecipeOutput {
   customNotes?: string;
   cookingTips?: string; // Helpful cooking tips for this recipe
   nutritionDetails?: any;
-  
+
   // Total nutrition (for detailed calculations)
   totalCalories?: number;
   totalProtein?: number;
@@ -206,7 +213,7 @@ export interface CustomRecipeOutput {
   totalSugar?: number;
   totalSodium?: number;
   totalWeight?: number;
-  
+
   // Timestamps
   createdAt?: string;
   updatedAt?: string;

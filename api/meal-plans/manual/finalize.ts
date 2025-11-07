@@ -5,7 +5,7 @@ import Joi from 'joi';
 
 const finalizeSchema = Joi.object({
   draftId: Joi.string().required(),
-  planName: Joi.string().min(1).max(255).required()
+  planName: Joi.string().min(1).max(255).optional()
 });
 
 /**
@@ -45,13 +45,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    const { draftId, planName } = value;
-
-    console.log('✅ Finalizing manual meal plan:', {
-      nutritionist: user.email,
-      draftId,
-      planName
-    });
+    let { draftId, planName } = value;
 
     // Verify draft exists and belongs to this nutritionist
     const draft = await manualMealPlanService.getDraft(draftId);
@@ -69,8 +63,40 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
+    // Generate unique plan name if not provided
+    if (!planName) {
+      // Get client name for the plan name
+      const { supabase } = require('../../../lib/supabase');
+      const { data: client } = await supabase
+        .from('clients')
+        .select('first_name, last_name')
+        .eq('id', draft.client_id)
+        .single();
+
+      const clientName = client
+        ? `${client.first_name} ${client.last_name}`.trim()
+        : 'Client';
+
+      // Format: "ClientName - Manual Plan - YYYY-MM-DD HH:MM:SS"
+      const planDate = new Date(draft.plan_date);
+      const now = new Date();
+      const dateStr = planDate.toISOString().split('T')[0];
+      const timeStr = now.toISOString().split('T')[1].substring(0, 8); // HH:MM:SS
+      planName = `${clientName} - Manual Plan - ${dateStr} ${timeStr}`;
+
+      console.log(`📝 Generated unique plan name: ${planName}`);
+    }
+
+    console.log('✅ Finalizing manual meal plan:', {
+      nutritionist: user.email,
+      draftId,
+      planName
+    });
+
     // Check if plan name is already in use by this nutritionist
-    const { data: existingPlan, error: checkError } = await require('../../../lib/supabase').supabase
+    // If it is, auto-rename by appending a number
+    const { supabase } = require('../../../lib/supabase');
+    const { data: existingPlan } = await supabase
       .from('meal_plan_drafts')
       .select('id, plan_name')
       .eq('nutritionist_id', user.id)
@@ -79,11 +105,32 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       .single();
 
     if (existingPlan) {
-      return res.status(409).json({
-        error: 'Duplicate plan name',
-        message: `You already have a meal plan named "${planName}". Please choose a different name.`,
-        existingPlanId: existingPlan.id
-      });
+      console.log(`⚠️ Plan name "${planName}" already exists, auto-renaming...`);
+
+      // Find all plans with similar names to get the next number
+      const { data: similarPlans } = await supabase
+        .from('meal_plan_drafts')
+        .select('plan_name')
+        .eq('nutritionist_id', user.id)
+        .like('plan_name', `${planName}%`)
+        .neq('id', draftId);
+
+      // Extract numbers from existing plan names (e.g., "Plan Name (2)")
+      const numbers: number[] = [0];
+      if (similarPlans) {
+        for (const plan of similarPlans) {
+          const match = plan.plan_name.match(/\((\d+)\)$/);
+          if (match) {
+            numbers.push(parseInt(match[1]));
+          }
+        }
+      }
+
+      // Get the next available number
+      const nextNumber = Math.max(...numbers) + 1;
+      planName = `${planName} (${nextNumber})`;
+
+      console.log(`✅ Auto-renamed to: ${planName}`);
     }
 
     // Finalize the plan

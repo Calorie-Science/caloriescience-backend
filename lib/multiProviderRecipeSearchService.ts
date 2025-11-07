@@ -1374,7 +1374,7 @@ export class MultiProviderRecipeSearchService {
   /**
    * Get detailed recipe information by ID
    */
-  async getRecipeDetails(recipeId: string, provider?: 'edamam' | 'spoonacular' | 'bonhappetee'): Promise<any> {
+  async getRecipeDetails(recipeId: string, provider?: 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual'): Promise<any> {
     try {
       // Check if this is a simple ingredient (from simpleIngredientService)
       // These are locally generated and should not be fetched from external APIs
@@ -1386,7 +1386,11 @@ export class MultiProviderRecipeSearchService {
       // If provider is explicitly specified, use it (fixes UUID Spoonacular recipes)
       if (provider) {
         console.log(`🔍 Using explicit provider: ${provider} for recipe ${recipeId}`);
-        if (provider === 'bonhappetee') {
+        if (provider === 'manual') {
+          // Manual recipes are stored locally, not in external APIs
+          console.log(`⚠️ Manual recipe ${recipeId} should be fetched from cache, not external API - returning null`);
+          return null;
+        } else if (provider === 'bonhappetee') {
           return await this.getBonHappeteeRecipeDetails(recipeId);
         } else if (provider === 'edamam') {
           return await this.getEdamamRecipeDetails(recipeId);
@@ -1398,12 +1402,32 @@ export class MultiProviderRecipeSearchService {
       // Fallback: Determine provider from recipe ID format
       // Edamam: starts with 'recipe_'
       // Spoonacular: numeric string
-      // Bon Happetee: UUID format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+      // UUID: could be Bon Happetee OR simple ingredient from simple_ingredients table
       console.log(`🔍 Auto-detecting provider from recipe ID format: ${recipeId}`);
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
       const isEdamam = recipeId.startsWith('recipe_');
 
       if (isUUID) {
+        // Check if it's a simple ingredient first (stored in simple_ingredients table)
+        try {
+          const { supabase } = require('./supabase');
+          const { data: simpleIngredient, error } = await supabase
+            .from('simple_ingredients')
+            .select('*')
+            .eq('id', recipeId)
+            .single();
+
+          if (simpleIngredient && !error) {
+            console.log(`✅ Found as simple ingredient: ${simpleIngredient.name}`);
+            // Return null so the code falls back to using draft data
+            // Simple ingredients should be handled by the simple ingredient code path
+            return null;
+          }
+        } catch (error) {
+          console.log(`ℹ️ Not a simple ingredient, trying BonHappetee...`);
+        }
+
+        // If not a simple ingredient, try BonHappetee
         return await this.getBonHappeteeRecipeDetails(recipeId);
       } else if (isEdamam) {
         return await this.getEdamamRecipeDetails(recipeId);

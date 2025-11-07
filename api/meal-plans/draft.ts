@@ -1394,16 +1394,22 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
     // If auto-calculation is enabled and customNutrition is not provided, calculate it
     const hadStoredCustomNutrition = !!customizations.customNutrition;
-    
+
     if (autoCalculateNutrition && !customizations.customNutrition) {
       console.log('🤖 Auto-calculating nutrition WITH MICRONUTRIENTS...');
 
       // Check if this is a simple ingredient (from simpleIngredientService)
-      const isSimpleIngredient = (recipe as any).isSimpleIngredient === true || 
-                                  (recipe as any).isIngredient === true || 
-                                  recipeId.startsWith('ingredient_');
-      
-      console.log(`🔍 Recipe type check: isSimpleIngredient=${isSimpleIngredient}, recipeId=${recipeId}`);
+      // Simple ingredients can have:
+      // 1. 'ingredient_' prefix in ID
+      // 2. isSimpleIngredient or isIngredient flags set to true
+      // 3. UUID format ID (new simple ingredients stored in simple_ingredients table)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
+      const isSimpleIngredient = (recipe as any).isSimpleIngredient === true ||
+                                  (recipe as any).isIngredient === true ||
+                                  recipeId.startsWith('ingredient_') ||
+                                  (isUUID && recipe.ingredients?.length === 1); // UUID with single ingredient = simple ingredient
+
+      console.log(`🔍 Recipe type check: isSimpleIngredient=${isSimpleIngredient}, isUUID=${isUUID}, recipeId=${recipeId}`);
 
       // Get the ORIGINAL unmodified recipe from cache/API with FULL NUTRITION DATA
       console.log('🔍 Getting original recipe with complete nutrition from cache/API...');
@@ -1414,26 +1420,59 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       let originalRecipe: any = null;
       let cachedRecipe: any = null; // Declare here for use in debug logging later
       
-      // For simple ingredients, skip cache/API lookup and use recipe data directly
+      // For simple ingredients, skip cache/API lookup and fetch fresh from simple_ingredients table
       if (isSimpleIngredient) {
-        console.log('✅ Simple ingredient detected - using recipe data directly (no external API fetch)');
+        console.log('✅ Simple ingredient detected - fetching fresh nutrition from simple_ingredients table');
         originalRecipe = recipe;
-        
+
         // Update recipe servings for simple ingredients (always 1)
         recipeServings = recipe.servings || 1;
-        
+
+        // Fetch fresh nutrition from simple_ingredients table if UUID
+        let freshNutrition: any = null;
+        if (isUUID) {
+          try {
+            const { supabase } = require('../../lib/supabase');
+            const { data: simpleIngredient, error } = await supabase
+              .from('simple_ingredients')
+              .select('*')
+              .eq('id', recipeId)
+              .single();
+
+            if (simpleIngredient && !error) {
+              console.log(`✅ Fetched fresh nutrition from simple_ingredients: ${simpleIngredient.name}`);
+              freshNutrition = {
+                calories: { quantity: parseFloat(simpleIngredient.calories) || 0, unit: 'kcal' },
+                macros: {
+                  protein: { quantity: parseFloat(simpleIngredient.protein_g) || 0, unit: 'g' },
+                  carbs: { quantity: parseFloat(simpleIngredient.carbs_g) || 0, unit: 'g' },
+                  fat: { quantity: parseFloat(simpleIngredient.fat_g) || 0, unit: 'g' },
+                  fiber: { quantity: parseFloat(simpleIngredient.fiber_g) || 0, unit: 'g' },
+                  sugar: { quantity: parseFloat(simpleIngredient.sugar_g) || 0, unit: 'g' },
+                  sodium: { quantity: parseFloat(simpleIngredient.sodium_mg) || 0, unit: 'mg' },
+                  saturatedFat: { quantity: parseFloat(simpleIngredient.saturated_fat_g) || 0, unit: 'g' },
+                  cholesterol: { quantity: parseFloat(simpleIngredient.cholesterol_mg) || 0, unit: 'mg' }
+                },
+                micros: { vitamins: {}, minerals: {} } // TODO: Add micronutrients from simple_ingredients if needed
+              };
+            }
+          } catch (error) {
+            console.warn('⚠️ Could not fetch from simple_ingredients table:', error);
+          }
+        }
+
         // Look up original amounts from recipe ingredients
         for (const mod of customizations.modifications) {
           if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
             console.log(`🔍 Looking up original amount for simple ingredient: ${mod.originalIngredient} (${mod.type})`);
-            
+
             const targetName = mod.originalIngredient.toLowerCase();
             const recipeIngredients = recipe.ingredients || [];
             const originalIng = recipeIngredients.find((ing: any) => {
               const ingName = (ing.name || ing.food || ing.original || '').toLowerCase();
               return ingName.includes(targetName) || targetName.includes(ingName);
             });
-            
+
             if (originalIng) {
               (mod as any).originalAmount = originalIng.amount || 1;
               (mod as any).originalUnit = originalIng.unit || '';
@@ -1451,32 +1490,37 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             }
           }
         }
-        
-        // Get nutrition from recipe data (already in correct format for simple ingredients)
-        const extractNumber = (value: any) => {
-          if (typeof value === 'number') return value;
-          if (value?.quantity !== undefined) return value.quantity;
-          return 0;
-        };
-        
-        // Check if recipe has nutrition object or flat values
-        const recipeAny = recipe as any;
-        if (recipeAny.nutrition && typeof recipeAny.nutrition === 'object') {
-          originalNutritionWithMicros = recipeAny.nutrition;
+
+        // Use fresh nutrition from database if available, otherwise fall back to recipe data
+        if (freshNutrition) {
+          originalNutritionWithMicros = freshNutrition;
         } else {
-          // Build nutrition object from flat values
-          originalNutritionWithMicros = {
-            calories: { quantity: extractNumber(recipe.calories), unit: 'kcal' },
-            macros: {
-              protein: { quantity: extractNumber(recipe.protein), unit: 'g' },
-              carbs: { quantity: extractNumber(recipe.carbs), unit: 'g' },
-              fat: { quantity: extractNumber(recipe.fat), unit: 'g' },
-              fiber: { quantity: extractNumber(recipe.fiber), unit: 'g' },
-              sugar: { quantity: extractNumber(recipeAny.sugar || recipeAny.nutrition?.macros?.sugar), unit: 'g' },
-              sodium: { quantity: extractNumber(recipeAny.sodium || recipeAny.nutrition?.macros?.sodium), unit: 'mg' }
-            },
-            micros: recipeAny.nutrition?.micros || { vitamins: {}, minerals: {} }
+          // Get nutrition from recipe data (fallback)
+          const extractNumber = (value: any) => {
+            if (typeof value === 'number') return value;
+            if (value?.quantity !== undefined) return value.quantity;
+            return 0;
           };
+
+          // Check if recipe has nutrition object or flat values
+          const recipeAny = recipe as any;
+          if (recipeAny.nutrition && typeof recipeAny.nutrition === 'object') {
+            originalNutritionWithMicros = recipeAny.nutrition;
+          } else {
+            // Build nutrition object from flat values
+            originalNutritionWithMicros = {
+              calories: { quantity: extractNumber(recipe.calories), unit: 'kcal' },
+              macros: {
+                protein: { quantity: extractNumber(recipe.protein), unit: 'g' },
+                carbs: { quantity: extractNumber(recipe.carbs), unit: 'g' },
+                fat: { quantity: extractNumber(recipe.fat), unit: 'g' },
+                fiber: { quantity: extractNumber(recipe.fiber), unit: 'g' },
+                sugar: { quantity: extractNumber(recipeAny.sugar || recipeAny.nutrition?.macros?.sugar), unit: 'g' },
+                sodium: { quantity: extractNumber(recipeAny.sodium || recipeAny.nutrition?.macros?.sodium), unit: 'mg' }
+              },
+              micros: recipeAny.nutrition?.micros || { vitamins: {}, minerals: {} }
+            };
+          }
         }
         
         console.log('✅ Using nutrition from simple ingredient:', {
@@ -1600,7 +1644,16 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
       } else {
         // Fetch from API if not in cache
         debugCacheLookup.fetchedFromAPI = true;
-        const recipeDetails = await multiProviderService.getRecipeDetails(recipeId);
+        let recipeDetails: any = null;
+        try {
+          // Pass the provider/source to avoid auto-detection issues with UUIDs
+          const provider = customizations.source as 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual' | undefined;
+          recipeDetails = await multiProviderService.getRecipeDetails(recipeId, provider);
+        } catch (error) {
+          console.warn(`⚠️ Could not fetch recipe from API: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          debugCacheLookup.apiFetchError = error instanceof Error ? error.message : 'Unknown error';
+        }
+
         if (recipeDetails) {
           debugCacheLookup.apiRecipeServings = recipeDetails.servings;
           originalRecipe = {

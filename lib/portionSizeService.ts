@@ -85,6 +85,7 @@ export class PortionSizeService {
         name: input.name,
         description: input.description,
         category: input.category,
+        food_category: input.foodCategory,
         volume_ml: input.volumeMl,
         weight_g: input.weightG,
         multiplier: input.multiplier,
@@ -112,6 +113,7 @@ export class PortionSizeService {
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
     if (input.category !== undefined) updateData.category = input.category;
+    if (input.foodCategory !== undefined) updateData.food_category = input.foodCategory;
     if (input.volumeMl !== undefined) updateData.volume_ml = input.volumeMl;
     if (input.weightG !== undefined) updateData.weight_g = input.weightG;
     if (input.multiplier !== undefined) updateData.multiplier = input.multiplier;
@@ -225,6 +227,7 @@ export class PortionSizeService {
       name: data.name,
       description: data.description,
       category: data.category,
+      foodCategory: data.food_category,
       volumeMl: data.volume_ml,
       weightG: data.weight_g,
       multiplier: data.multiplier,

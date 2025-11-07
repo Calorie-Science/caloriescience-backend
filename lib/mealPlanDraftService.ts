@@ -92,6 +92,7 @@ export interface MealPlanDraft {
   clientId: string;
   nutritionistId: string;
   status: 'draft' | 'completed' | 'finalized';
+  creationMethod?: 'auto_generated' | 'manual' | 'ai_generated';
   searchParams: any;
   suggestions: Array<{
     day: number;
@@ -326,6 +327,7 @@ export class MealPlanDraftService {
       clientId: data.client_id,
       nutritionistId: data.nutritionist_id,
       status: data.status,
+      creationMethod: data.creation_method,
       searchParams: data.search_params,
       suggestions: data.suggestions,
       createdAt: data.created_at,

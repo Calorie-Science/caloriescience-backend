@@ -53,10 +53,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     const { clientId, status, creationMethod, page, pageSize, includeNutrition, sortBy, sortOrder } = value;
 
-    // Build query
+    // Build query - include creation_method column
     let query = supabase
       .from('meal_plan_drafts')
-      .select('*', { count: 'exact' })
+      .select('*, creation_method', { count: 'exact' })
       .eq('nutritionist_id', user.id);
 
     // Apply filters
@@ -94,6 +94,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           clientId: draft.client_id,
           nutritionistId: draft.nutritionist_id,
           status: draft.status,
+          creationType: draft.creation_method || draft.search_params?.creation_method || 'auto_generated',
           searchParams: draft.search_params,
           createdAt: draft.created_at,
           updatedAt: draft.updated_at,

@@ -88,8 +88,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         clientGoals: {
           calories: clientGoal?.eer_goal_calories || nutritionReq?.eer_calories || 0,
           protein: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+          proteinMin: clientGoal?.protein_goal_min || nutritionReq?.protein_grams || 0,
+          proteinMax: clientGoal?.protein_goal_max || nutritionReq?.protein_grams || 0,
           carbs: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+          carbsMin: clientGoal?.carbs_goal_min || nutritionReq?.carbs_grams || 0,
+          carbsMax: clientGoal?.carbs_goal_max || nutritionReq?.carbs_grams || 0,
           fat: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+          fatMin: clientGoal?.fat_goal_min || nutritionReq?.fat_grams || 0,
+          fatMax: clientGoal?.fat_goal_max || nutritionReq?.fat_grams || 0,
           fiber: clientGoal?.fiber_goal_grams || nutritionReq?.fiber_grams || 0
         },
         dietaryPreferences: {
@@ -360,13 +366,64 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               }
             }
 
+            // Apply nutritionServings multiplier to nutrition values
+            const nutritionServingsMultiplier = customizations?.nutritionServings || customizations?.servings || 1;
+
+            // Multiply all nutrition values by nutritionServings
+            if (nutritionServingsMultiplier !== 1) {
+              console.log(`📊 Multiplying nutrition by ${nutritionServingsMultiplier} servings for ${selectedRecipe.title}`);
+
+              // Multiply macros
+              detailedNutrition.macros.calories *= nutritionServingsMultiplier;
+              detailedNutrition.macros.protein *= nutritionServingsMultiplier;
+              detailedNutrition.macros.carbs *= nutritionServingsMultiplier;
+              detailedNutrition.macros.fat *= nutritionServingsMultiplier;
+              detailedNutrition.macros.fiber *= nutritionServingsMultiplier;
+
+              if (detailedNutrition.macros.sugar !== null) {
+                detailedNutrition.macros.sugar *= nutritionServingsMultiplier;
+              }
+              if (detailedNutrition.macros.sodium !== null) {
+                detailedNutrition.macros.sodium *= nutritionServingsMultiplier;
+              }
+              if (detailedNutrition.macros.saturatedFat !== null) {
+                detailedNutrition.macros.saturatedFat *= nutritionServingsMultiplier;
+              }
+              if (detailedNutrition.macros.cholesterol !== null) {
+                detailedNutrition.macros.cholesterol *= nutritionServingsMultiplier;
+              }
+
+              // Multiply micronutrients if they exist
+              if (detailedNutrition.micronutrients) {
+                // Multiply vitamins
+                if (detailedNutrition.micronutrients.vitamins) {
+                  Object.keys(detailedNutrition.micronutrients.vitamins).forEach(vitaminKey => {
+                    const vitamin = detailedNutrition.micronutrients.vitamins[vitaminKey];
+                    if (vitamin && typeof vitamin.quantity === 'number') {
+                      vitamin.quantity *= nutritionServingsMultiplier;
+                    }
+                  });
+                }
+
+                // Multiply minerals
+                if (detailedNutrition.micronutrients.minerals) {
+                  Object.keys(detailedNutrition.micronutrients.minerals).forEach(mineralKey => {
+                    const mineral = detailedNutrition.micronutrients.minerals[mineralKey];
+                    if (mineral && typeof mineral.quantity === 'number') {
+                      mineral.quantity *= nutritionServingsMultiplier;
+                    }
+                  });
+                }
+              }
+            }
+
             detailedMeals[mealName] = {
               recipeName: selectedRecipe.title,
               recipeId: selectedRecipe.id,
               recipeImage: selectedRecipe.image,
               recipeSource: selectedRecipe.source,
               servings: selectedRecipe.servings || 1, // Recipe yield (for ingredients)
-              nutritionServings: customizations?.nutritionServings || customizations?.servings || 1, // Portion size multiplier
+              nutritionServings: nutritionServingsMultiplier, // Portion size multiplier
               isSelected: true,
               hasCustomizations: !!(customizations?.customizationsApplied),
               customNotes: selectedRecipe.customNotes || null,
@@ -533,6 +590,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         clientId: draft.clientId,
         nutritionistId: draft.nutritionistId,
         status: draft.status,
+        creationType: draft.creationMethod || draft.searchParams?.creation_method || 'auto_generated',
         searchParams: draft.searchParams,
         createdAt: draft.createdAt,
         updatedAt: draft.updatedAt,
