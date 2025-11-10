@@ -23,7 +23,7 @@ const replaceIngredientSchema = Joi.object({
   unit: Joi.string().optional(),
   servings: Joi.number().min(0.1).max(20).optional(), // Deprecated: use nutritionServings
   nutritionServings: Joi.number().min(0.1).max(20).default(1).optional(), // Portion size multiplier for nutrition
-  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'auto').default('auto').optional() // 'auto' tries both providers
+  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'auto', 'claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo').default('auto').optional() // 'auto' tries both providers
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {

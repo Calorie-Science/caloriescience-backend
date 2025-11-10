@@ -1,6 +1,11 @@
 {
   "version": 2,
   "alias": ["caloriescience-api.vercel.app"],
+  "functions": {
+    "api/meal-plans/index.ts": {
+      "maxDuration": 300
+    }
+  },
   "headers": [
     {
       "source": "/api/(.*)",

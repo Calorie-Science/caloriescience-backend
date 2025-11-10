@@ -173,13 +173,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
         // Get AI model from request body (support both aiModel and aiProvider for backwards compatibility)
         // Prefer aiModel if both are provided
-        const aiModel = (req.body.aiModel || req.body.aiProvider || 'claude') as 'openai' | 'claude' | 'gemini' | 'grok';
+        let aiModel = (req.body.aiModel || req.body.aiProvider || 'claude') as string;
+
+        // Normalize GPT variants to 'openai'
+        if (['gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo'].includes(aiModel.toLowerCase())) {
+          console.log(`🔄 Normalizing AI model "${aiModel}" to "openai"`);
+          aiModel = 'openai';
+        }
+
+        // Cast to proper type after normalization
+        const normalizedAiModel = aiModel as 'openai' | 'claude' | 'gemini' | 'grok';
 
         // Validate AI model
-        if (!['openai', 'claude', 'gemini', 'grok'].includes(aiModel)) {
+        if (!['openai', 'claude', 'gemini', 'grok'].includes(normalizedAiModel)) {
           return res.status(400).json({
             error: 'Invalid AI model',
-            message: 'aiModel/aiProvider must be one of: openai, claude, gemini, grok'
+            message: 'aiModel/aiProvider must be one of: openai, claude, gemini, grok (gpt/chatgpt variants are also accepted)'
           });
         }
 
@@ -262,7 +271,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             user.id,
             clientGoals,
             req.body.additionalText,
-            aiModel,
+            normalizedAiModel,
             days,
             startDate
           );

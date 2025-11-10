@@ -67,7 +67,7 @@ export interface RecipeSuggestion {
 
 export interface MealCustomization {
   recipeId: string;
-  source: 'edamam' | 'spoonacular';
+  source: 'edamam' | 'spoonacular' | 'manual' | 'bonhappetee' | 'claude' | 'grok' | 'openai';
   modifications: {
     type: 'replace' | 'omit' | 'reduce' | 'add';
     ingredient?: string;

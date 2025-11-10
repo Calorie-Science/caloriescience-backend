@@ -56,7 +56,7 @@ export class ClaudeService {
 
         const stream = await this.anthropic.messages.stream({
           model: 'claude-opus-4-1-20250805',
-          max_tokens: 32000, // Increased to 32K to handle multi-day plans with full nutrition data
+          max_tokens: 32000, // Claude Opus 4 maximum output tokens
           temperature: 0.7,
           messages: [
             {
@@ -90,7 +90,7 @@ export class ClaudeService {
           // Warn if output tokens are close to limit
           const outputTokens = response.usage.output_tokens || 0;
           if (outputTokens > 28000) {
-            console.log('⚠️  Warning: Output tokens approaching max_tokens limit!');
+            console.log('⚠️  Warning: Output tokens approaching max_tokens limit (32K)!');
             console.log('⚠️  Consider reducing days or simplifying meal plan structure');
           }
         }

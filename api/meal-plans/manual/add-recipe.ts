@@ -11,7 +11,7 @@ const addRecipeSchema = Joi.object({
   mealName: Joi.string().required(),
   recipe: Joi.object({
     id: Joi.string().required(),
-    provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee', 'manual').required(),
+    provider: Joi.string().valid('edamam', 'spoonacular', 'bonhappetee', 'manual', 'claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo').required(),
     source: Joi.string().valid('api', 'cached').required(),
     isSimpleIngredient: Joi.boolean().optional()
   }).required(),

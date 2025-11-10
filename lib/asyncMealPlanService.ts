@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { OpenAIAssistantService, AssistantMealPlanRequest, AssistantMealPlanResponse } from './openaiAssistantService';
+import { OpenAIService, OpenAIMealPlanRequest, OpenAIMealPlanResponse } from './openaiService';
 import { ClaudeService, ClaudeMealPlanRequest, ClaudeMealPlanResponse } from './claudeService';
 import { GeminiService, GeminiMealPlanRequest, GeminiMealPlanResponse } from './geminiService';
 import { GrokService, GrokMealPlanRequest, GrokMealPlanResponse } from './grokService';
@@ -28,13 +28,13 @@ export interface AsyncMealPlanResponse {
 }
 
 export class AsyncMealPlanService {
-  private openaiService: OpenAIAssistantService;
+  private openaiService: OpenAIService;
   private claudeService: ClaudeService;
   private geminiService: GeminiService;
   private grokService: GrokService;
 
   constructor() {
-    this.openaiService = new OpenAIAssistantService();
+    this.openaiService = new OpenAIService();
     this.claudeService = new ClaudeService();
     this.geminiService = new GeminiService();
     this.grokService = new GrokService();
@@ -228,26 +228,29 @@ export class AsyncMealPlanService {
         status = 'completed';
         generatedMealPlan = processedMealPlan;
       } else {
-        // Use OpenAI Assistant for async generation
-        const assistantRequest: AssistantMealPlanRequest = {
+        // OpenAI: Generate meal plan synchronously (fast)
+        const openaiRequest: OpenAIMealPlanRequest = {
           clientGoals,
           additionalText,
           clientId,
           nutritionistId,
-          mealProgram
+          mealProgram,
+          days
         };
 
-        const assistantResponse = await this.openaiService.generateMealPlanAsync(assistantRequest);
-        
-        if (!assistantResponse.success || !assistantResponse.runId || !assistantResponse.threadId) {
+        const openaiResponse = await this.openaiService.generateMealPlanSync(openaiRequest);
+
+        if (!openaiResponse.success) {
           return {
             success: false,
-            error: assistantResponse.error || 'Failed to start OpenAI Assistant generation'
+            error: openaiResponse.error || 'Failed to generate OpenAI meal plan'
           };
         }
 
-        threadId = assistantResponse.threadId;
-        runId = assistantResponse.runId;
+        threadId = openaiResponse.messageId || `thread-openai-${Date.now()}`;
+        runId = `run-openai-${Date.now()}`;
+        status = 'completed';
+        generatedMealPlan = openaiResponse.data;
       }
 
       // Store in database with UUID (let database generate it)
@@ -278,8 +281,8 @@ export class AsyncMealPlanService {
 
       console.log('✅ Async Meal Plan Service - Generation started with ID:', asyncMealPlan.id);
 
-      // If Claude or Grok (completed immediately), add wrapper fields to the response
-      if ((aiModel === 'claude' || aiModel === 'grok') && status === 'completed' && generatedMealPlan) {
+      // If Claude, Grok, or OpenAI (completed immediately), add wrapper fields to the response
+      if ((aiModel === 'claude' || aiModel === 'grok' || aiModel === 'openai') && status === 'completed' && generatedMealPlan) {
         // Create draft ID that will be used in meal_plan_drafts table
         const draftId = `ai-${asyncMealPlan.id}`;
         
@@ -372,47 +375,21 @@ export class AsyncMealPlanService {
         };
       }
 
-      // Check with OpenAI Assistant
-      const assistantResponse = await this.openaiService.checkGenerationStatus(
-        asyncMealPlan.thread_id,
-        asyncMealPlan.run_id
-      );
-
-      if (!assistantResponse.success) {
-        // Update status to failed
-        await this.updateStatus(asyncMealPlanId, 'failed', null, assistantResponse.error);
-        
+      // Claude, Grok, and OpenAI complete synchronously - should never reach here for those models
+      if (asyncMealPlan.ai_model === 'claude' || asyncMealPlan.ai_model === 'grok' || asyncMealPlan.ai_model === 'openai') {
+        console.warn(`⚠️ Unexpected: ${asyncMealPlan.ai_model} meal plan in pending status - marking as failed`);
+        await this.updateStatus(asyncMealPlanId, 'failed', null, 'Generation did not complete immediately');
         return {
-          success: true,
-          data: {
-            ...this.mapDbToAsyncMealPlan(asyncMealPlan),
-            status: 'failed',
-            errorMessage: assistantResponse.error
-          }
+          success: false,
+          error: 'Generation did not complete as expected'
         };
       }
 
-      if (assistantResponse.status === 'completed') {
-        // Update status to completed with the generated meal plan
-        await this.updateStatus(asyncMealPlanId, 'completed', assistantResponse.data);
-        
-        return {
-          success: true,
-          data: {
-            ...this.mapDbToAsyncMealPlan(asyncMealPlan),
-            status: 'completed',
-            generatedMealPlan: assistantResponse.data,
-            completedAt: new Date().toISOString()
-          }
-        };
-      } else {
-        // Still pending
-        return {
-          success: true,
-          data: this.mapDbToAsyncMealPlan(asyncMealPlan)
-        };
-      }
-
+      // For other AI models that might use async generation in the future
+      return {
+        success: false,
+        error: 'Status checking not implemented for this AI model'
+      };
     } catch (error) {
       console.error('❌ Async Meal Plan Service - Error checking status:', error);
       return {
@@ -450,46 +427,21 @@ export class AsyncMealPlanService {
         };
       }
 
-      // Check with OpenAI Assistant if still pending
-      const assistantResponse = await this.openaiService.checkGenerationStatus(
-        asyncMealPlan.thread_id,
-        asyncMealPlan.run_id
-      );
-
-      if (!assistantResponse.success) {
-        // Update status to failed
-        await this.updateStatus(previewId, 'failed', null, assistantResponse.error);
-        
+      // Claude, Grok, and OpenAI complete synchronously - should never reach here for those models
+      if (asyncMealPlan.ai_model === 'claude' || asyncMealPlan.ai_model === 'grok' || asyncMealPlan.ai_model === 'openai') {
+        console.warn(`⚠️ Unexpected: ${asyncMealPlan.ai_model} meal plan in pending status - marking as failed`);
+        await this.updateStatus(previewId, 'failed', null, 'Generation did not complete immediately');
         return {
-          success: true,
-          data: {
-            ...this.mapDbToAsyncMealPlan(asyncMealPlan),
-            status: 'failed',
-            errorMessage: assistantResponse.error
-          }
+          success: false,
+          error: 'Generation did not complete as expected'
         };
       }
 
-      if (assistantResponse.status === 'completed') {
-        // Update status to completed with the generated meal plan
-        await this.updateStatus(previewId, 'completed', assistantResponse.data);
-        
-        return {
-          success: true,
-          data: {
-            ...this.mapDbToAsyncMealPlan(asyncMealPlan),
-            status: 'completed',
-            generatedMealPlan: assistantResponse.data,
-            completedAt: new Date().toISOString()
-          }
-        };
-      } else {
-        // Still pending
-        return {
-          success: true,
-          data: this.mapDbToAsyncMealPlan(asyncMealPlan)
-        };
-      }
+      // For other AI models that might use async generation in the future
+      return {
+        success: false,
+        error: 'Status checking not implemented for this AI model'
+      };
 
     } catch (error) {
       console.error('❌ Async Meal Plan Service - Error getting async meal plan by preview ID:', error);
@@ -896,7 +848,7 @@ export class AsyncMealPlanService {
     generatedMealPlan: any,
     days: number,
     startDate?: string,
-    aiModel: 'claude' | 'grok' = 'claude'
+    aiModel: 'claude' | 'grok' | 'openai' = 'claude'
   ): any {
     try {
       console.log('🔍 Received generatedMealPlan:', JSON.stringify(generatedMealPlan, null, 2).substring(0, 500));

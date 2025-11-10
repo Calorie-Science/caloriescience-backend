@@ -24,7 +24,7 @@ const selectRecipeSchema = Joi.object({
   recipeId: Joi.string().required(),
   customizations: Joi.object({
     recipeId: Joi.string().required(),
-    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required(),
+    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee', 'claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo').required(),
     modifications: Joi.array().items(
       Joi.object({
         type: Joi.string().valid('replace', 'omit', 'reduce', 'add').required(),
@@ -63,7 +63,7 @@ const updateCustomizationsSchema = Joi.object({
   autoCalculateNutrition: Joi.boolean().default(true).optional(), // Enable auto-calculation by default
   customizations: Joi.object({
     recipeId: Joi.string().required(),
-    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required(),
+    source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee', 'claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo').required(),
     modifications: Joi.array().items(
       Joi.object({
         type: Joi.string().valid('replace', 'omit', 'add').required(),
@@ -135,7 +135,7 @@ const replaceIngredientInPlanSchema = Joi.object({
   recipeId: Joi.string().required(),
   originalIngredient: Joi.string().required(),
   newIngredient: Joi.string().required(),
-  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee').required()
+  source: Joi.string().valid('edamam', 'spoonacular', 'manual', 'bonhappetee', 'claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo').required()
 });
 
 const updateInstructionsSchema = Joi.object({
@@ -1642,17 +1642,83 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
         };
       } else {
-        // Fetch from API if not in cache
-        debugCacheLookup.fetchedFromAPI = true;
-        let recipeDetails: any = null;
-        try {
-          // Pass the provider/source to avoid auto-detection issues with UUIDs
-          const provider = customizations.source as 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual' | undefined;
-          recipeDetails = await multiProviderService.getRecipeDetails(recipeId, provider);
-        } catch (error) {
-          console.warn(`⚠️ Could not fetch recipe from API: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          debugCacheLookup.apiFetchError = error instanceof Error ? error.message : 'Unknown error';
+        // Normalize GPT variants to 'openai'
+        let normalizedSource = customizations.source;
+        if (['gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo'].includes(customizations.source.toLowerCase())) {
+          console.log(`🔄 Normalizing source "${customizations.source}" to "openai"`);
+          normalizedSource = 'openai';
+          customizations.source = 'openai'; // Update the customizations object
         }
+
+        // Check if this is an AI-generated recipe (claude, grok, openai)
+        const isAIGeneratedRecipe = ['claude', 'grok', 'openai'].includes(normalizedSource);
+
+        if (isAIGeneratedRecipe) {
+          // AI-generated recipes don't exist in external APIs - use nutrition from draft
+          console.log(`🤖 AI-generated recipe detected (${customizations.source}) - using nutrition from draft`);
+          debugCacheLookup.isAIGenerated = true;
+
+          // Helper function to extract nutrition value (handles both 'value' and 'quantity' for backward compatibility)
+          const getNutritionValue = (nutrient: any): number => {
+            if (!nutrient) return 0;
+            if (typeof nutrient === 'number') return nutrient;
+            return nutrient.quantity || nutrient.value || 0;
+          };
+
+          // Build nutrition from recipe data in draft
+          const recipeAny = recipe as any;
+          if (recipeAny.nutrition && typeof recipeAny.nutrition === 'object') {
+            originalNutritionWithMicros = recipeAny.nutrition;
+          } else {
+            // Build nutrition object from flat values
+            originalNutritionWithMicros = {
+              calories: { quantity: getNutritionValue(recipe.calories), unit: 'kcal' },
+              macros: {
+                protein: { quantity: getNutritionValue(recipe.protein), unit: 'g' },
+                carbs: { quantity: getNutritionValue(recipe.carbs), unit: 'g' },
+                fat: { quantity: getNutritionValue(recipe.fat), unit: 'g' },
+                fiber: { quantity: getNutritionValue(recipe.fiber), unit: 'g' },
+                sugar: { quantity: getNutritionValue(recipeAny.sugar || recipeAny.nutrition?.macros?.sugar), unit: 'g' },
+                sodium: { quantity: getNutritionValue(recipeAny.sodium || recipeAny.nutrition?.macros?.sodium), unit: 'mg' }
+              },
+              micros: recipeAny.nutrition?.micros || { vitamins: {}, minerals: {} }
+            };
+          }
+
+          // Set recipe servings
+          recipeServings = recipe.servings || 1;
+
+          // Set originalRecipe with ingredients from draft
+          originalRecipe = {
+            id: recipeId,
+            ingredients: recipe.ingredients || [],
+            servings: recipeServings
+          };
+
+          console.log('✅ Using nutrition from AI recipe:', {
+            calories: originalNutritionWithMicros.calories?.quantity,
+            protein: originalNutritionWithMicros.macros?.protein?.quantity,
+            servings: recipeServings
+          });
+
+          debugCacheLookup.finalNutrition = {
+            calories: originalNutritionWithMicros.calories?.quantity,
+            protein: originalNutritionWithMicros.macros?.protein?.quantity,
+            vitaminsCount: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
+            mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
+          };
+        } else {
+          // Fetch from API if not in cache (for non-AI recipes)
+          debugCacheLookup.fetchedFromAPI = true;
+          let recipeDetails: any = null;
+          try {
+            // Pass the provider/source to avoid auto-detection issues with UUIDs
+            const provider = customizations.source as 'edamam' | 'spoonacular' | 'bonhappetee' | 'manual' | undefined;
+            recipeDetails = await multiProviderService.getRecipeDetails(recipeId, provider);
+          } catch (error) {
+            console.warn(`⚠️ Could not fetch recipe from API: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            debugCacheLookup.apiFetchError = error instanceof Error ? error.message : 'Unknown error';
+          }
 
         if (recipeDetails) {
           debugCacheLookup.apiRecipeServings = recipeDetails.servings;
@@ -1757,7 +1823,8 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             micros: { vitamins: {}, minerals: {} }
           };
         }
-      }
+        } // Close else block for non-AI recipes (API fetch)
+      } // Close else block for when not in cache
       } // End of else block for normal recipes (not simple ingredients)
 
       if (!originalRecipe || !originalNutritionWithMicros) {
