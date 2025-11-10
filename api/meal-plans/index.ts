@@ -3,6 +3,7 @@ import { requireAuth } from '../../lib/auth';
 import { MealProgramService } from '../../lib/mealProgramService';
 import { ClientGoalsService } from '../../lib/clientGoalsService';
 import { AsyncMealPlanService } from '../../lib/asyncMealPlanService';
+import { supabase } from '../../lib/supabase';
 
 const mealProgramService = new MealProgramService();
 const clientGoalsService = new ClientGoalsService();
@@ -186,11 +187,71 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           // Get active client goals
           const activeGoalResult = await clientGoalsService.getActiveClientGoal(clientId, user.id);
 
+          let clientGoals = activeGoalResult.data;
+
+          // If no active client goal, use EER from client's nutrition requirements
           if (!activeGoalResult.success || !activeGoalResult.data) {
-            return res.status(400).json({
-              error: 'No active client goal found',
-              message: 'Please set client goals before generating meal plan'
-            });
+            console.log('⚠️ No active client goal found, fetching EER from client data...');
+
+            // Fetch client data with nutrition requirements
+            const { data: client, error: clientError } = await supabase
+              .from('clients')
+              .select('*')
+              .eq('id', clientId)
+              .eq('nutritionist_id', user.id)
+              .single();
+
+            if (clientError || !client) {
+              return res.status(400).json({
+                error: 'Client not found',
+                message: 'Unable to find client data'
+              });
+            }
+
+            // Fetch nutrition requirements
+            const { data: nutritionRequirements } = await supabase
+              .from('client_nutrition_requirements')
+              .select('*')
+              .eq('client_id', clientId)
+              .eq('is_active', true)
+              .order('created_at', { ascending: false })
+              .limit(1);
+
+            const eerCalories = nutritionRequirements?.[0]?.eer_calories;
+
+            if (!eerCalories) {
+              return res.status(400).json({
+                error: 'No calorie goal found',
+                message: 'Please set client goals or ensure client has calculated EER'
+              });
+            }
+
+            // Create minimal client goals with EER and default to 3 meals
+            clientGoals = {
+              id: 'default',
+              clientId: clientId,
+              nutritionistId: user.id,
+              eerGoalCalories: eerCalories,
+              proteinGoalMin: 0,
+              proteinGoalMax: 0,
+              carbsGoalMin: 0,
+              carbsGoalMax: 0,
+              fatGoalMin: 0,
+              fatGoalMax: 0,
+              fiberGoalGrams: undefined,
+              waterGoalLiters: undefined,
+              allergies: [],
+              preferences: [],
+              cuisineTypes: [],
+              isActive: true,
+              goalStartDate: new Date().toISOString().split('T')[0],
+              goalEndDate: undefined,
+              notes: 'Auto-generated from EER',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+
+            console.log(`✅ Using EER of ${eerCalories} calories for meal plan generation`);
           }
 
           // Start async generation with Claude (returns complete draft in same format as automated/manual)
@@ -199,7 +260,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           const result = await asyncMealPlanService.startGeneration(
             clientId,
             user.id,
-            activeGoalResult.data,
+            clientGoals,
             req.body.additionalText,
             aiModel,
             days,

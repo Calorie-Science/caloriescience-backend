@@ -661,6 +661,9 @@ export class RecipeResponseStandardizationService {
     } else if (recipe.provider === 'manual') {
       // Manual recipes are already in database format, return directly without recursion
       return this.buildStandardizedResponse(recipe);
+    } else if (recipe.provider === 'bonhappetee') {
+      // Bonhappetee recipes are already in database format (similar to manual)
+      return this.buildStandardizedResponse(recipe);
     } else {
       throw new Error(`Unknown provider: ${recipe.provider}`);
     }

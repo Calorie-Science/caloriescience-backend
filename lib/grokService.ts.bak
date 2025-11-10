@@ -1,6 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-
-export interface ClaudeMealPlanRequest {
+export interface GrokMealPlanRequest {
   clientGoals: any;
   additionalText?: string;
   clientId: string;
@@ -9,7 +7,7 @@ export interface ClaudeMealPlanRequest {
   days?: number;
 }
 
-export interface ClaudeMealPlanResponse {
+export interface GrokMealPlanResponse {
   success: boolean;
   data?: any;
   error?: string;
@@ -17,31 +15,29 @@ export interface ClaudeMealPlanResponse {
   status?: 'completed' | 'failed';
 }
 
-export class ClaudeService {
-  private anthropic: Anthropic;
+export class GrokService {
+  private apiKey: string;
+  private baseUrl: string;
 
   constructor() {
-    // Using CLAUDE_API_KEY_V2 as the environment variable name
-    const apiKey = process.env.CLAUDE_API_KEY_V2;
-    if (!apiKey) {
-      throw new Error('CLAUDE_API_KEY_V2 environment variable is required');
-    }
+    this.apiKey = process.env.GROK_API_KEY || '';
+    this.baseUrl = 'https://api.x.ai/v1';
 
-    this.anthropic = new Anthropic({
-      apiKey
-    });
+    if (!this.apiKey) {
+      throw new Error('GROK_API_KEY environment variable is required');
+    }
   }
 
   /**
-   * Generate meal plan using Claude (synchronous version)
+   * Generate meal plan using Grok (synchronous version)
    */
-  async generateMealPlanSync(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
+  async generateMealPlanSync(request: GrokMealPlanRequest): Promise<GrokMealPlanResponse> {
     const maxRetries = 3;
     let attempt = 0;
 
     while (attempt < maxRetries) {
       try {
-        console.log(`🤖 Claude meal plan generation started (attempt ${attempt + 1}/${maxRetries})`);
+        console.log(`🤖 Grok meal plan generation started (attempt ${attempt + 1}/${maxRetries})`);
 
         // Warn if requesting too many days (risk of truncation)
         const days = request.days || 2;
@@ -52,77 +48,87 @@ export class ClaudeService {
         }
 
         const prompt = this.prepareInputMessage(request);
-        console.log('🤖 Claude prompt prepared');
+        console.log('🤖 Grok prompt prepared');
 
-        const stream = await this.anthropic.messages.stream({
-          model: 'claude-opus-4-1-20250805',
-          max_tokens: 32000, // Increased to 32K to handle multi-day plans with full nutrition data
-          temperature: 0.7,
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ]
+        // Call Grok API using OpenAI-compatible endpoint
+        const response = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'grok-3',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a professional nutritionist AI assistant that generates detailed meal plans in JSON format.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            temperature: 0.7,
+            max_tokens: 100000,
+            stream: false
+          })
         });
 
-        console.log('🤖 Claude streaming started');
-
-        // Collect the streamed response
-        let content = '';
-        for await (const chunk of stream) {
-          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-            content += chunk.delta.text;
-          }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('❌ Grok API error:', errorData);
+          throw new Error(`Grok API error: ${errorData.error?.message || response.statusText}`);
         }
 
-        const response = await stream.finalMessage();
-        console.log('🤖 Claude response received');
+        const responseData = await response.json();
+        console.log('🤖 Grok response received');
 
         // Log token usage for monitoring
-        if (response.usage) {
+        if (responseData.usage) {
           console.log('📊 Token usage:', {
-            input: response.usage.input_tokens,
-            output: response.usage.output_tokens,
-            total: (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0)
+            input: responseData.usage.prompt_tokens,
+            output: responseData.usage.completion_tokens,
+            total: responseData.usage.total_tokens
           });
 
           // Warn if output tokens are close to limit
-          const outputTokens = response.usage.output_tokens || 0;
+          const outputTokens = responseData.usage.completion_tokens || 0;
           if (outputTokens > 28000) {
             console.log('⚠️  Warning: Output tokens approaching max_tokens limit!');
             console.log('⚠️  Consider reducing days or simplifying meal plan structure');
           }
         }
 
-        if (content) {
-          console.log('🤖 Claude response content received');
-          
+        if (responseData.choices && responseData.choices[0]?.message?.content) {
+          let content = responseData.choices[0].message.content;
+          console.log('🤖 Grok response content received');
+
           // Declare jsonContent outside try block for error handling
           let jsonContent = '';
-          
+
           try {
             // Clean up the content
             content = content.trim();
-            console.log('🔍 Raw Claude response length:', content.length);
+            console.log('🔍 Raw Grok response length:', content.length);
             console.log('🔍 First 200 chars:', content.substring(0, 200));
             console.log('🔍 Last 200 chars:', content.substring(Math.max(0, content.length - 200)));
-            
+
             jsonContent = content;
-            
+
             // 1. First try: Extract from markdown code block if present
             let jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
             if (jsonMatch && jsonMatch[1]) {
               jsonContent = jsonMatch[1].trim();
               console.log('🤖 Extracted JSON from markdown block');
             }
-            
+
             // 2. Second try: Find JSON object (starts with { and ends with })
             else if (content.includes('{')) {
               const startIndex = content.indexOf('{');
               let braceCount = 0;
               let endIndex = -1;
-              
+
               for (let i = startIndex; i < content.length; i++) {
                 if (content[i] === '{') braceCount++;
                 if (content[i] === '}') braceCount--;
@@ -131,13 +137,13 @@ export class ClaudeService {
                   break;
                 }
               }
-              
+
               if (endIndex > startIndex) {
                 jsonContent = content.substring(startIndex, endIndex + 1);
                 console.log('🤖 Extracted JSON by brace matching');
               }
             }
-            
+
             // 3. Third try: Use regex to find JSON object
             else {
               jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -146,7 +152,7 @@ export class ClaudeService {
                 console.log('🤖 Extracted JSON with regex fallback');
               }
             }
-            
+
             // Clean up any remaining issues
             jsonContent = jsonContent
               .replace(/^[^{]*/, '') // Remove anything before first {
@@ -169,12 +175,12 @@ export class ClaudeService {
               console.log(`   Opening braces: ${openBraces}, Closing braces: ${closeBraces}, Diff: ${openBraces - closeBraces}`);
               console.log(`   Opening brackets: ${openBrackets}, Closing brackets: ${closeBrackets}, Diff: ${openBrackets - closeBrackets}`);
             }
-            
+
             // Validate JSON structure before parsing
             if (!jsonContent.startsWith('{') || !jsonContent.endsWith('}')) {
               throw new Error(`Invalid JSON structure: starts with '${jsonContent.charAt(0)}', ends with '${jsonContent.charAt(jsonContent.length - 1)}'`);
             }
-            
+
             // First try parsing without any fixes
             let mealPlanData;
             try {
@@ -206,7 +212,7 @@ export class ClaudeService {
             console.log('🔍 Top-level keys in parsed response:', Object.keys(mealPlanData));
             console.log('🔍 Has suggestions?', !!mealPlanData.suggestions);
             console.log('🔍 Has nutrition?', !!mealPlanData.nutrition);
-            
+
             // Validate the response structure
             if (!this.isValidMealPlanResponse(mealPlanData)) {
               console.error('❌ Validation failed. Response structure:', JSON.stringify(mealPlanData, null, 2).substring(0, 500));
@@ -216,74 +222,74 @@ export class ClaudeService {
               success: true,
               status: 'completed',
               data: mealPlanData,
-              messageId: response.id || `claude-${Date.now()}`
+              messageId: responseData.id || `grok-${Date.now()}`
             };
-            } catch (parseError) {
-              console.error('❌ Error parsing Claude JSON response:', parseError);
-              console.log('🔍 Raw Claude response content:', content);
-              console.log('🔍 Processed JSON content:', jsonContent);
-              
-              // Try one more time with a more aggressive fix
-              try {
-                let aggressivelyFixed = this.aggressiveJsonFix(jsonContent);
-                
-                // If we have position information, try to fix syntax errors at that position
-                const positionMatch = parseError instanceof Error ? parseError.message.match(/at position (\d+)/) : null;
-                if (positionMatch) {
-                  const errorPosition = parseInt(positionMatch[1]);
-                  aggressivelyFixed = this.fixJsonAtPosition(aggressivelyFixed, errorPosition);
-                }
-                const mealPlanData = JSON.parse(aggressivelyFixed);
-                console.log('✅ Successfully parsed JSON with aggressive fixes');
-                
-                if (this.isValidMealPlanResponse(mealPlanData)) {
-                  return {
-                    success: true,
-                    status: 'completed',
-                    data: mealPlanData,
-                    messageId: response.id || `claude-${Date.now()}`
-                  };
-                }
-              } catch (secondParseError) {
-                console.error('❌ Aggressive JSON fix also failed:', secondParseError);
+          } catch (parseError) {
+            console.error('❌ Error parsing Grok JSON response:', parseError);
+            console.log('🔍 Raw Grok response content:', content);
+            console.log('🔍 Processed JSON content:', jsonContent);
+
+            // Try one more time with a more aggressive fix
+            try {
+              let aggressivelyFixed = this.aggressiveJsonFix(jsonContent);
+
+              // If we have position information, try to fix syntax errors at that position
+              const positionMatch = parseError instanceof Error ? parseError.message.match(/at position (\d+)/) : null;
+              if (positionMatch) {
+                const errorPosition = parseInt(positionMatch[1]);
+                aggressivelyFixed = this.fixJsonAtPosition(aggressivelyFixed, errorPosition);
               }
-              
-              // If all JSON parsing attempts failed, return the raw text response
-              console.log('📄 JSON parsing failed completely, returning plaintext response');
-              return {
-                success: true,
-                status: 'completed',
-                data: {
-                  rawText: content,
-                  jsonParsingFailed: true,
-                  error: `JSON parsing failed: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
-                },
-                messageId: response.id || `claude-${Date.now()}`
-              };
+              const mealPlanData = JSON.parse(aggressivelyFixed);
+              console.log('✅ Successfully parsed JSON with aggressive fixes');
+
+              if (this.isValidMealPlanResponse(mealPlanData)) {
+                return {
+                  success: true,
+                  status: 'completed',
+                  data: mealPlanData,
+                  messageId: responseData.id || `grok-${Date.now()}`
+                };
+              }
+            } catch (secondParseError) {
+              console.error('❌ Aggressive JSON fix also failed:', secondParseError);
             }
+
+            // If all JSON parsing attempts failed, return the raw text response
+            console.log('📄 JSON parsing failed completely, returning plaintext response');
+            return {
+              success: true,
+              status: 'completed',
+              data: {
+                rawText: content,
+                jsonParsingFailed: true,
+                error: `JSON parsing failed: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
+              },
+              messageId: responseData.id || `grok-${Date.now()}`
+            };
+          }
         } else {
-          console.error('❌ No content in Claude response');
+          console.error('❌ No content in Grok response');
           return {
             success: false,
             status: 'failed',
-            error: 'No content received from Claude'
+            error: 'No content received from Grok'
           };
         }
       } catch (error) {
-        console.error(`❌ Error calling Claude API (attempt ${attempt + 1}):`, error);
-        
+        console.error(`❌ Error calling Grok API (attempt ${attempt + 1}):`, error);
+
         // Check if it's an overloaded error that we should retry
         const errorMessage = error instanceof Error ? error.message : String(error);
         const isOverloadedError = errorMessage.includes('Overloaded') || errorMessage.includes('overloaded') || errorMessage.includes('api_error');
-        
+
         if (isOverloadedError && attempt < maxRetries - 1) {
           const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 1s, 2s, 4s
-          console.log(`⏳ Claude API overloaded, retrying in ${delay}ms...`);
+          console.log(`⏳ Grok API overloaded, retrying in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           attempt++;
           continue;
         }
-        
+
         // If not retryable or max retries reached, return error
         return {
           success: false,
@@ -292,7 +298,7 @@ export class ClaudeService {
         };
       }
     }
-    
+
     // This should never be reached due to the return statements above
     return {
       success: false,
@@ -302,18 +308,19 @@ export class ClaudeService {
   }
 
   /**
-   * Generate meal plan using Claude (async version - calls sync internally)
+   * Generate meal plan using Grok (async version - calls sync internally)
    */
-  async generateMealPlan(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
+  async generateMealPlan(request: GrokMealPlanRequest): Promise<GrokMealPlanResponse> {
     return this.generateMealPlanSync(request);
   }
 
   /**
-   * Prepare the input message for Claude with strong allergen exclusion instructions
+   * Prepare the input message for Grok with strong allergen exclusion instructions
+   * (Similar to Claude prompt)
    */
-  private prepareInputMessage(request: ClaudeMealPlanRequest): string {
+  private prepareInputMessage(request: GrokMealPlanRequest): string {
     const { clientGoals, additionalText, mealProgram } = request;
-    
+
     let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.
 
 NUTRITIONAL TARGETS:
@@ -321,53 +328,53 @@ NUTRITIONAL TARGETS:
 - Protein: ${clientGoals.proteinGoalMin || 0}-${clientGoals.proteinGoalMax || 0}g
 - Carbs: ${clientGoals.carbsGoalMin || 0}-${clientGoals.carbsGoalMax || 0}g
 - Fat: ${clientGoals.fatGoalMin || 0}-${clientGoals.fatGoalMax || 0}g`;
-    
+
     if (clientGoals.fiberGoalGrams) {
       message += `\n- Fiber: ${clientGoals.fiberGoalGrams}g`;
     }
-    
+
     // CRITICAL: Add allergen exclusion
     if (clientGoals.allergies && clientGoals.allergies.length > 0) {
       message += `\n\n⚠️ ALLERGIES (EXCLUDE COMPLETELY): ${clientGoals.allergies.join(', ')}`;
       message += `\n- Exclude ALL forms, derivatives, and cross-contamination risks of these allergens.`;
     }
-    
+
     if (clientGoals.preferences && clientGoals.preferences.length > 0) {
       message += `\n- Dietary Preferences: ${clientGoals.preferences.join(', ')}`;
     }
-    
+
     if (clientGoals.cuisineTypes && clientGoals.cuisineTypes.length > 0) {
       message += `\n- Cuisine Types: ${clientGoals.cuisineTypes.join(', ')}`;
     }
-    
+
     if (clientGoals.notes) {
       message += `\n- Notes: ${clientGoals.notes}`;
     }
-    
+
     // Add meal program constraints
     if (mealProgram && mealProgram.meals && mealProgram.meals.length > 0) {
       message += `\n\nMEAL STRUCTURE (${mealProgram.meals.length} meals per day):`;
-      
+
       mealProgram.meals.forEach((meal: any) => {
         message += `\n${meal.mealOrder}. ${meal.mealName} (${meal.mealTime}) - ${meal.targetCalories || 'proportional'} cal`;
       });
     }
-    
+
     if (additionalText) {
       message += `\n\nADDITIONAL: ${additionalText}`;
     }
-    
+
     // Build default meal structure if no meal program provided (3 meals)
     const defaultMeals = [
       { mealName: 'breakfast', mealTime: '08:00', mealType: 'breakfast', mealOrder: 1 },
       { mealName: 'lunch', mealTime: '12:00', mealType: 'lunch', mealOrder: 2 },
       { mealName: 'dinner', mealTime: '18:00', mealType: 'dinner', mealOrder: 3 }
     ];
-    
-    const mealsToUse = (mealProgram && mealProgram.meals && mealProgram.meals.length > 0) 
-      ? mealProgram.meals 
+
+    const mealsToUse = (mealProgram && mealProgram.meals && mealProgram.meals.length > 0)
+      ? mealProgram.meals
       : defaultMeals;
-    
+
     message += `
 
 JSON FORMAT - COMPACT VERSION (return ONLY this structure):
@@ -386,7 +393,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
               "title": "Recipe Name Here",
               "image": null,
               "sourceUrl": null,
-              "source": "claude",
+              "source": "grok",
               "servings": 1,
               "fromCache": false,
               "calories": 500,
@@ -394,7 +401,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
               "carbs": 60,
               "fat": 15,
               "fiber": 8,
-              "nutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}},
+              "nutrition": {"calories": {"value": 500, "unit": "kcal"}, "macros": {"protein": {"value": 25, "unit": "g"}, "carbs": {"value": 60, "unit": "g"}, "fat": {"value": 15, "unit": "g"}, "fiber": {"value": 8, "unit": "g"}, "sugar": {"value": 5, "unit": "g"}, "sodium": {"value": 200, "unit": "mg"}, "cholesterol": {"value": 10, "unit": "mg"}, "saturatedFat": {"value": 2, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 3, "unit": "g"}, "polyunsaturatedFat": {"value": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"value": 800, "unit": "IU"}, "vitaminC": {"value": 90, "unit": "mg"}, "vitaminD": {"value": 2, "unit": "mcg"}, "vitaminE": {"value": 5, "unit": "mg"}, "vitaminK": {"value": 1, "unit": "mcg"}, "thiamin": {"value": 0.5, "unit": "mg"}, "riboflavin": {"value": 0.6, "unit": "mg"}, "niacin": {"value": 5, "unit": "mg"}, "vitaminB6": {"value": 0.8, "unit": "mg"}, "folate": {"value": 100, "unit": "mcg"}, "vitaminB12": {"value": 1, "unit": "mcg"}, "biotin": {"value": 10, "unit": "mcg"}, "pantothenicAcid": {"value": 2, "unit": "mg"}}, "minerals": {"calcium": {"value": 300, "unit": "mg"}, "iron": {"value": 8, "unit": "mg"}, "magnesium": {"value": 50, "unit": "mg"}, "phosphorus": {"value": 200, "unit": "mg"}, "potassium": {"value": 400, "unit": "mg"}, "zinc": {"value": 3, "unit": "mg"}, "copper": {"value": 0.5, "unit": "mg"}, "manganese": {"value": 1, "unit": "mg"}, "selenium": {"value": 20, "unit": "mcg"}, "iodine": {"value": 50, "unit": "mcg"}, "chromium": {"value": 10, "unit": "mcg"}, "molybdenum": {"value": 20, "unit": "mcg"}}}},
               "ingredients": [{"text": "1 cup ingredient", "quantity": 1, "measure": "cup", "food": "ingredient", "weight": 100}],
               "instructions": ["Cook ingredient", "Serve hot"],
               "isSelected": true,
@@ -403,7 +410,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
           ],
           "customizations": {},
           "selectedRecipeId": "recipe-1-breakfast",
-          "totalNutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}}
+          "totalNutrition": {"calories": {"value": 500, "unit": "kcal"}, "macros": {"protein": {"value": 25, "unit": "g"}, "carbs": {"value": 60, "unit": "g"}, "fat": {"value": 15, "unit": "g"}, "fiber": {"value": 8, "unit": "g"}, "sugar": {"value": 5, "unit": "g"}, "sodium": {"value": 200, "unit": "mg"}, "cholesterol": {"value": 10, "unit": "mg"}, "saturatedFat": {"value": 2, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 3, "unit": "g"}, "polyunsaturatedFat": {"value": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"value": 800, "unit": "IU"}, "vitaminC": {"value": 90, "unit": "mg"}, "vitaminD": {"value": 2, "unit": "mcg"}, "vitaminE": {"value": 5, "unit": "mg"}, "vitaminK": {"value": 1, "unit": "mcg"}, "thiamin": {"value": 0.5, "unit": "mg"}, "riboflavin": {"value": 0.6, "unit": "mg"}, "niacin": {"value": 5, "unit": "mg"}, "vitaminB6": {"value": 0.8, "unit": "mg"}, "folate": {"value": 100, "unit": "mcg"}, "vitaminB12": {"value": 1, "unit": "mcg"}, "biotin": {"value": 10, "unit": "mcg"}, "pantothenicAcid": {"value": 2, "unit": "mg"}}, "minerals": {"calcium": {"value": 300, "unit": "mg"}, "iron": {"value": 8, "unit": "mg"}, "magnesium": {"value": 50, "unit": "mg"}, "phosphorus": {"value": 200, "unit": "mg"}, "potassium": {"value": 400, "unit": "mg"}, "zinc": {"value": 3, "unit": "mg"}, "copper": {"value": 0.5, "unit": "mg"}, "manganese": {"value": 1, "unit": "mg"}, "selenium": {"value": 20, "unit": "mcg"}, "iodine": {"value": 50, "unit": "mcg"}, "chromium": {"value": 10, "unit": "mcg"}, "molybdenum": {"value": 20, "unit": "mcg"}}}}
         }
       }
     }
@@ -417,16 +424,16 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
           "${mealsToUse[0]?.mealName || 'breakfast'}": {
             "mealTime": "${mealsToUse[0]?.mealTime || '08:00'}",
             "targetCalories": ${mealsToUse[0]?.targetCalories || 500},
-            "calories": {"quantity": 500, "unit": "kcal"},
-            "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}},
-            "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}
+            "calories": {"value": 500, "unit": "kcal"},
+            "macros": {"protein": {"value": 25, "unit": "g"}, "carbs": {"value": 60, "unit": "g"}, "fat": {"value": 15, "unit": "g"}, "fiber": {"value": 8, "unit": "g"}, "sugar": {"value": 5, "unit": "g"}, "sodium": {"value": 200, "unit": "mg"}, "cholesterol": {"value": 10, "unit": "mg"}, "saturatedFat": {"value": 2, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 3, "unit": "g"}, "polyunsaturatedFat": {"value": 2, "unit": "g"}},
+            "micros": {"vitamins": {"vitaminA": {"value": 800, "unit": "IU"}, "vitaminC": {"value": 90, "unit": "mg"}, "vitaminD": {"value": 2, "unit": "mcg"}, "vitaminE": {"value": 5, "unit": "mg"}, "vitaminK": {"value": 1, "unit": "mcg"}, "thiamin": {"value": 0.5, "unit": "mg"}, "riboflavin": {"value": 0.6, "unit": "mg"}, "niacin": {"value": 5, "unit": "mg"}, "vitaminB6": {"value": 0.8, "unit": "mg"}, "folate": {"value": 100, "unit": "mcg"}, "vitaminB12": {"value": 1, "unit": "mcg"}, "biotin": {"value": 10, "unit": "mcg"}, "pantothenicAcid": {"value": 2, "unit": "mg"}}, "minerals": {"calcium": {"value": 300, "unit": "mg"}, "iron": {"value": 8, "unit": "mg"}, "magnesium": {"value": 50, "unit": "mg"}, "phosphorus": {"value": 200, "unit": "mg"}, "potassium": {"value": 400, "unit": "mg"}, "zinc": {"value": 3, "unit": "mg"}, "copper": {"value": 0.5, "unit": "mg"}, "manganese": {"value": 1, "unit": "mg"}, "selenium": {"value": 20, "unit": "mcg"}, "iodine": {"value": 50, "unit": "mcg"}, "chromium": {"value": 10, "unit": "mcg"}, "molybdenum": {"value": 20, "unit": "mcg"}}}
           }
         },
-        "dayTotal": {"calories": {"quantity": 2000, "unit": "kcal"}, "macros": {"protein": {"quantity": 150, "unit": "g"}, "carbs": {"quantity": 250, "unit": "g"}, "fat": {"quantity": 65, "unit": "g"}, "fiber": {"quantity": 30, "unit": "g"}, "sugar": {"quantity": 50, "unit": "g"}, "sodium": {"quantity": 2000, "unit": "mg"}, "cholesterol": {"quantity": 100, "unit": "mg"}, "saturatedFat": {"quantity": 20, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 25, "unit": "g"}, "polyunsaturatedFat": {"quantity": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 3000, "unit": "IU"}, "vitaminC": {"quantity": 300, "unit": "mg"}, "vitaminD": {"quantity": 10, "unit": "mcg"}, "vitaminE": {"quantity": 20, "unit": "mg"}, "vitaminK": {"quantity": 80, "unit": "mcg"}, "thiamin": {"quantity": 2, "unit": "mg"}, "riboflavin": {"quantity": 2.5, "unit": "mg"}, "niacin": {"quantity": 20, "unit": "mg"}, "vitaminB6": {"quantity": 2.5, "unit": "mg"}, "folate": {"quantity": 400, "unit": "mcg"}, "vitaminB12": {"quantity": 5, "unit": "mcg"}, "biotin": {"quantity": 50, "unit": "mcg"}, "pantothenicAcid": {"quantity": 8, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 1200, "unit": "mg"}, "iron": {"quantity": 18, "unit": "mg"}, "magnesium": {"quantity": 400, "unit": "mg"}, "phosphorus": {"quantity": 1200, "unit": "mg"}, "potassium": {"quantity": 3500, "unit": "mg"}, "zinc": {"quantity": 15, "unit": "mg"}, "copper": {"quantity": 2, "unit": "mg"}, "manganese": {"quantity": 5, "unit": "mg"}, "selenium": {"quantity": 70, "unit": "mcg"}, "iodine": {"quantity": 150, "unit": "mcg"}, "chromium": {"quantity": 35, "unit": "mcg"}, "molybdenum": {"quantity": 75, "unit": "mcg"}}}}
+        "dayTotal": {"calories": {"value": 2000, "unit": "kcal"}, "macros": {"protein": {"value": 150, "unit": "g"}, "carbs": {"value": 250, "unit": "g"}, "fat": {"value": 65, "unit": "g"}, "fiber": {"value": 30, "unit": "g"}, "sugar": {"value": 50, "unit": "g"}, "sodium": {"value": 2000, "unit": "mg"}, "cholesterol": {"value": 100, "unit": "mg"}, "saturatedFat": {"value": 20, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 25, "unit": "g"}, "polyunsaturatedFat": {"value": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"value": 3000, "unit": "IU"}, "vitaminC": {"value": 300, "unit": "mg"}, "vitaminD": {"value": 10, "unit": "mcg"}, "vitaminE": {"value": 20, "unit": "mg"}, "vitaminK": {"value": 80, "unit": "mcg"}, "thiamin": {"value": 2, "unit": "mg"}, "riboflavin": {"value": 2.5, "unit": "mg"}, "niacin": {"value": 20, "unit": "mg"}, "vitaminB6": {"value": 2.5, "unit": "mg"}, "folate": {"value": 400, "unit": "mcg"}, "vitaminB12": {"value": 5, "unit": "mcg"}, "biotin": {"value": 50, "unit": "mcg"}, "pantothenicAcid": {"value": 8, "unit": "mg"}}, "minerals": {"calcium": {"value": 1200, "unit": "mg"}, "iron": {"value": 18, "unit": "mg"}, "magnesium": {"value": 400, "unit": "mg"}, "phosphorus": {"value": 1200, "unit": "mg"}, "potassium": {"value": 3500, "unit": "mg"}, "zinc": {"value": 15, "unit": "mg"}, "copper": {"value": 2, "unit": "mg"}, "manganese": {"value": 5, "unit": "mg"}, "selenium": {"value": 70, "unit": "mcg"}, "iodine": {"value": 150, "unit": "mcg"}, "chromium": {"value": 35, "unit": "mcg"}, "molybdenum": {"value": 75, "unit": "mcg"}}}}
       }
     ],
-    "overall": {"calories": {"quantity": 4000, "unit": "kcal"}, "macros": {"protein": {"quantity": 300, "unit": "g"}, "carbs": {"quantity": 500, "unit": "g"}, "fat": {"quantity": 130, "unit": "g"}, "fiber": {"quantity": 60, "unit": "g"}, "sugar": {"quantity": 100, "unit": "g"}, "sodium": {"quantity": 4000, "unit": "mg"}, "cholesterol": {"quantity": 200, "unit": "mg"}, "saturatedFat": {"quantity": 40, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 50, "unit": "g"}, "polyunsaturatedFat": {"quantity": 30, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 6000, "unit": "IU"}, "vitaminC": {"quantity": 600, "unit": "mg"}, "vitaminD": {"quantity": 20, "unit": "mcg"}, "vitaminE": {"quantity": 40, "unit": "mg"}, "vitaminK": {"quantity": 160, "unit": "mcg"}, "thiamin": {"quantity": 4, "unit": "mg"}, "riboflavin": {"quantity": 5, "unit": "mg"}, "niacin": {"quantity": 40, "unit": "mg"}, "vitaminB6": {"quantity": 5, "unit": "mg"}, "folate": {"quantity": 800, "unit": "mcg"}, "vitaminB12": {"quantity": 10, "unit": "mcg"}, "biotin": {"quantity": 100, "unit": "mcg"}, "pantothenicAcid": {"quantity": 16, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 2400, "unit": "mg"}, "iron": {"quantity": 36, "unit": "mg"}, "magnesium": {"quantity": 800, "unit": "mg"}, "phosphorus": {"quantity": 2400, "unit": "mg"}, "potassium": {"quantity": 7000, "unit": "mg"}, "zinc": {"quantity": 30, "unit": "mg"}, "copper": {"quantity": 4, "unit": "mg"}, "manganese": {"quantity": 10, "unit": "mg"}, "selenium": {"quantity": 140, "unit": "mcg"}, "iodine": {"quantity": 300, "unit": "mcg"}, "chromium": {"quantity": 70, "unit": "mcg"}, "molybdenum": {"quantity": 150, "unit": "mcg"}}}},
-    "dailyAverage": {"calories": {"quantity": 2000, "unit": "kcal"}, "macros": {"protein": {"quantity": 150, "unit": "g"}, "carbs": {"quantity": 250, "unit": "g"}, "fat": {"quantity": 65, "unit": "g"}, "fiber": {"quantity": 30, "unit": "g"}, "sugar": {"quantity": 50, "unit": "g"}, "sodium": {"quantity": 2000, "unit": "mg"}, "cholesterol": {"quantity": 100, "unit": "mg"}, "saturatedFat": {"quantity": 20, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 25, "unit": "g"}, "polyunsaturatedFat": {"quantity": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 3000, "unit": "IU"}, "vitaminC": {"quantity": 300, "unit": "mg"}, "vitaminD": {"quantity": 10, "unit": "mcg"}, "vitaminE": {"quantity": 20, "unit": "mg"}, "vitaminK": {"quantity": 80, "unit": "mcg"}, "thiamin": {"quantity": 2, "unit": "mg"}, "riboflavin": {"quantity": 2.5, "unit": "mg"}, "niacin": {"quantity": 20, "unit": "mg"}, "vitaminB6": {"quantity": 2.5, "unit": "mg"}, "folate": {"quantity": 400, "unit": "mcg"}, "vitaminB12": {"quantity": 5, "unit": "mcg"}, "biotin": {"quantity": 50, "unit": "mcg"}, "pantothenicAcid": {"quantity": 8, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 1200, "unit": "mg"}, "iron": {"quantity": 18, "unit": "mg"}, "magnesium": {"quantity": 400, "unit": "mg"}, "phosphorus": {"quantity": 1200, "unit": "mg"}, "potassium": {"quantity": 3500, "unit": "mg"}, "zinc": {"quantity": 15, "unit": "mg"}, "copper": {"quantity": 2, "unit": "mg"}, "manganese": {"quantity": 5, "unit": "mg"}, "selenium": {"quantity": 70, "unit": "mcg"}, "iodine": {"quantity": 150, "unit": "mcg"}, "chromium": {"quantity": 35, "unit": "mcg"}, "molybdenum": {"quantity": 75, "unit": "mcg"}}}}
+    "overall": {"calories": {"value": 4000, "unit": "kcal"}, "macros": {"protein": {"value": 300, "unit": "g"}, "carbs": {"value": 500, "unit": "g"}, "fat": {"value": 130, "unit": "g"}, "fiber": {"value": 60, "unit": "g"}, "sugar": {"value": 100, "unit": "g"}, "sodium": {"value": 4000, "unit": "mg"}, "cholesterol": {"value": 200, "unit": "mg"}, "saturatedFat": {"value": 40, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 50, "unit": "g"}, "polyunsaturatedFat": {"value": 30, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"value": 6000, "unit": "IU"}, "vitaminC": {"value": 600, "unit": "mg"}, "vitaminD": {"value": 20, "unit": "mcg"}, "vitaminE": {"value": 40, "unit": "mg"}, "vitaminK": {"value": 160, "unit": "mcg"}, "thiamin": {"value": 4, "unit": "mg"}, "riboflavin": {"value": 5, "unit": "mg"}, "niacin": {"value": 40, "unit": "mg"}, "vitaminB6": {"value": 5, "unit": "mg"}, "folate": {"value": 800, "unit": "mcg"}, "vitaminB12": {"value": 10, "unit": "mcg"}, "biotin": {"value": 100, "unit": "mcg"}, "pantothenicAcid": {"value": 16, "unit": "mg"}}, "minerals": {"calcium": {"value": 2400, "unit": "mg"}, "iron": {"value": 36, "unit": "mg"}, "magnesium": {"value": 800, "unit": "mg"}, "phosphorus": {"value": 2400, "unit": "mg"}, "potassium": {"value": 7000, "unit": "mg"}, "zinc": {"value": 30, "unit": "mg"}, "copper": {"value": 4, "unit": "mg"}, "manganese": {"value": 10, "unit": "mg"}, "selenium": {"value": 140, "unit": "mcg"}, "iodine": {"value": 300, "unit": "mcg"}, "chromium": {"value": 70, "unit": "mcg"}, "molybdenum": {"value": 150, "unit": "mcg"}}}},
+    "dailyAverage": {"calories": {"value": 2000, "unit": "kcal"}, "macros": {"protein": {"value": 150, "unit": "g"}, "carbs": {"value": 250, "unit": "g"}, "fat": {"value": 65, "unit": "g"}, "fiber": {"value": 30, "unit": "g"}, "sugar": {"value": 50, "unit": "g"}, "sodium": {"value": 2000, "unit": "mg"}, "cholesterol": {"value": 100, "unit": "mg"}, "saturatedFat": {"value": 20, "unit": "g"}, "transFat": {"value": 0, "unit": "g"}, "monounsaturatedFat": {"value": 25, "unit": "g"}, "polyunsaturatedFat": {"value": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"value": 3000, "unit": "IU"}, "vitaminC": {"value": 300, "unit": "mg"}, "vitaminD": {"value": 10, "unit": "mcg"}, "vitaminE": {"value": 20, "unit": "mg"}, "vitaminK": {"value": 80, "unit": "mcg"}, "thiamin": {"value": 2, "unit": "mg"}, "riboflavin": {"value": 2.5, "unit": "mg"}, "niacin": {"value": 20, "unit": "mg"}, "vitaminB6": {"value": 2.5, "unit": "mg"}, "folate": {"value": 400, "unit": "mcg"}, "vitaminB12": {"value": 5, "unit": "mcg"}, "biotin": {"value": 50, "unit": "mcg"}, "pantothenicAcid": {"value": 8, "unit": "mg"}}, "minerals": {"calcium": {"value": 1200, "unit": "mg"}, "iron": {"value": 18, "unit": "mg"}, "magnesium": {"value": 400, "unit": "mg"}, "phosphorus": {"value": 1200, "unit": "mg"}, "potassium": {"value": 3500, "unit": "mg"}, "zinc": {"value": 15, "unit": "mg"}, "copper": {"value": 2, "unit": "mg"}, "manganese": {"value": 5, "unit": "mg"}, "selenium": {"value": 70, "unit": "mcg"}, "iodine": {"value": 150, "unit": "mcg"}, "chromium": {"value": 35, "unit": "mcg"}, "molybdenum": {"value": 75, "unit": "mcg"}}}}
   }
 }
 
@@ -443,7 +450,7 @@ CRITICAL JSON SYNTAX RULES - MUST FOLLOW EXACTLY:
 10. null should NOT be in quotes: null not "null"
 11. Ensure ALL braces and brackets are properly closed
 12. NO single quotes - ONLY double quotes for strings
-13. Escape special characters in strings: \" \\ \n \t
+13. Escape special characters in strings: \\" \\\\ \\n \\t
 14. NO comments in JSON (// or /* */)
 15. NO trailing commas before closing } or ]
 
@@ -472,7 +479,7 @@ NUTRITION STRUCTURE RULES:
 35. Minerals MUST include: calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
 36. If a nutrient value is unknown, use 0 - NEVER omit any nutrient field
 37. dayTotal, overall, and dailyAverage MUST also include ALL complete macros AND micros
-38. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
+38. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"value": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
 39. EACH meal's "totalNutrition" field MUST use same structured format
 40. DO NOT use flat format like {"calories": 500, "protein": 25}
 
@@ -652,21 +659,21 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
    */
   private fixJsonAtPosition(jsonString: string, errorPosition: number): string {
     if (errorPosition >= jsonString.length) return jsonString;
-    
+
     let fixed = jsonString;
     const context = 50; // Characters to check around the error position
     const start = Math.max(0, errorPosition - context);
     const end = Math.min(jsonString.length, errorPosition + context);
     const errorArea = jsonString.substring(start, end);
-    
+
     console.log(`🔍 Fixing JSON at position ${errorPosition}`);
     console.log(`🔍 Error area: "${errorArea}"`);
-    
+
     // Check what character is at the error position
     const errorChar = jsonString[errorPosition];
     const prevChar = errorPosition > 0 ? jsonString[errorPosition - 1] : '';
     const nextChar = errorPosition < jsonString.length - 1 ? jsonString[errorPosition + 1] : '';
-    
+
     // Common fixes based on the error context
     if (errorChar === '{' && prevChar !== ',' && prevChar !== '[' && prevChar !== ':') {
       // Missing comma before object
@@ -685,7 +692,7 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
       fixed = jsonString.substring(0, errorPosition) + ',' + jsonString.substring(errorPosition);
       console.log('🔧 Added missing comma between elements');
     }
-    
+
     return fixed;
   }
 
@@ -696,32 +703,32 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
     try {
       // Check basic structure - now expecting suggestions and nutrition at top level
       if (!data || typeof data !== 'object') return false;
-      
+
       // Check for required top-level properties
       if (!data.suggestions || !Array.isArray(data.suggestions)) return false;
       if (!data.nutrition || typeof data.nutrition !== 'object') return false;
-      
+
       // Check that we have at least one day
       if (data.suggestions.length === 0) return false;
-      
+
       const firstDay = data.suggestions[0];
       if (!firstDay.day || !firstDay.date || !firstDay.meals) return false;
       if (typeof firstDay.meals !== 'object') return false;
-      
+
       // Check that we have at least one meal
       const mealNames = Object.keys(firstDay.meals);
       if (mealNames.length === 0) return false;
-      
+
       // Validate first meal structure
       const firstMeal = firstDay.meals[mealNames[0]];
       if (!firstMeal.recipes || !Array.isArray(firstMeal.recipes)) return false;
       if (!firstMeal.totalNutrition || typeof firstMeal.totalNutrition !== 'object') return false;
-      
+
       // Check nutrition structure
       if (!data.nutrition.byDay || !Array.isArray(data.nutrition.byDay)) return false;
       if (!data.nutrition.overall || typeof data.nutrition.overall !== 'object') return false;
       if (!data.nutrition.dailyAverage || typeof data.nutrition.dailyAverage !== 'object') return false;
-      
+
       console.log('✅ Meal plan response structure is valid (manual/automated format)');
       return true;
     } catch (error) {
