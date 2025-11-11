@@ -212,6 +212,12 @@ export class ClaudeService {
               console.error('❌ Validation failed. Response structure:', JSON.stringify(mealPlanData, null, 2).substring(0, 500));
               throw new Error('Response does not match expected meal plan structure');
             }
+
+            // Calculate byDay, overall, and dailyAverage nutrition from the suggestions
+            console.log('🧮 Calculating nutrition aggregates...');
+            mealPlanData.nutrition = this.calculateNutritionAggregates(mealPlanData.suggestions);
+            console.log('✅ Nutrition aggregates calculated');
+
             return {
               success: true,
               status: 'completed',
@@ -408,26 +414,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
       }
     }
   ],
-  "nutrition": {
-    "byDay": [
-      {
-        "day": 1,
-        "date": "2025-10-29",
-        "meals": {
-          "${mealsToUse[0]?.mealName || 'breakfast'}": {
-            "mealTime": "${mealsToUse[0]?.mealTime || '08:00'}",
-            "targetCalories": ${mealsToUse[0]?.targetCalories || 500},
-            "calories": {"quantity": 500, "unit": "kcal"},
-            "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}},
-            "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}
-          }
-        },
-        "dayTotal": {"calories": {"quantity": 2000, "unit": "kcal"}, "macros": {"protein": {"quantity": 150, "unit": "g"}, "carbs": {"quantity": 250, "unit": "g"}, "fat": {"quantity": 65, "unit": "g"}, "fiber": {"quantity": 30, "unit": "g"}, "sugar": {"quantity": 50, "unit": "g"}, "sodium": {"quantity": 2000, "unit": "mg"}, "cholesterol": {"quantity": 100, "unit": "mg"}, "saturatedFat": {"quantity": 20, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 25, "unit": "g"}, "polyunsaturatedFat": {"quantity": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 3000, "unit": "IU"}, "vitaminC": {"quantity": 300, "unit": "mg"}, "vitaminD": {"quantity": 10, "unit": "mcg"}, "vitaminE": {"quantity": 20, "unit": "mg"}, "vitaminK": {"quantity": 80, "unit": "mcg"}, "thiamin": {"quantity": 2, "unit": "mg"}, "riboflavin": {"quantity": 2.5, "unit": "mg"}, "niacin": {"quantity": 20, "unit": "mg"}, "vitaminB6": {"quantity": 2.5, "unit": "mg"}, "folate": {"quantity": 400, "unit": "mcg"}, "vitaminB12": {"quantity": 5, "unit": "mcg"}, "biotin": {"quantity": 50, "unit": "mcg"}, "pantothenicAcid": {"quantity": 8, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 1200, "unit": "mg"}, "iron": {"quantity": 18, "unit": "mg"}, "magnesium": {"quantity": 400, "unit": "mg"}, "phosphorus": {"quantity": 1200, "unit": "mg"}, "potassium": {"quantity": 3500, "unit": "mg"}, "zinc": {"quantity": 15, "unit": "mg"}, "copper": {"quantity": 2, "unit": "mg"}, "manganese": {"quantity": 5, "unit": "mg"}, "selenium": {"quantity": 70, "unit": "mcg"}, "iodine": {"quantity": 150, "unit": "mcg"}, "chromium": {"quantity": 35, "unit": "mcg"}, "molybdenum": {"quantity": 75, "unit": "mcg"}}}}
-      }
-    ],
-    "overall": {"calories": {"quantity": 4000, "unit": "kcal"}, "macros": {"protein": {"quantity": 300, "unit": "g"}, "carbs": {"quantity": 500, "unit": "g"}, "fat": {"quantity": 130, "unit": "g"}, "fiber": {"quantity": 60, "unit": "g"}, "sugar": {"quantity": 100, "unit": "g"}, "sodium": {"quantity": 4000, "unit": "mg"}, "cholesterol": {"quantity": 200, "unit": "mg"}, "saturatedFat": {"quantity": 40, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 50, "unit": "g"}, "polyunsaturatedFat": {"quantity": 30, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 6000, "unit": "IU"}, "vitaminC": {"quantity": 600, "unit": "mg"}, "vitaminD": {"quantity": 20, "unit": "mcg"}, "vitaminE": {"quantity": 40, "unit": "mg"}, "vitaminK": {"quantity": 160, "unit": "mcg"}, "thiamin": {"quantity": 4, "unit": "mg"}, "riboflavin": {"quantity": 5, "unit": "mg"}, "niacin": {"quantity": 40, "unit": "mg"}, "vitaminB6": {"quantity": 5, "unit": "mg"}, "folate": {"quantity": 800, "unit": "mcg"}, "vitaminB12": {"quantity": 10, "unit": "mcg"}, "biotin": {"quantity": 100, "unit": "mcg"}, "pantothenicAcid": {"quantity": 16, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 2400, "unit": "mg"}, "iron": {"quantity": 36, "unit": "mg"}, "magnesium": {"quantity": 800, "unit": "mg"}, "phosphorus": {"quantity": 2400, "unit": "mg"}, "potassium": {"quantity": 7000, "unit": "mg"}, "zinc": {"quantity": 30, "unit": "mg"}, "copper": {"quantity": 4, "unit": "mg"}, "manganese": {"quantity": 10, "unit": "mg"}, "selenium": {"quantity": 140, "unit": "mcg"}, "iodine": {"quantity": 300, "unit": "mcg"}, "chromium": {"quantity": 70, "unit": "mcg"}, "molybdenum": {"quantity": 150, "unit": "mcg"}}}},
-    "dailyAverage": {"calories": {"quantity": 2000, "unit": "kcal"}, "macros": {"protein": {"quantity": 150, "unit": "g"}, "carbs": {"quantity": 250, "unit": "g"}, "fat": {"quantity": 65, "unit": "g"}, "fiber": {"quantity": 30, "unit": "g"}, "sugar": {"quantity": 50, "unit": "g"}, "sodium": {"quantity": 2000, "unit": "mg"}, "cholesterol": {"quantity": 100, "unit": "mg"}, "saturatedFat": {"quantity": 20, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 25, "unit": "g"}, "polyunsaturatedFat": {"quantity": 15, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 3000, "unit": "IU"}, "vitaminC": {"quantity": 300, "unit": "mg"}, "vitaminD": {"quantity": 10, "unit": "mcg"}, "vitaminE": {"quantity": 20, "unit": "mg"}, "vitaminK": {"quantity": 80, "unit": "mcg"}, "thiamin": {"quantity": 2, "unit": "mg"}, "riboflavin": {"quantity": 2.5, "unit": "mg"}, "niacin": {"quantity": 20, "unit": "mg"}, "vitaminB6": {"quantity": 2.5, "unit": "mg"}, "folate": {"quantity": 400, "unit": "mcg"}, "vitaminB12": {"quantity": 5, "unit": "mcg"}, "biotin": {"quantity": 50, "unit": "mcg"}, "pantothenicAcid": {"quantity": 8, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 1200, "unit": "mg"}, "iron": {"quantity": 18, "unit": "mg"}, "magnesium": {"quantity": 400, "unit": "mg"}, "phosphorus": {"quantity": 1200, "unit": "mg"}, "potassium": {"quantity": 3500, "unit": "mg"}, "zinc": {"quantity": 15, "unit": "mg"}, "copper": {"quantity": 2, "unit": "mg"}, "manganese": {"quantity": 5, "unit": "mg"}, "selenium": {"quantity": 70, "unit": "mcg"}, "iodine": {"quantity": 150, "unit": "mcg"}, "chromium": {"quantity": 35, "unit": "mcg"}, "molybdenum": {"quantity": 75, "unit": "mcg"}}}}
-  }
+  "nutrition": {"byDay": [], "overall": {}, "dailyAverage": {}}
 }
 
 CRITICAL JSON SYNTAX RULES - MUST FOLLOW EXACTLY:
@@ -454,24 +441,35 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 19. Each meal MUST have: mealTime, targetCalories, recipes array, customizations object, selectedRecipeId, totalNutrition
 20. Each recipe MUST have: id (unique), title, nutrition object, ingredients array, instructions array
 21. totalNutrition for each meal = sum of all recipes in that meal's recipes array
-22. nutrition.byDay[].dayTotal = sum of all meals for that day
-23. nutrition.overall and nutrition.dailyAverage should match target goals as closely as possible
-24. Generate ${request.days || 2} days of meals (ONLY ${request.days || 2} DAYS!)
-25. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
-26. Keep instructions SHORT (2-3 steps max per recipe)
-27. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
-28. Dates should increment: day 1 = today, day 2 = tomorrow, etc.
-29. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
-30. Use COMPACT JSON formatting (minimize whitespace)
+22. Leave nutrition.byDay as empty array [] - we will calculate it on the backend
+23. Leave nutrition.overall as empty object {} - we will calculate it on the backend
+24. Leave nutrition.dailyAverage as empty object {} - we will calculate it on the backend
+25. Generate ${request.days || 2} days of meals (ONLY ${request.days || 2} DAYS!)
+26. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
+27. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
+28. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
+29. Dates should increment: day 1 = today, day 2 = tomorrow, etc.
+30. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
+31. Use COMPACT JSON formatting (minimize whitespace)
 
 NUTRITION STRUCTURE RULES:
-31. EVERY meal in nutrition.byDay[].meals MUST include BOTH complete macros AND micros
-32. ALL macros MUST be included (even if 0): protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
-33. ALL micros MUST be included in nested structure with vitamins and minerals
-34. Vitamins MUST include: vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
-35. Minerals MUST include: calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
-36. If a nutrient value is unknown, use 0 - NEVER omit any nutrient field
-37. dayTotal, overall, and dailyAverage MUST also include ALL complete macros AND micros
+32. EVERY recipe and meal MUST include BOTH complete macros AND micros
+33. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
+34. ALL micros MUST be included in nested structure with vitamins and minerals
+35. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
+36. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
+37. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
+   - Calculate nutrient values based on actual ingredients used - BE SPECIFIC AND REALISTIC
+   - For cholesterol: Only animal products contain cholesterol (eggs ~186mg, chicken ~85mg, fish ~50-70mg, dairy/ghee ~20-30mg per serving). ALL plant-based foods = 0mg (rice, dosa, vegetables, vegetable oils, grains, lentils, nuts have ZERO cholesterol).
+   - For vitamin B12: Animal products are rich sources (chicken 100g = 0.3mcg, fish 100g = 2-8mcg, eggs = 0.6mcg, dairy = 0.4-1.2mcg). Plant-based meals typically 0-0.1mcg unless fortified.
+   - For vitamin D: Fatty fish (salmon 100g = 10-25mcg, mackerel = 5-10mcg), egg yolk = 2mcg, fortified dairy = 1-2mcg. Plant-based meals = 0-0.5mcg unless fortified (mushrooms/fortified products).
+   - For saturatedFat: Animal products (chicken skin = 3-4g/100g, red meat = 5-10g/100g), coconut oil = 12g/tablespoon, ghee = 8g/tablespoon, palm oil = 7g/tablespoon. Calculate based on actual ingredients.
+   - For transFat: Mainly in processed/fried foods. Natural whole foods = 0g or trace (<0.1g).
+   - NEVER default all nutrients to 0 - this is INCORRECT and LAZY
+   - Use your knowledge of food composition to estimate realistic values
+   - Example: 100g cooked chicken breast should have ~0.3mcg B12, ~0.1mcg vitamin D, ~85mg cholesterol, ~1g saturated fat
+   - Example: 1 egg should have ~0.6mcg B12, ~2mcg vitamin D, ~186mg cholesterol, ~1.6g saturated fat
+   - Example: Dosa with sambar (no animal products) should have ~0mcg B12, ~0mcg vitamin D, 0mg cholesterol, ~0.5g saturated fat (from oil)
 38. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
 39. EACH meal's "totalNutrition" field MUST use same structured format
 40. DO NOT use flat format like {"calories": 500, "protein": 25}
@@ -717,10 +715,10 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
       if (!firstMeal.recipes || !Array.isArray(firstMeal.recipes)) return false;
       if (!firstMeal.totalNutrition || typeof firstMeal.totalNutrition !== 'object') return false;
       
-      // Check nutrition structure
-      if (!data.nutrition.byDay || !Array.isArray(data.nutrition.byDay)) return false;
-      if (!data.nutrition.overall || typeof data.nutrition.overall !== 'object') return false;
-      if (!data.nutrition.dailyAverage || typeof data.nutrition.dailyAverage !== 'object') return false;
+      // Check nutrition structure exists (can be empty - will be calculated later)
+      if (data.nutrition.byDay !== undefined && !Array.isArray(data.nutrition.byDay)) return false;
+      if (data.nutrition.overall !== undefined && typeof data.nutrition.overall !== 'object') return false;
+      if (data.nutrition.dailyAverage !== undefined && typeof data.nutrition.dailyAverage !== 'object') return false;
       
       console.log('✅ Meal plan response structure is valid (manual/automated format)');
       return true;
@@ -728,5 +726,164 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
       console.error('❌ Meal plan validation error:', error);
       return false;
     }
+  }
+
+  /**
+   * Calculate nutrition aggregates (byDay, overall, dailyAverage) from suggestions
+   */
+  private calculateNutritionAggregates(suggestions: any[]): any {
+    const byDay: any[] = [];
+    const totalDays = suggestions.length;
+
+    // Helper function to create empty nutrient structure (with all 13 vitamins and 12 minerals)
+    const createEmptyNutrient = () => ({
+      calories: { quantity: 0, unit: 'kcal' },
+      macros: {
+        protein: { quantity: 0, unit: 'g' },
+        carbs: { quantity: 0, unit: 'g' },
+        fat: { quantity: 0, unit: 'g' },
+        fiber: { quantity: 0, unit: 'g' },
+        sugar: { quantity: 0, unit: 'g' },
+        sodium: { quantity: 0, unit: 'mg' },
+        cholesterol: { quantity: 0, unit: 'mg' },
+        saturatedFat: { quantity: 0, unit: 'g' },
+        transFat: { quantity: 0, unit: 'g' },
+        monounsaturatedFat: { quantity: 0, unit: 'g' },
+        polyunsaturatedFat: { quantity: 0, unit: 'g' }
+      },
+      micros: {
+        vitamins: {
+          vitaminA: { quantity: 0, unit: 'IU' },
+          vitaminC: { quantity: 0, unit: 'mg' },
+          vitaminD: { quantity: 0, unit: 'mcg' },
+          vitaminE: { quantity: 0, unit: 'mg' },
+          vitaminK: { quantity: 0, unit: 'mcg' },
+          thiamin: { quantity: 0, unit: 'mg' },
+          riboflavin: { quantity: 0, unit: 'mg' },
+          niacin: { quantity: 0, unit: 'mg' },
+          vitaminB6: { quantity: 0, unit: 'mg' },
+          folate: { quantity: 0, unit: 'mcg' },
+          vitaminB12: { quantity: 0, unit: 'mcg' },
+          biotin: { quantity: 0, unit: 'mcg' },
+          pantothenicAcid: { quantity: 0, unit: 'mg' }
+        },
+        minerals: {
+          calcium: { quantity: 0, unit: 'mg' },
+          iron: { quantity: 0, unit: 'mg' },
+          magnesium: { quantity: 0, unit: 'mg' },
+          phosphorus: { quantity: 0, unit: 'mg' },
+          potassium: { quantity: 0, unit: 'mg' },
+          zinc: { quantity: 0, unit: 'mg' },
+          copper: { quantity: 0, unit: 'mg' },
+          manganese: { quantity: 0, unit: 'mg' },
+          selenium: { quantity: 0, unit: 'mcg' },
+          iodine: { quantity: 0, unit: 'mcg' },
+          chromium: { quantity: 0, unit: 'mcg' },
+          molybdenum: { quantity: 0, unit: 'mcg' }
+        }
+      }
+    });
+
+    // Helper function to add nutrients
+    const addNutrients = (target: any, source: any) => {
+      if (!source) return;
+
+      if (source.calories?.quantity) {
+        target.calories.quantity += source.calories.quantity;
+      }
+
+      // Add macros
+      if (source.macros) {
+        Object.keys(target.macros).forEach(macro => {
+          if (source.macros[macro]?.quantity) {
+            target.macros[macro].quantity += source.macros[macro].quantity;
+          }
+        });
+      }
+
+      // Add micros (vitamins)
+      if (source.micros?.vitamins) {
+        Object.keys(target.micros.vitamins).forEach(vitamin => {
+          if (source.micros.vitamins[vitamin]?.quantity) {
+            target.micros.vitamins[vitamin].quantity += source.micros.vitamins[vitamin].quantity;
+          }
+        });
+      }
+
+      // Add micros (minerals)
+      if (source.micros?.minerals) {
+        Object.keys(target.micros.minerals).forEach(mineral => {
+          if (source.micros.minerals[mineral]?.quantity) {
+            target.micros.minerals[mineral].quantity += source.micros.minerals[mineral].quantity;
+          }
+        });
+      }
+    };
+
+    // Initialize overall total
+    const overall = createEmptyNutrient();
+
+    // Calculate nutrition for each day
+    suggestions.forEach((day: any) => {
+      const dayTotal = createEmptyNutrient();
+      const meals: any = {};
+
+      // Process each meal in the day
+      if (day.meals) {
+        Object.keys(day.meals).forEach(mealName => {
+          const meal = day.meals[mealName];
+          const mealNutrition = createEmptyNutrient();
+
+          // Use totalNutrition if available, otherwise sum up recipes
+          if (meal.totalNutrition) {
+            addNutrients(mealNutrition, meal.totalNutrition);
+          } else if (meal.recipes && Array.isArray(meal.recipes)) {
+            meal.recipes.forEach((recipe: any) => {
+              if (recipe.nutrition) {
+                addNutrients(mealNutrition, recipe.nutrition);
+              }
+            });
+          }
+
+          meals[mealName] = mealNutrition;
+          addNutrients(dayTotal, mealNutrition);
+        });
+      }
+
+      byDay.push({
+        day: day.day,
+        date: day.date,
+        meals,
+        dayTotal
+      });
+
+      // Add to overall
+      addNutrients(overall, dayTotal);
+    });
+
+    // Calculate daily average
+    const dailyAverage = createEmptyNutrient();
+    if (totalDays > 0) {
+      // Divide overall by number of days
+      dailyAverage.calories.quantity = Math.round(overall.calories.quantity / totalDays);
+
+      Object.keys(dailyAverage.macros).forEach(macro => {
+        dailyAverage.macros[macro].quantity = Math.round(overall.macros[macro].quantity / totalDays);
+      });
+
+      Object.keys(dailyAverage.micros.vitamins).forEach(vitamin => {
+        dailyAverage.micros.vitamins[vitamin].quantity = Math.round(overall.micros.vitamins[vitamin].quantity / totalDays);
+      });
+
+      Object.keys(dailyAverage.micros.minerals).forEach(mineral => {
+        dailyAverage.micros.minerals[mineral].quantity = Math.round(overall.micros.minerals[mineral].quantity / totalDays);
+      });
+    }
+
+    return {
+      byDay,
+      overall,
+      dailyAverage
+    };
   }
 }

@@ -1,7 +1,7 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import { NextResponse } from 'next/server';
-import { FoodCategory, CATEGORY_PORTION_SIZES } from '@/types/foodCategory';
+import { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from '../../lib/auth';
+import { supabase } from '../../lib/supabase';
+import { FoodCategory } from '../../types/foodCategory';
 
 /**
  * GET /api/food-categories
@@ -9,26 +9,68 @@ import { FoodCategory, CATEGORY_PORTION_SIZES } from '@/types/foodCategory';
  * Returns list of all food categories with their primary (recommended) portion sizes
  * for use in custom recipe creation UX
  */
-export async function GET() {
+async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
+  if (req.method !== 'GET') {
+    return res.status(405).json({
+      success: false,
+      error: 'Method not allowed'
+    });
+  }
+
   try {
+    // Fetch all food categories with their portion sizes
+    const { data: foodCategories, error: categoriesError } = await supabase
+      .from('food_categories')
+      .select('id, code, name, category_group')
+      .order('category_group', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (categoriesError) {
+      throw categoriesError;
+    }
+
+    // Fetch portion sizes
+    const { data: portionSizes, error: portionsError } = await supabase
+      .from('portion_sizes')
+      .select('id, name, description, food_category_id, volume_ml, weight_g, multiplier, is_default')
+      .not('food_category_id', 'is', null)
+      .order('is_default', { ascending: false });
+
+    if (portionsError) {
+      throw portionsError;
+    }
+
+    // Group portion sizes by food category ID
+    const portionsByCategoryId = new Map<string, any[]>();
+    portionSizes?.forEach(portion => {
+      const categoryId = portion.food_category_id;
+      if (!portionsByCategoryId.has(categoryId)) {
+        portionsByCategoryId.set(categoryId, []);
+      }
+      portionsByCategoryId.get(categoryId)!.push({
+        id: portion.id,
+        name: portion.name,
+        description: portion.description,
+        weightG: portion.weight_g,
+        volumeMl: portion.volume_ml,
+        multiplier: portion.multiplier,
+        isDefault: portion.is_default
+      });
+    });
+
     // Transform category data to UX-friendly format
-    const categories = CATEGORY_PORTION_SIZES.map(cat => {
-      // Get only default/primary portions
-      const primaryPortions = cat.allowedPortions.filter(p => p.isDefault);
+    const categories = foodCategories?.map(category => {
+      const portions = portionsByCategoryId.get(category.id) || [];
+      const primaryPortions = portions.filter(p => p.isDefault);
 
       return {
-        value: cat.category,
-        label: formatCategoryLabel(cat.category),
-        group: getCategoryGroup(cat.category),
-        primaryPortions: primaryPortions.map(p => ({
-          name: p.name,
-          description: p.description,
-          weightG: p.weightG,
-          volumeMl: p.volumeMl,
-          multiplier: p.multiplier
-        }))
+        id: category.id,
+        code: category.code,
+        name: category.name,
+        group: category.category_group,
+        primaryPortions: primaryPortions
       };
-    });
+    }) || [];
 
     // Group categories for better UX
     const grouped = {
@@ -44,7 +86,7 @@ export async function GET() {
       other: categories.filter(c => c.group === 'Other')
     };
 
-    return NextResponse.json({
+    return res.status(200).json({
       success: true,
       categories: grouped,
       allCategories: categories
@@ -52,13 +94,10 @@ export async function GET() {
 
   } catch (error: any) {
     console.error('Error fetching food categories:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || 'Failed to fetch food categories'
-      },
-      { status: 500 }
-    );
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch food categories'
+    });
   }
 }
 
@@ -148,8 +187,9 @@ function getCategoryGroup(category: FoodCategory): string {
       category === 'ice_cream') return 'Dairy Products';
   if (category.includes('fruit') || category.includes('vegetable') || category === 'potato') return 'Fruits & Vegetables';
   if (category.includes('oil') || category.includes('butter')) return 'Fats & Oils';
-  if (category.includes('sauce') || category.includes('curry') || category === 'pudding' ||
-      category === 'mousse' || category === 'mixed_dish') return 'Sauces & Mixed Dishes';
-  if (category === 'pudding' || category === 'mousse') return 'Desserts';
+  if (category === FoodCategory.PUDDING || category === FoodCategory.MOUSSE) return 'Desserts';
+  if (category.includes('sauce') || category.includes('curry') || category === 'mixed_dish') return 'Sauces & Mixed Dishes';
   return 'Other';
 }
+
+export default requireAuth(handler);

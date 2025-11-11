@@ -749,10 +749,10 @@ export class AsyncMealPlanService {
       if (!firstMeal.recipes || !Array.isArray(firstMeal.recipes)) return false;
       if (!firstMeal.totalNutrition || typeof firstMeal.totalNutrition !== 'object') return false;
       
-      // Check nutrition structure
-      if (!data.nutrition.byDay || !Array.isArray(data.nutrition.byDay)) return false;
-      if (!data.nutrition.overall || typeof data.nutrition.overall !== 'object') return false;
-      if (!data.nutrition.dailyAverage || typeof data.nutrition.dailyAverage !== 'object') return false;
+      // Check nutrition structure exists (can be empty - will be calculated later)
+      if (data.nutrition && data.nutrition.byDay !== undefined && !Array.isArray(data.nutrition.byDay)) return false;
+      if (data.nutrition && data.nutrition.overall !== undefined && typeof data.nutrition.overall !== 'object') return false;
+      if (data.nutrition && data.nutrition.dailyAverage !== undefined && typeof data.nutrition.dailyAverage !== 'object') return false;
       
       console.log('✅ Meal plan response structure is valid (manual/automated format)');
       return true;

@@ -56,9 +56,23 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           }
         }
         
+        // Fetch food category if available
+        if (cachedRecipe.food_category_id) {
+          const { supabase } = await import('../../../lib/supabase');
+          const { data: foodCategory } = await supabase
+            .from('food_categories')
+            .select('id, code, name, category_group')
+            .eq('id', cachedRecipe.food_category_id)
+            .single();
+
+          if (foodCategory) {
+            cachedRecipe.foodCategory = foodCategory;
+          }
+        }
+
         // Standardize the cached recipe response
         const standardizedRecipe = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
-        
+
         // Check if nutritionDetails is empty and extract from originalApiResponse
         const hasNutritionData = standardizedRecipe.nutritionDetails && 
                                   (standardizedRecipe.nutritionDetails.calories?.quantity > 0 || 

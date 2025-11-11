@@ -100,7 +100,8 @@ export interface CreateCustomRecipeInput {
   description?: string;
   ingredients: CustomRecipeIngredient[];
   servings: number;
-  foodCategory?: FoodCategory; // Food category for portion size recommendations
+  foodCategoryId?: string; // UUID reference to food category for portion size recommendations
+  foodCategory?: FoodCategory; // DEPRECATED: Use foodCategoryId instead. Kept for backward compatibility
   portionSizeId?: string; // Reference to default portion size
   instructions?: string[];
   customNotes?: string;
@@ -127,7 +128,8 @@ export interface EditCustomRecipeBasicDetailsInput {
   description?: string;
   imageUrl?: string;
   servings?: number;
-  foodCategory?: FoodCategory; // Food category for portion size recommendations
+  foodCategoryId?: string; // UUID reference to food category for portion size recommendations
+  foodCategory?: FoodCategory; // DEPRECATED: Use foodCategoryId instead. Kept for backward compatibility
   prepTimeMinutes?: number;
   cookTimeMinutes?: number;
   totalTimeMinutes?: number;
@@ -160,7 +162,8 @@ export interface CustomRecipeOutput {
   nutritionServings?: number; // Portion size multiplier for nutrition (default: 1)
   portionSize?: PortionSize; // Current portion size
   defaultPortionSizeId?: string; // Reference to default portion size
-  foodCategory?: FoodCategory; // Food category for portion size recommendations
+  foodCategoryId?: string; // UUID reference to food category
+  foodCategory?: any; // Food category object { id, code, name, category_group } or legacy FoodCategory code
 
   // Nutrition data (per serving) - standard format
   calories?: number;

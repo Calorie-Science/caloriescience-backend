@@ -83,7 +83,8 @@ export class CustomRecipeService {
 
         // Servings & Time
         servings: input.servings,
-        food_category: input.foodCategory || null,
+        food_category_id: input.foodCategoryId || null,
+        food_category: input.foodCategory || null, // Keep for backward compatibility
         default_portion_size_id: input.portionSizeId || null,
         prep_time_minutes: input.prepTimeMinutes,
         cook_time_minutes: input.cookTimeMinutes,
@@ -167,7 +168,8 @@ export class CustomRecipeService {
     if (input.dietLabels) updateData.diet_labels = input.dietLabels;
     if (input.allergens) updateData.allergens = input.allergens;
     if (input.servings) updateData.servings = input.servings;
-    if (input.foodCategory !== undefined) updateData.food_category = input.foodCategory;
+    if (input.foodCategoryId !== undefined) updateData.food_category_id = input.foodCategoryId;
+    if (input.foodCategory !== undefined) updateData.food_category = input.foodCategory; // Keep for backward compatibility
     if (input.prepTimeMinutes !== undefined) updateData.prep_time_minutes = input.prepTimeMinutes;
     if (input.cookTimeMinutes !== undefined) updateData.cook_time_minutes = input.cookTimeMinutes;
     if (input.totalTimeMinutes !== undefined) updateData.total_time_minutes = input.totalTimeMinutes;
@@ -709,6 +711,19 @@ export class CustomRecipeService {
       portionSize = await this.portionSizeService.getPortionSizeById(data.default_portion_size_id);
     }
 
+    // Fetch food category if available
+    let foodCategory = null;
+    if (data.food_category_id) {
+      const { data: category, error } = await supabase
+        .from('food_categories')
+        .select('id, code, name, category_group')
+        .eq('id', data.food_category_id)
+        .single();
+      if (!error && category) {
+        foodCategory = category;
+      }
+    }
+
     return {
       // Standard UnifiedRecipeSummary fields
       id: data.id,
@@ -721,7 +736,8 @@ export class CustomRecipeService {
       nutritionServings: 1, // Default to 1, can be changed via edit servings API
       portionSize: portionSize || undefined,
       defaultPortionSizeId: data.default_portion_size_id || undefined,
-      foodCategory: data.food_category || undefined,
+      foodCategory: foodCategory || (data.food_category ? { code: data.food_category } : undefined),
+      foodCategoryId: data.food_category_id || undefined,
 
       // Nutrition data (per serving)
       calories: data.calories_per_serving,

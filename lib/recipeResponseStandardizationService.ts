@@ -562,7 +562,9 @@ export class RecipeResponseStandardizationService {
       created_by_nutritionist_id: dbRecipe.created_by_nutritionist_id || dbRecipe.createdByNutritionistId,
       default_portion_size_id: dbRecipe.default_portion_size_id || dbRecipe.defaultPortionSizeId,
       custom_notes: dbRecipe.custom_notes || dbRecipe.customNotes,
-      cooking_tips: dbRecipe.cooking_tips || dbRecipe.cookingTips
+      cooking_tips: dbRecipe.cooking_tips || dbRecipe.cookingTips,
+      food_category_id: dbRecipe.food_category_id || dbRecipe.foodCategoryId,
+      food_category: dbRecipe.food_category || dbRecipe.foodCategory
     };
 
     // For manual provider, return directly to avoid recursion
@@ -638,6 +640,8 @@ export class RecipeResponseStandardizationService {
       standardized.defaultPortionSizeId = recipe.default_portion_size_id || recipe.defaultPortionSizeId;
       standardized.customNotes = recipe.custom_notes || recipe.customNotes;
       standardized.cookingTips = recipe.cooking_tips || recipe.cookingTips;
+      standardized.foodCategoryId = recipe.food_category_id;
+      standardized.foodCategory = recipe.food_category;
     }
 
     return standardized;

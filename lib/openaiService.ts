@@ -56,8 +56,24 @@ export class OpenAIService {
         console.log('🤖 Starting OpenAI streaming completion...');
         const startTime = Date.now();
 
+        // Select model and max tokens based on environment variable
+        const modelName = process.env.OPENAI_MODEL || 'gpt-4.1-mini-2025-04-14';
+        let maxTokens = 16384; // Default for gpt-4o-mini and gpt-4o
+
+        // Set max tokens based on model
+        if (modelName === 'gpt-4o-64k-output-alpha') {
+          maxTokens = 64000;
+          console.log('🚀 Using GPT-4o 64k output model with 64,000 max tokens');
+        } else if (modelName.includes('gpt-4.1')) {
+          // GPT-4.1, GPT-4.1-mini, GPT-4.1-nano all support 32,768 output tokens
+          maxTokens = 32768;
+          console.log(`🚀 Using ${modelName} with 32,768 max tokens (GPT-4.1 family)`);
+        } else {
+          console.log(`🤖 Using ${modelName} with ${maxTokens} max tokens`);
+        }
+
         const stream = await this.openai.chat.completions.create({
-          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+          model: modelName,
           messages: [
             {
               role: 'system',
@@ -69,7 +85,7 @@ export class OpenAIService {
             }
           ],
           temperature: 0.7,
-          max_tokens: 16384, // gpt-4o-mini maximum output tokens
+          max_tokens: maxTokens,
           stream: true,
           response_format: { type: 'json_object' }
         });
@@ -317,7 +333,7 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 24. Leave nutrition.dailyAverage as empty object {} - we will calculate it on the backend
 25. Generate ${request.days || 2} days of meals (ONLY ${request.days || 2} DAYS!)
 26. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
-27. Keep instructions SHORT (2-3 steps max per recipe)
+27. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
 28. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
 29. Dates should increment: day 1 = today, day 2 = tomorrow, etc.
 30. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
@@ -325,11 +341,22 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 
 NUTRITION STRUCTURE RULES:
 32. EVERY recipe and meal MUST include BOTH complete macros AND micros
-33. ALL macros MUST be included (even if 0): protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
+33. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
 34. ALL micros MUST be included in nested structure with vitamins and minerals
 35. Vitamins MUST include (essential 6): vitaminA, vitaminC, vitaminD, vitaminE, vitaminB12, folate
 36. Minerals MUST include (essential 6): calcium, iron, magnesium, potassium, zinc, selenium
-37. If a nutrient value is unknown, use 0 - NEVER omit any nutrient field
+37. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
+   - Calculate nutrient values based on actual ingredients used - BE SPECIFIC AND REALISTIC
+   - For cholesterol: Only animal products contain cholesterol (eggs ~186mg, chicken ~85mg, fish ~50-70mg, dairy/ghee ~20-30mg per serving). ALL plant-based foods = 0mg (rice, dosa, vegetables, vegetable oils, grains, lentils, nuts have ZERO cholesterol).
+   - For vitamin B12: Animal products are rich sources (chicken 100g = 0.3mcg, fish 100g = 2-8mcg, eggs = 0.6mcg, dairy = 0.4-1.2mcg). Plant-based meals typically 0-0.1mcg unless fortified.
+   - For vitamin D: Fatty fish (salmon 100g = 10-25mcg, mackerel = 5-10mcg), egg yolk = 2mcg, fortified dairy = 1-2mcg. Plant-based meals = 0-0.5mcg unless fortified (mushrooms/fortified products).
+   - For saturatedFat: Animal products (chicken skin = 3-4g/100g, red meat = 5-10g/100g), coconut oil = 12g/tablespoon, ghee = 8g/tablespoon, palm oil = 7g/tablespoon. Calculate based on actual ingredients.
+   - For transFat: Mainly in processed/fried foods. Natural whole foods = 0g or trace (<0.1g).
+   - NEVER default all nutrients to 0 - this is INCORRECT and LAZY
+   - Use your knowledge of food composition to estimate realistic values
+   - Example: 100g cooked chicken breast should have ~0.3mcg B12, ~0.1mcg vitamin D, ~85mg cholesterol, ~1g saturated fat
+   - Example: 1 egg should have ~0.6mcg B12, ~2mcg vitamin D, ~186mg cholesterol, ~1.6g saturated fat
+   - Example: Dosa with sambar (no animal products) should have ~0mcg B12, ~0mcg vitamin D, 0mg cholesterol, ~0.5g saturated fat (from oil)
 38. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
 39. EACH meal's "totalNutrition" field MUST use same structured format
 40. DO NOT use flat format like {"calories": 500, "protein": 25}
