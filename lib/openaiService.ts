@@ -287,7 +287,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
               "carbs": 60,
               "fat": 15,
               "fiber": 8,
-              "nutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "folate": {"quantity": 100, "unit": "mcg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}}}},
+              "nutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}},
               "ingredients": [{"text": "1 cup ingredient", "quantity": 1, "measure": "cup", "food": "ingredient", "weight": 100}],
               "instructions": ["Cook ingredient", "Serve hot"],
               "isSelected": true,
@@ -296,7 +296,7 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
           ],
           "customizations": {},
           "selectedRecipeId": "recipe-1-breakfast",
-          "totalNutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "folate": {"quantity": 100, "unit": "mcg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}}}}
+          "totalNutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}}
         }
       }
     }
@@ -343,8 +343,8 @@ NUTRITION STRUCTURE RULES:
 32. EVERY recipe and meal MUST include BOTH complete macros AND micros
 33. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
 34. ALL micros MUST be included in nested structure with vitamins and minerals
-35. Vitamins MUST include (essential 6): vitaminA, vitaminC, vitaminD, vitaminE, vitaminB12, folate
-36. Minerals MUST include (essential 6): calcium, iron, magnesium, potassium, zinc, selenium
+35. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
+36. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
 37. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
    - Calculate nutrient values based on actual ingredients used - BE SPECIFIC AND REALISTIC
    - For cholesterol: Only animal products contain cholesterol (eggs ~186mg, chicken ~85mg, fish ~50-70mg, dairy/ghee ~20-30mg per serving). ALL plant-based foods = 0mg (rice, dosa, vegetables, vegetable oils, grains, lentils, nuts have ZERO cholesterol).
@@ -407,16 +407,29 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
           vitaminC: { quantity: 0, unit: 'mg' },
           vitaminD: { quantity: 0, unit: 'mcg' },
           vitaminE: { quantity: 0, unit: 'mg' },
+          vitaminK: { quantity: 0, unit: 'mcg' },
+          thiamin: { quantity: 0, unit: 'mg' },
+          riboflavin: { quantity: 0, unit: 'mg' },
+          niacin: { quantity: 0, unit: 'mg' },
+          vitaminB6: { quantity: 0, unit: 'mg' },
+          folate: { quantity: 0, unit: 'mcg' },
           vitaminB12: { quantity: 0, unit: 'mcg' },
-          folate: { quantity: 0, unit: 'mcg' }
+          biotin: { quantity: 0, unit: 'mcg' },
+          pantothenicAcid: { quantity: 0, unit: 'mg' }
         },
         minerals: {
           calcium: { quantity: 0, unit: 'mg' },
           iron: { quantity: 0, unit: 'mg' },
           magnesium: { quantity: 0, unit: 'mg' },
+          phosphorus: { quantity: 0, unit: 'mg' },
           potassium: { quantity: 0, unit: 'mg' },
           zinc: { quantity: 0, unit: 'mg' },
-          selenium: { quantity: 0, unit: 'mcg' }
+          copper: { quantity: 0, unit: 'mg' },
+          manganese: { quantity: 0, unit: 'mg' },
+          selenium: { quantity: 0, unit: 'mcg' },
+          iodine: { quantity: 0, unit: 'mcg' },
+          chromium: { quantity: 0, unit: 'mcg' },
+          molybdenum: { quantity: 0, unit: 'mcg' }
         }
       }
     });
