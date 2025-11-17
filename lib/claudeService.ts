@@ -507,8 +507,15 @@ export class ClaudeService {
    */
   private prepareInputMessage(request: ClaudeMealPlanRequest, overrideDate?: string): string {
     const { clientGoals, additionalText, mealProgram } = request;
-    
-    let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.
+
+    // Add variation to prevent duplicate meals across days
+    const dayNumber = request.days || 1;
+    const skipCount = (dayNumber - 1) * 3;
+    const variationInstructions = dayNumber > 1
+      ? `\n\nVARIATION INSTRUCTION FOR DAY ${dayNumber}: This is recipe set #${dayNumber}. Think of recipe ideas sequentially, skip the first ${skipCount} ideas, and use the NEXT 3 fresh recipe ideas you think of. Generate different recipes than you would for other days.`
+      : `\n\nVARIATION INSTRUCTION: Generate the first 3 recipe ideas that come to mind for this meal plan.`;
+
+    let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.${variationInstructions}
 
 NUTRITIONAL TARGETS:
 - Calories: ${clientGoals.eerGoalCalories || 'Not specified'}
