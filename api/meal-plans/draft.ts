@@ -2025,17 +2025,38 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
     console.log('🎯 Preparing customized recipe response (same format as /api/recipes/customized)...');
 
-    // Fetch the complete recipe from cache to build the response
-    const cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
+    // Check if this is an AI-generated recipe (skip cache/API for these)
+    const responseIsAIGenerated = ['claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo'].includes(customizations.source.toLowerCase());
+
+    // Fetch the complete recipe from cache to build the response (skip for AI-generated)
+    const cachedRecipeForResponse = responseIsAIGenerated ? null : await cacheService.getRecipeByExternalId(customizations.source, recipeId);
     let baseRecipe: any;
-    
-    if (cachedRecipe) {
-      const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
+
+    if (cachedRecipeForResponse) {
+      const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipeForResponse);
       baseRecipe = standardized;
+    } else if (responseIsAIGenerated) {
+      // AI-generated recipes: use the recipe data from draft
+      console.log('🤖 AI-generated recipe - using data from draft');
+      baseRecipe = {
+        recipeName: recipe.title,
+        ingredients: recipe.ingredients || [],
+        ingredientLines: (recipe as any).ingredientLines || [],
+        cookingInstructions: recipe.instructions || [],
+        nutritionDetails: (recipe as any).nutrition || originalNutritionWithMicros,
+        caloriesPerServing: (typeof recipe.calories === 'object' ? (recipe.calories as any).quantity : recipe.calories)?.toString(),
+        proteinPerServingG: (typeof recipe.protein === 'object' ? (recipe.protein as any).quantity : recipe.protein)?.toString(),
+        carbsPerServingG: (typeof recipe.carbs === 'object' ? (recipe.carbs as any).quantity : recipe.carbs)?.toString(),
+        fatPerServingG: (typeof recipe.fat === 'object' ? (recipe.fat as any).quantity : recipe.fat)?.toString(),
+        fiberPerServingG: (typeof recipe.fiber === 'object' ? (recipe.fiber as any).quantity : recipe.fiber)?.toString(),
+        servings: recipe.servings || 1,
+        recipeImageUrl: recipe.image,
+        sourceUrl: recipe.sourceUrl
+      };
     } else {
       // Fetch from API to get full recipe details including ingredients
       console.log('🔄 Recipe not in cache, fetching full details from API...');
-      const recipeDetails = await multiProviderService.getRecipeDetails(recipeId);
+      const recipeDetails = await multiProviderService.getRecipeDetails(recipeId, customizations.source as any);
       
       if (recipeDetails) {
         baseRecipe = {
