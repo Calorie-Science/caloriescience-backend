@@ -2038,9 +2038,40 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
     } else if (responseIsAIGenerated) {
       // AI-generated recipes: use the recipe data from draft
       console.log('🤖 AI-generated recipe - using data from draft');
+
+      // Transform AI recipe ingredients from Edamam format (food/quantity/measure) to Spoonacular format (name/amount/unit)
+      const transformedIngredients = (recipe.ingredients || []).map((ing: any) => {
+        // AI recipes can use either format: {food, quantity, measure} or {name, amount, unit}
+        const ingredientName = ing.name || ing.food || ing.text || '';
+        const ingredientAmount = ing.amount !== undefined ? ing.amount : (ing.quantity || 0);
+        const ingredientUnit = ing.unit || ing.measure || '';
+
+        return {
+          name: ingredientName,
+          amount: ingredientAmount,
+          unit: ingredientUnit,
+          image: ing.image || '',
+          originalString: ing.text || ing.original || `${ingredientAmount} ${ingredientUnit} ${ingredientName}`.trim(),
+          aisle: ing.aisle || '',
+          meta: ing.meta || [],
+          measures: {
+            us: {
+              amount: ingredientAmount,
+              unitLong: ingredientUnit,
+              unitShort: ingredientUnit
+            },
+            metric: {
+              amount: ingredientAmount,
+              unitLong: ingredientUnit,
+              unitShort: ingredientUnit
+            }
+          }
+        };
+      });
+
       baseRecipe = {
         recipeName: recipe.title,
-        ingredients: recipe.ingredients || [],
+        ingredients: transformedIngredients,
         ingredientLines: (recipe as any).ingredientLines || [],
         cookingInstructions: recipe.instructions || [],
         nutritionDetails: (recipe as any).nutrition || originalNutritionWithMicros,
