@@ -33,9 +33,198 @@ export class ClaudeService {
   }
 
   /**
+   * Generate a single day meal plan
+   */
+  private async generateSingleDay(
+    request: ClaudeMealPlanRequest,
+    dayNumber: number,
+    date: string
+  ): Promise<any> {
+    const maxRetries = 3;
+    let attempt = 0;
+
+    while (attempt < maxRetries) {
+      try {
+        console.log(`🤖 Claude generating day ${dayNumber} (attempt ${attempt + 1}/${maxRetries})`);
+
+        const singleDayRequest = {
+          ...request,
+          days: dayNumber // Pass the day number for proper ID generation
+        };
+
+        const prompt = this.prepareInputMessage(singleDayRequest, date);
+
+        const stream = await this.anthropic.messages.stream({
+          model: 'claude-opus-4-1-20250805',
+          max_tokens: 16000, // Reduced since we're only generating 1 day
+          temperature: 0.7,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        });
+
+        console.log(`🤖 Claude streaming day ${dayNumber}...`);
+
+        // Collect the streamed response
+        let content = '';
+        for await (const chunk of stream) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            content += chunk.delta.text;
+          }
+        }
+
+        const response = await stream.finalMessage();
+
+        // Log token usage
+        if (response.usage) {
+          console.log(`📊 Day ${dayNumber} token usage:`, {
+            input: response.usage.input_tokens,
+            output: response.usage.output_tokens,
+            total: (response.usage.input_tokens || 0) + (response.usage.output_tokens || 0)
+          });
+        }
+
+        if (!content) {
+          throw new Error(`No content received for day ${dayNumber}`);
+        }
+
+        // Parse and validate the response
+        let jsonContent = content.trim();
+
+        // Extract JSON from markdown if needed
+        let jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch && jsonMatch[1]) {
+          jsonContent = jsonMatch[1].trim();
+        } else if (content.includes('{')) {
+          const startIndex = content.indexOf('{');
+          let braceCount = 0;
+          let endIndex = -1;
+
+          for (let i = startIndex; i < content.length; i++) {
+            if (content[i] === '{') braceCount++;
+            if (content[i] === '}') braceCount--;
+            if (braceCount === 0) {
+              endIndex = i;
+              break;
+            }
+          }
+
+          if (endIndex > startIndex) {
+            jsonContent = content.substring(startIndex, endIndex + 1);
+          }
+        }
+
+        jsonContent = jsonContent
+          .replace(/^[^{]*/, '')
+          .replace(/[^}]*$/, '')
+          .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+          .trim();
+
+        // Try parsing
+        let dayData;
+        try {
+          dayData = JSON.parse(jsonContent);
+        } catch (parseError) {
+          const fixedJson = this.fixCommonJsonIssues(jsonContent);
+          dayData = JSON.parse(fixedJson);
+        }
+
+        // Validate and extract suggestions
+        if (!dayData.suggestions || !Array.isArray(dayData.suggestions) || dayData.suggestions.length === 0) {
+          throw new Error(`Invalid day ${dayNumber} structure: missing suggestions array`);
+        }
+
+        // Return the first day's data with corrected day number and date
+        const singleDaySuggestion = dayData.suggestions[0];
+        singleDaySuggestion.day = dayNumber;
+        singleDaySuggestion.date = date;
+
+        return singleDaySuggestion;
+
+      } catch (error) {
+        console.error(`❌ Error generating day ${dayNumber} (attempt ${attempt + 1}):`, error);
+
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isOverloadedError = errorMessage.includes('Overloaded') || errorMessage.includes('overloaded') || errorMessage.includes('api_error');
+
+        if (isOverloadedError && attempt < maxRetries - 1) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.log(`⏳ Claude API overloaded, retrying day ${dayNumber} in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          attempt++;
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new Error(`Failed to generate day ${dayNumber} after ${maxRetries} attempts`);
+  }
+
+  /**
    * Generate meal plan using Claude (synchronous version)
    */
   async generateMealPlanSync(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
+    try {
+      console.log(`🤖 Claude meal plan generation started`);
+
+      const days = request.days || 2;
+      const mealsPerDay = request.mealProgram?.meals?.length || 2;
+
+      console.log(`📅 Generating ${days} day(s) with ${mealsPerDay} meals each`);
+      console.log(`🚀 Using parallel generation for optimal performance`);
+
+      // Calculate start date (default to today)
+      const startDate = new Date();
+
+      // Generate all days in parallel
+      const dayPromises: Promise<any>[] = [];
+      for (let dayNum = 1; dayNum <= days; dayNum++) {
+        const dayDate = new Date(startDate);
+        dayDate.setDate(startDate.getDate() + dayNum - 1);
+        const dateStr = dayDate.toISOString().split('T')[0];
+
+        dayPromises.push(this.generateSingleDay(request, dayNum, dateStr));
+      }
+
+      // Wait for all days to complete
+      console.log(`⏳ Generating ${days} days in parallel...`);
+      const allDays = await Promise.all(dayPromises);
+      console.log(`✅ All ${days} days generated successfully`);
+
+      // Combine into final structure with nutrition
+      console.log('🧮 Calculating nutrition aggregates...');
+      const nutrition = this.calculateNutritionAggregates(allDays);
+      const mealPlanData = {
+        suggestions: allDays,
+        nutrition: nutrition
+      };
+      console.log('✅ Nutrition aggregates calculated');
+
+      return {
+        success: true,
+        status: 'completed',
+        data: mealPlanData,
+        messageId: `claude-parallel-${Date.now()}`
+      };
+    } catch (error) {
+      console.error('❌ Error in parallel meal plan generation:', error);
+      return {
+        success: false,
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Failed to generate meal plan'
+      };
+    }
+  }
+
+  /**
+   * Legacy single-call generation (kept for backward compatibility)
+   */
+  private async generateMealPlanSingleCall(request: ClaudeMealPlanRequest): Promise<ClaudeMealPlanResponse> {
     const maxRetries = 3;
     let attempt = 0;
 
@@ -43,7 +232,6 @@ export class ClaudeService {
       try {
         console.log(`🤖 Claude meal plan generation started (attempt ${attempt + 1}/${maxRetries})`);
 
-        // Warn if requesting too many days (risk of truncation)
         const days = request.days || 2;
         const mealsPerDay = request.mealProgram?.meals?.length || 2;
         if (days * mealsPerDay > 14) {
@@ -317,7 +505,7 @@ export class ClaudeService {
   /**
    * Prepare the input message for Claude with strong allergen exclusion instructions
    */
-  private prepareInputMessage(request: ClaudeMealPlanRequest): string {
+  private prepareInputMessage(request: ClaudeMealPlanRequest, overrideDate?: string): string {
     const { clientGoals, additionalText, mealProgram } = request;
     
     let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.
@@ -408,13 +596,11 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
             }
           ],
           "customizations": {},
-          "selectedRecipeId": "recipe-1-breakfast",
-          "totalNutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}}
+          "selectedRecipeId": "recipe-1-breakfast"
         }
       }
     }
-  ],
-  "nutrition": {"byDay": [], "overall": {}, "dailyAverage": {}}
+  ]
 }
 
 CRITICAL JSON SYNTAX RULES - MUST FOLLOW EXACTLY:
@@ -438,27 +624,24 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 16. Exclude all allergens completely - no exceptions
 17. Generate ALL ${mealsToUse.length} meals for EACH day: ${mealsToUse.map((m: any) => m.mealName).join(', ')}
 18. Each meal MUST be in the "meals" object under its meal name (e.g., "breakfast", "lunch")
-19. Each meal MUST have: mealTime, targetCalories, recipes array, customizations object, selectedRecipeId, totalNutrition
+19. Each meal MUST have: mealTime, targetCalories, recipes array, customizations object, selectedRecipeId
 20. Each recipe MUST have: id (unique), title, nutrition object, ingredients array, instructions array
-21. totalNutrition for each meal = sum of all recipes in that meal's recipes array
-22. Leave nutrition.byDay as empty array [] - we will calculate it on the backend
-23. Leave nutrition.overall as empty object {} - we will calculate it on the backend
-24. Leave nutrition.dailyAverage as empty object {} - we will calculate it on the backend
-25. Generate ${request.days || 2} days of meals (ONLY ${request.days || 2} DAYS!)
-26. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
-27. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
-28. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
-29. Dates should increment: day 1 = today, day 2 = tomorrow, etc.
-30. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
-31. Use COMPACT JSON formatting (minimize whitespace)
+21. DO NOT include totalNutrition in meals - backend will calculate it
+22. DO NOT include nutrition.byDay, nutrition.overall, or nutrition.dailyAverage - backend will calculate them
+23. Generate ONLY 1 DAY of meals (day ${request.days || 1})
+24. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
+25. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
+26. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
+27. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
+28. Use COMPACT JSON formatting (minimize whitespace)
 
 NUTRITION STRUCTURE RULES:
-32. EVERY recipe and meal MUST include BOTH complete macros AND micros
-33. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
-34. ALL micros MUST be included in nested structure with vitamins and minerals
-35. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
-36. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
-37. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
+29. EVERY recipe MUST include BOTH complete macros AND micros
+30. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
+31. ALL micros MUST be included in nested structure with vitamins and minerals
+32. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
+33. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
+34. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
    - Calculate nutrient values based on actual ingredients used - BE SPECIFIC AND REALISTIC
    - For cholesterol: Only animal products contain cholesterol (eggs ~186mg, chicken ~85mg, fish ~50-70mg, dairy/ghee ~20-30mg per serving). ALL plant-based foods = 0mg (rice, dosa, vegetables, vegetable oils, grains, lentils, nuts have ZERO cholesterol).
    - For vitamin B12: Animal products are rich sources (chicken 100g = 0.3mcg, fish 100g = 2-8mcg, eggs = 0.6mcg, dairy = 0.4-1.2mcg). Plant-based meals typically 0-0.1mcg unless fortified.
@@ -470,14 +653,13 @@ NUTRITION STRUCTURE RULES:
    - Example: 100g cooked chicken breast should have ~0.3mcg B12, ~0.1mcg vitamin D, ~85mg cholesterol, ~1g saturated fat
    - Example: 1 egg should have ~0.6mcg B12, ~2mcg vitamin D, ~186mg cholesterol, ~1.6g saturated fat
    - Example: Dosa with sambar (no animal products) should have ~0mcg B12, ~0mcg vitamin D, 0mg cholesterol, ~0.5g saturated fat (from oil)
-38. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
-39. EACH meal's "totalNutrition" field MUST use same structured format
-40. DO NOT use flat format like {"calories": 500, "protein": 25}
+35. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
+36. DO NOT use flat format like {"calories": 500, "protein": 25}
 
 VALIDATION CHECKLIST BEFORE RESPONDING:
 ✓ First character is {
 ✓ Starts with {"suggestions":
-✓ Has exactly 2 top-level keys: "suggestions" and "nutrition"
+✓ Has exactly 1 top-level key: "suggestions"
 ✓ All property names in double quotes
 ✓ All strings in double quotes
 ✓ Numbers NOT in quotes
@@ -485,8 +667,8 @@ VALIDATION CHECKLIST BEFORE RESPONDING:
 ✓ All braces/brackets closed
 ✓ No comments or markdown
 
-IMPORTANT: Your response must have EXACTLY 2 top-level keys: "suggestions" and "nutrition"
-DO NOT add "success", "message", "data" or any wrapper - just suggestions and nutrition!`;
+IMPORTANT: Your response must have EXACTLY 1 top-level key: "suggestions"
+DO NOT add "success", "message", "data", "nutrition" or any wrapper - just suggestions!`;
 
     return message;
   }
@@ -692,35 +874,30 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
    */
   private isValidMealPlanResponse(data: any): boolean {
     try {
-      // Check basic structure - now expecting suggestions and nutrition at top level
+      // Check basic structure - now expecting only suggestions at top level
       if (!data || typeof data !== 'object') return false;
-      
+
       // Check for required top-level properties
       if (!data.suggestions || !Array.isArray(data.suggestions)) return false;
-      if (!data.nutrition || typeof data.nutrition !== 'object') return false;
-      
+
       // Check that we have at least one day
       if (data.suggestions.length === 0) return false;
-      
+
       const firstDay = data.suggestions[0];
       if (!firstDay.day || !firstDay.date || !firstDay.meals) return false;
       if (typeof firstDay.meals !== 'object') return false;
-      
+
       // Check that we have at least one meal
       const mealNames = Object.keys(firstDay.meals);
       if (mealNames.length === 0) return false;
-      
+
       // Validate first meal structure
       const firstMeal = firstDay.meals[mealNames[0]];
       if (!firstMeal.recipes || !Array.isArray(firstMeal.recipes)) return false;
-      if (!firstMeal.totalNutrition || typeof firstMeal.totalNutrition !== 'object') return false;
-      
-      // Check nutrition structure exists (can be empty - will be calculated later)
-      if (data.nutrition.byDay !== undefined && !Array.isArray(data.nutrition.byDay)) return false;
-      if (data.nutrition.overall !== undefined && typeof data.nutrition.overall !== 'object') return false;
-      if (data.nutrition.dailyAverage !== undefined && typeof data.nutrition.dailyAverage !== 'object') return false;
-      
-      console.log('✅ Meal plan response structure is valid (manual/automated format)');
+
+      // totalNutrition is no longer required - backend will calculate it
+
+      console.log('✅ Meal plan response structure is valid (simplified format)');
       return true;
     } catch (error) {
       console.error('❌ Meal plan validation error:', error);
@@ -834,16 +1011,17 @@ DO NOT add "success", "message", "data" or any wrapper - just suggestions and nu
           const meal = day.meals[mealName];
           const mealNutrition = createEmptyNutrient();
 
-          // Use totalNutrition if available, otherwise sum up recipes
-          if (meal.totalNutrition) {
-            addNutrients(mealNutrition, meal.totalNutrition);
-          } else if (meal.recipes && Array.isArray(meal.recipes)) {
+          // Sum up recipes to calculate meal nutrition
+          if (meal.recipes && Array.isArray(meal.recipes)) {
             meal.recipes.forEach((recipe: any) => {
               if (recipe.nutrition) {
                 addNutrients(mealNutrition, recipe.nutrition);
               }
             });
           }
+
+          // Set totalNutrition on the meal object for consistency
+          meal.totalNutrition = JSON.parse(JSON.stringify(mealNutrition)); // Deep clone
 
           meals[mealName] = mealNutrition;
           addNutrients(dayTotal, mealNutrition);

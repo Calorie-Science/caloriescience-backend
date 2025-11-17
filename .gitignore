@@ -86,3 +86,4 @@ temp/
 # Development files
 server-simple.js
 add-test-user.js
+.env*.local
