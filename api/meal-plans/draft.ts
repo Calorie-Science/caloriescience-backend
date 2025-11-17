@@ -1550,11 +1550,29 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           // Skip the normal modification calculation below since we already have customNutrition
         }
       } else {
-        // Normal recipe - try cache first to get full nutrition
-        cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
-        debugCacheLookup.found = !!cachedRecipe;
-        debugCacheLookup.cachedRecipeServings = cachedRecipe?.servings;
-        debugCacheLookup.cachedRecipeServingsType = typeof cachedRecipe?.servings;
+        // Normalize GPT variants to 'openai' first
+        let normalizedSource = customizations.source;
+        if (['gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo'].includes(customizations.source.toLowerCase())) {
+          console.log(`🔄 Normalizing source "${customizations.source}" to "openai"`);
+          normalizedSource = 'openai';
+          customizations.source = 'openai'; // Update the customizations object
+        }
+
+        // Check if this is an AI-generated recipe (claude, grok, openai)
+        // AI-generated recipes should NOT be fetched from cache/API
+        const isAIGeneratedRecipe = ['claude', 'grok', 'openai'].includes(normalizedSource);
+
+        // Normal recipe - try cache first to get full nutrition (skip for AI-generated)
+        if (!isAIGeneratedRecipe) {
+          cachedRecipe = await cacheService.getRecipeByExternalId(customizations.source, recipeId);
+          debugCacheLookup.found = !!cachedRecipe;
+          debugCacheLookup.cachedRecipeServings = cachedRecipe?.servings;
+          debugCacheLookup.cachedRecipeServingsType = typeof cachedRecipe?.servings;
+        } else {
+          console.log(`🤖 AI-generated recipe detected (${customizations.source}) - skipping cache lookup`);
+          debugCacheLookup.isAIGenerated = true;
+          debugCacheLookup.found = false;
+        }
       
       if (cachedRecipe) {
         const standardized = standardizationService.standardizeDatabaseRecipeResponse(cachedRecipe);
@@ -1642,17 +1660,8 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
         };
       } else {
-        // Normalize GPT variants to 'openai'
-        let normalizedSource = customizations.source;
-        if (['gpt', 'chatgpt', 'gpt-4', 'gpt-3.5', 'gpt-4-turbo', 'gpt-3.5-turbo'].includes(customizations.source.toLowerCase())) {
-          console.log(`🔄 Normalizing source "${customizations.source}" to "openai"`);
-          normalizedSource = 'openai';
-          customizations.source = 'openai'; // Update the customizations object
-        }
-
-        // Check if this is an AI-generated recipe (claude, grok, openai)
-        const isAIGeneratedRecipe = ['claude', 'grok', 'openai'].includes(normalizedSource);
-
+        // Cache lookup failed - check if AI-generated or fetch from API
+        // (normalizedSource and isAIGeneratedRecipe already computed above)
         if (isAIGeneratedRecipe) {
           // AI-generated recipes don't exist in external APIs - use nutrition from draft
           console.log(`🤖 AI-generated recipe detected (${customizations.source}) - using nutrition from draft`);
@@ -1694,6 +1703,36 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             ingredients: recipe.ingredients || [],
             servings: recipeServings
           };
+
+          // Look up original amounts from recipe ingredients
+          for (const mod of customizations.modifications) {
+            if ((mod.type === 'replace' || mod.type === 'omit') && mod.originalIngredient && !(mod as any).originalAmount) {
+              console.log(`🔍 Looking up original amount for AI recipe: ${mod.originalIngredient} (${mod.type})`);
+
+              const targetName = mod.originalIngredient.toLowerCase();
+              const recipeIngredients = recipe.ingredients || [];
+              const originalIng = recipeIngredients.find((ing: any) => {
+                const ingName = (ing.name || ing.food || ing.text || ing.original || '').toLowerCase();
+                return ingName.includes(targetName) || targetName.includes(ingName);
+              });
+
+              if (originalIng) {
+                (mod as any).originalAmount = originalIng.amount || 1;
+                (mod as any).originalUnit = originalIng.unit || '';
+                console.log(`  ✅ Found original: ${(mod as any).originalAmount} ${(mod as any).originalUnit} ${originalIng.name}`);
+              } else {
+                console.warn(`  ⚠️ Could not find "${mod.originalIngredient}" in AI recipe ingredients`);
+                // Use defaults
+                if (mod.type === 'replace') {
+                  (mod as any).originalAmount = (mod as any).amount || 1;
+                  (mod as any).originalUnit = (mod as any).unit || '';
+                } else {
+                  (mod as any).originalAmount = 1;
+                  (mod as any).originalUnit = '';
+                }
+              }
+            }
+          }
 
           console.log('✅ Using nutrition from AI recipe:', {
             calories: originalNutritionWithMicros.calories?.quantity,
