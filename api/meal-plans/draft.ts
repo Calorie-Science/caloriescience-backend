@@ -3065,6 +3065,21 @@ async function handleGetAlternateRecipes(
     const mealProgram = draft.searchParams?.mealProgram;
     const mealInfo = mealProgram?.meals?.find((m: any) => m.mealName === mealName);
 
+    // Create a properly formatted meal object with required fields
+    const formattedMealInfo = mealInfo ? {
+      mealOrder: mealInfo.mealOrder || 1,
+      mealName: mealInfo.mealName || mealName,
+      mealTime: mealInfo.mealTime || '08:00',
+      mealType: mealInfo.mealType || mealName.toLowerCase(),
+      targetCalories: mealInfo.targetCalories || currentRecipe.calories
+    } : {
+      mealOrder: 1,
+      mealName: mealName,
+      mealTime: '08:00',
+      mealType: mealName.toLowerCase(),
+      targetCalories: currentRecipe.calories
+    };
+
     // Determine which AI service to use (based on original draft creation)
     const aiService = draft.creationMethod === 'ai_generated' && draft.searchParams?.aiProvider
       ? draft.searchParams.aiProvider
@@ -3090,7 +3105,7 @@ async function handleGetAlternateRecipes(
         nutritionistId: draft.nutritionistId,
         clientGoals,
         mealProgram: {
-          meals: [mealInfo]
+          meals: [formattedMealInfo]
         },
         days: 1,
         additionalText
@@ -3110,7 +3125,7 @@ async function handleGetAlternateRecipes(
         nutritionistId: draft.nutritionistId,
         clientGoals,
         mealProgram: {
-          meals: [mealInfo]
+          meals: [formattedMealInfo]
         },
         days: 1,
         additionalText
