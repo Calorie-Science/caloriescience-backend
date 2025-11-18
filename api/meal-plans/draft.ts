@@ -3,6 +3,7 @@ import { requireAuth } from '../../lib/auth';
 import { MealPlanDraftService } from '../../lib/mealPlanDraftService';
 import { EdamamService } from '../../lib/edamamService';
 import { MultiProviderRecipeSearchService } from '../../lib/multiProviderRecipeSearchService';
+import { supabase } from '../../lib/supabase';
 import Joi from 'joi';
 
 const draftService = new MealPlanDraftService();
@@ -218,7 +219,13 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       
       case 'update-notes':
         return await handleUpdateNotes(req, res, user);
-      
+
+      case 'get-alternate-recipes':
+        return await handleGetAlternateRecipes(req, res, user);
+
+      case 'swap-recipe':
+        return await handleSwapRecipe(req, res, user);
+
       default:
         return res.status(400).json({ error: 'Invalid action' });
     }
@@ -3001,6 +3008,276 @@ async function handleUpdateNotes(req: VercelRequest, res: VercelResponse, user: 
     console.error('❌ Error updating notes:', error);
     return res.status(500).json({
       error: 'Failed to update notes',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}
+
+/**
+ * Get alternate recipe suggestions using AI
+ */
+async function handleGetAlternateRecipes(
+  req: VercelRequest,
+  res: VercelResponse,
+  user: any
+): Promise<VercelResponse> {
+  try {
+    const { draftId, day, mealName, recipeId, count = 3 } = req.body;
+
+    if (!draftId || !day || !mealName || !recipeId) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'draftId, day, mealName, and recipeId are required'
+      });
+    }
+
+    console.log(`🔄 Generating ${count} alternate recipes for ${mealName} on day ${day}`);
+
+    // Get the draft
+    const draft = await draftService.getDraft(draftId);
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    // Verify ownership
+    if (draft.nutritionistId !== user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Get the current recipe to understand context
+    const daySuggestion = draft.suggestions?.[day - 1];
+    if (!daySuggestion) {
+      return res.status(404).json({ error: 'Day not found' });
+    }
+
+    const meal = daySuggestion.meals?.[mealName];
+    if (!meal) {
+      return res.status(404).json({ error: 'Meal not found' });
+    }
+
+    const currentRecipe = meal.recipes?.find((r: any) => r.id === recipeId);
+    if (!currentRecipe) {
+      return res.status(404).json({ error: 'Recipe not found' });
+    }
+
+    // Extract client goals and meal requirements
+    const clientGoals = draft.searchParams?.clientGoals || {};
+    const mealProgram = draft.searchParams?.mealProgram;
+    const mealInfo = mealProgram?.meals?.find((m: any) => m.mealName === mealName);
+
+    // Determine which AI service to use (based on original draft creation)
+    const aiService = draft.creationMethod === 'ai_generated' && draft.searchParams?.aiProvider
+      ? draft.searchParams.aiProvider
+      : 'openai';
+
+    console.log(`🤖 Using ${aiService} to generate ${count} alternates`);
+
+    // Generate alternate recipes using AI
+    // Build a focused request for just this meal with alternates
+    const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
+    const additionalText = `Generate ${count} alternative recipes for ${mealName}. Similar nutrition to: ${currentRecipe.title} (${currentRecipe.calories} cal, ${currentRecipe.protein}g protein). DO NOT include these recipes: ${excludeTitles}`;
+
+    const alternateRecipes: any[] = [];
+
+    // Import and use the appropriate AI service
+    if (aiService === 'claude' || aiService === 'anthropic') {
+      const { ClaudeService } = await import('../../lib/claudeService');
+      const claudeService = new ClaudeService();
+
+      // Generate alternates by creating a mini meal plan request
+      const result = await claudeService.generateMealPlan({
+        clientId: draft.clientId,
+        nutritionistId: draft.nutritionistId,
+        clientGoals,
+        mealProgram: {
+          meals: [mealInfo]
+        },
+        days: 1,
+        additionalText
+      });
+
+      // Extract recipes from the response
+      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
+        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, count));
+      }
+    } else {
+      const { OpenAIService } = await import('../../lib/openaiService');
+      const openaiService = new OpenAIService();
+
+      // Generate alternates using OpenAI
+      const result = await openaiService.generateMealPlanSync({
+        clientId: draft.clientId,
+        nutritionistId: draft.nutritionistId,
+        clientGoals,
+        mealProgram: {
+          meals: [mealInfo]
+        },
+        days: 1,
+        additionalText
+      });
+
+      // Extract recipes from the response
+      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
+        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, count));
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        alternateRecipes,
+        originalRecipe: {
+          id: currentRecipe.id,
+          title: currentRecipe.title,
+          calories: currentRecipe.calories,
+          protein: currentRecipe.protein
+        },
+        metadata: {
+          aiProvider: aiService,
+          generatedAt: new Date().toISOString(),
+          count: alternateRecipes.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating alternate recipes:', error);
+    return res.status(500).json({
+      error: 'Failed to generate alternate recipes',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}
+
+/**
+ * Swap a recipe with an alternate recipe
+ */
+async function handleSwapRecipe(
+  req: VercelRequest,
+  res: VercelResponse,
+  user: any
+): Promise<VercelResponse> {
+  try {
+    const { draftId, day, mealName, oldRecipeId, newRecipe } = req.body;
+
+    if (!draftId || !day || !mealName || !oldRecipeId || !newRecipe) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'draftId, day, mealName, oldRecipeId, and newRecipe are required'
+      });
+    }
+
+    console.log(`🔄 Swapping recipe ${oldRecipeId} with ${newRecipe.title} in ${mealName} on day ${day}`);
+
+    // Get the draft
+    const draft = await draftService.getDraft(draftId);
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    // Verify ownership
+    if (draft.nutritionistId !== user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Get the meal plan data
+    if (!draft.suggestions?.[day - 1]) {
+      return res.status(404).json({ error: 'Day not found' });
+    }
+
+    const daySuggestion = draft.suggestions[day - 1];
+    const meal = daySuggestion.meals?.[mealName];
+    if (!meal) {
+      return res.status(404).json({ error: 'Meal not found' });
+    }
+
+    // Find and replace the recipe
+    const recipeIndex = meal.recipes?.findIndex((r: any) => r.id === oldRecipeId);
+    if (recipeIndex === -1 || recipeIndex === undefined) {
+      return res.status(404).json({ error: 'Recipe to swap not found' });
+    }
+
+    // Store the old recipe for reference
+    const oldRecipe = meal.recipes[recipeIndex];
+
+    // Generate a new unique ID for the swapped recipe
+    const newRecipeId = `recipe-${day}-${mealName.toLowerCase()}-${Date.now()}`;
+
+    // Update the recipe with new ID and ensure it has all required fields
+    const recipeToInsert = {
+      ...newRecipe,
+      id: newRecipeId,
+      source: newRecipe.source || 'openai', // Use the AI provider that generated it
+      selected: true, // Mark as selected since we're swapping it in
+      swappedFrom: oldRecipeId, // Track what it was swapped from
+      swappedAt: new Date().toISOString()
+    };
+
+    // Replace the recipe
+    meal.recipes[recipeIndex] = recipeToInsert;
+
+    // Recalculate meal totals
+    const mealTotals = {
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      fiber: 0
+    };
+
+    meal.recipes.forEach((recipe: any) => {
+      const getNumericValue = (value: any) => {
+        if (typeof value === 'number') return value;
+        if (value?.quantity !== undefined) return value.quantity;
+        return 0;
+      };
+
+      mealTotals.calories += getNumericValue(recipe.calories);
+      mealTotals.protein += getNumericValue(recipe.protein);
+      mealTotals.carbs += getNumericValue(recipe.carbs);
+      mealTotals.fat += getNumericValue(recipe.fat);
+      mealTotals.fiber += getNumericValue(recipe.fiber);
+    });
+
+    // Save the updated draft directly to database
+    const { error: updateError } = await supabase
+      .from('meal_plan_drafts')
+      .update({
+        suggestions: draft.suggestions,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', draftId);
+
+    if (updateError) {
+      throw new Error(`Failed to update draft: ${updateError.message}`);
+    }
+
+    console.log(`✅ Recipe swapped successfully: ${oldRecipe.title} → ${newRecipe.title}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Recipe swapped successfully',
+      data: {
+        swappedRecipe: recipeToInsert,
+        oldRecipe: {
+          id: oldRecipe.id,
+          title: oldRecipe.title
+        },
+        updatedMeal: {
+          mealName,
+          calories: mealTotals.calories,
+          protein: mealTotals.protein,
+          carbs: mealTotals.carbs,
+          fat: mealTotals.fat,
+          fiber: mealTotals.fiber
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error swapping recipe:', error);
+    return res.status(500).json({
+      error: 'Failed to swap recipe',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
