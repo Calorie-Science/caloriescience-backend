@@ -305,7 +305,7 @@ export class AsyncMealPlanService {
             id: draftId,
             client_id: clientId,
             nutritionist_id: nutritionistId,
-            status: 'completed',
+            status: 'draft',
             creation_method: 'ai_generated',
             search_params: formattedDraft.searchParams,
             suggestions: formattedDraft.suggestions,
@@ -315,7 +315,7 @@ export class AsyncMealPlanService {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             expires_at: null, // AI plans don't expire
-            finalized_at: new Date().toISOString()
+            finalized_at: null // AI plans start as drafts, finalize later
           });
         
         if (draftError) {
@@ -900,7 +900,7 @@ export class AsyncMealPlanService {
         id: draftId,
         clientId,
         nutritionistId,
-        status: 'completed',
+        status: 'draft',
         creationMethod: 'ai_generated',
         planName: uniquePlanName,
         planDate: planStartDate,
