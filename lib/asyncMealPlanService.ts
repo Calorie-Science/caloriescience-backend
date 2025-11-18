@@ -913,6 +913,7 @@ export class AsyncMealPlanService {
         searchParams: {
           days,
           startDate: planStartDate,
+          aiProvider: aiModel,
           clientGoals: {
             calories: clientGoals.eerGoalCalories || 0,
             protein: clientGoals.proteinGoalMin || 0,
