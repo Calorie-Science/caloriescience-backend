@@ -3231,6 +3231,9 @@ async function handleSwapRecipe(
     // Replace the recipe
     meal.recipes[recipeIndex] = recipeToInsert;
 
+    // Update selectedRecipeId to point to the new recipe
+    meal.selectedRecipeId = newRecipeId;
+
     // Recalculate meal totals
     const mealTotals = {
       calories: 0,
