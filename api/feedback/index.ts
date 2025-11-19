@@ -125,14 +125,6 @@ async function handleSubmitFeedback(
 
   const { feedbackType, clientId, mealPlanId, title, feedbackText, rating, passFail, feedbackDate } = value;
 
-  // Validate rating is only provided for recipe quality feedback
-  if (rating && feedbackType !== 'ai_meal_recipe_quality') {
-    return res.status(400).json({
-      error: 'Invalid data',
-      message: 'Rating can only be provided for ai_meal_recipe_quality feedback'
-    });
-  }
-
   // Validate client-specific feedback has clientId
   if ((feedbackType === 'client_onboarding' || feedbackType === 'client_details_dietary_goals') && !clientId) {
     return res.status(400).json({
