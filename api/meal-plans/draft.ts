@@ -3103,11 +3103,11 @@ async function handleGetAlternateRecipes(
     }
 
     // Create 3 DIFFERENT prompts to ensure variety in responses
-    // Keep prompts SHORT for faster generation but include critical constraints
+    // Use "skip first N ideas" technique to force diversity
     const variations = [
-      `Option 1: Create a UNIQUE ${mealName} recipe`,
-      `Option 2: Suggest a DIFFERENT ${mealName} recipe`,
-      `Option 3: Generate a DISTINCT ${mealName} recipe`
+      `Generate 1 ${mealName} recipe (use your FIRST idea)`,
+      `Generate 1 ${mealName} recipe (SKIP your first idea, use your SECOND idea)`,
+      `Generate 1 ${mealName} recipe (SKIP your first 2 ideas, use your THIRD idea)`
     ];
 
     const additionalTexts = variations.map((variation) =>
