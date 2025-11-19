@@ -3090,8 +3090,20 @@ async function handleGetAlternateRecipes(
     // Build a focused request for just this meal with ONE alternative
     const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
 
+    // Build allergen and preference constraints
+    let constraints = '';
+    if (clientGoals.allergies && clientGoals.allergies.length > 0) {
+      constraints += ` EXCLUDE ALLERGENS: ${clientGoals.allergies.join(', ')}.`;
+    }
+    if (clientGoals.preferences && clientGoals.preferences.length > 0) {
+      constraints += ` Preferences: ${clientGoals.preferences.join(', ')}.`;
+    }
+    if (clientGoals.cuisineTypes && clientGoals.cuisineTypes.length > 0) {
+      constraints += ` Cuisine: ${clientGoals.cuisineTypes.join(', ')}.`;
+    }
+
     // Create 3 DIFFERENT prompts to ensure variety in responses
-    // Keep prompts SHORT for faster generation
+    // Keep prompts SHORT for faster generation but include critical constraints
     const variations = [
       `Option 1: Create a UNIQUE ${mealName} recipe`,
       `Option 2: Suggest a DIFFERENT ${mealName} recipe`,
@@ -3099,7 +3111,7 @@ async function handleGetAlternateRecipes(
     ];
 
     const additionalTexts = variations.map((variation) =>
-      `${variation} (~${currentRecipe.calories}cal, ~${currentRecipe.protein}g protein). Skip: ${excludeTitles}.`
+      `${variation} (~${currentRecipe.calories}cal, ~${currentRecipe.protein}g protein). Skip: ${excludeTitles}.${constraints}`
     );
 
     // Import the appropriate AI service
