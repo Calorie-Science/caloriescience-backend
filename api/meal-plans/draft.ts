@@ -3083,90 +3083,120 @@ async function handleGetAlternateRecipes(
       targetCalories: currentRecipe.calories
     };
 
-    // Determine which AI service to use (based on original draft creation)
-    const aiService = draft.creationMethod === 'ai_generated' && draft.searchParams?.aiProvider
-      ? draft.searchParams.aiProvider
-      : 'openai';
+    console.log(`🚀 Generating ${minCount} alternates using PARALLEL calls to all 3 AI services`);
 
-    console.log(`🤖 Using ${aiService} to generate ${minCount} alternates`);
-
-    // Generate alternate recipes using AI
     // Build a focused request for just this meal with alternates
     const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
     const additionalText = `Generate EXACTLY ${minCount} alternative recipes for ${mealName} (you MUST provide at least 2 alternative recipes, no fewer). Each recipe should have similar nutrition to: ${currentRecipe.title} (${currentRecipe.calories} cal, ${currentRecipe.protein}g protein). DO NOT include these recipes: ${excludeTitles}. Return all ${minCount} recipes in the response.`;
 
-    const alternateRecipes: any[] = [];
+    // Import all AI services
+    const { ClaudeService } = await import('../../lib/claudeService');
+    const { GrokService } = await import('../../lib/grokService');
+    const { OpenAIService } = await import('../../lib/openaiService');
 
-    // Import and use the appropriate AI service
-    if (aiService === 'claude' || aiService === 'anthropic') {
-      const { ClaudeService } = await import('../../lib/claudeService');
-      const claudeService = new ClaudeService();
+    const claudeService = new ClaudeService();
+    const grokService = new GrokService();
+    const openaiService = new OpenAIService();
 
-      // Generate alternates by creating a mini meal plan request
-      const result = await claudeService.generateMealPlan({
-        clientId: draft.clientId,
-        nutritionistId: draft.nutritionistId,
-        clientGoals,
-        mealProgram: {
-          meals: [formattedMealInfo]
-        },
-        days: 1,
-        additionalText,
-        recipesPerMeal: minCount // Tell Claude to generate multiple recipes
-      });
+    // Prepare common request parameters
+    const baseRequest = {
+      clientId: draft.clientId,
+      nutritionistId: draft.nutritionistId,
+      clientGoals,
+      mealProgram: {
+        meals: [formattedMealInfo]
+      },
+      days: 1,
+      additionalText,
+      recipesPerMeal: minCount
+    };
 
-      // Extract recipes from the response
-      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
-        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
-      }
-    } else if (aiService === 'grok') {
-      const { GrokService } = await import('../../lib/grokService');
-      const grokService = new GrokService();
+    // Make parallel calls to all three AI services
+    const startTime = Date.now();
+    const [claudeResult, grokResult, openaiResult] = await Promise.allSettled([
+      claudeService.generateMealPlan(baseRequest).catch(err => {
+        console.warn('⚠️ Claude API failed:', err.message);
+        return { status: 'failed' as const, error: err.message };
+      }),
+      grokService.generateMealPlanSync(baseRequest).catch(err => {
+        console.warn('⚠️ Grok API failed:', err.message);
+        return { status: 'failed' as const, error: err.message };
+      }),
+      openaiService.generateMealPlanSync(baseRequest).catch(err => {
+        console.warn('⚠️ OpenAI API failed:', err.message);
+        return { status: 'failed' as const, error: err.message };
+      })
+    ]);
+    const parallelTime = Date.now() - startTime;
 
-      // Generate alternates using Grok
-      const result = await grokService.generateMealPlanSync({
-        clientId: draft.clientId,
-        nutritionistId: draft.nutritionistId,
-        clientGoals,
-        mealProgram: {
-          meals: [formattedMealInfo]
-        },
-        days: 1,
-        additionalText,
-        recipesPerMeal: minCount // Tell Grok to generate multiple recipes
-      });
+    console.log(`⚡ Parallel AI calls completed in ${parallelTime}ms`);
 
-      // Extract recipes from the response
-      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
-        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
-      }
-    } else {
-      const { OpenAIService } = await import('../../lib/openaiService');
-      const openaiService = new OpenAIService();
+    // Extract recipes from all successful responses
+    const allRecipes: any[] = [];
 
-      // Generate alternates using OpenAI
-      const result = await openaiService.generateMealPlanSync({
-        clientId: draft.clientId,
-        nutritionistId: draft.nutritionistId,
-        clientGoals,
-        mealProgram: {
-          meals: [formattedMealInfo]
-        },
-        days: 1,
-        additionalText,
-        recipesPerMeal: minCount // Tell OpenAI to generate multiple recipes
-      });
+    // Extract from Claude
+    if (claudeResult.status === 'fulfilled' && claudeResult.value.status === 'completed') {
+      const recipes = claudeResult.value.data?.suggestions?.[0]?.meals?.[mealName]?.recipes || [];
+      allRecipes.push(...recipes.map((r: any) => ({ ...r, aiProvider: 'claude' })));
+      console.log(`✅ Claude returned ${recipes.length} recipes`);
+    }
 
-      // Extract recipes from the response
-      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
-        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
+    // Extract from Grok
+    if (grokResult.status === 'fulfilled' && grokResult.value.status === 'completed') {
+      const recipes = grokResult.value.data?.suggestions?.[0]?.meals?.[mealName]?.recipes || [];
+      allRecipes.push(...recipes.map((r: any) => ({ ...r, aiProvider: 'grok' })));
+      console.log(`✅ Grok returned ${recipes.length} recipes`);
+    }
+
+    // Extract from OpenAI
+    if (openaiResult.status === 'fulfilled' && openaiResult.value.status === 'completed') {
+      const recipes = openaiResult.value.data?.suggestions?.[0]?.meals?.[mealName]?.recipes || [];
+      allRecipes.push(...recipes.map((r: any) => ({ ...r, aiProvider: 'openai' })));
+      console.log(`✅ OpenAI returned ${recipes.length} recipes`);
+    }
+
+    console.log(`📦 Total recipes collected: ${allRecipes.length}`);
+
+    // Deduplicate recipes based on similar titles (case-insensitive, normalize whitespace)
+    const deduplicatedRecipes: any[] = [];
+    const seenTitles = new Set<string>();
+
+    for (const recipe of allRecipes) {
+      // Normalize title for comparison: lowercase, remove extra spaces, remove special chars
+      const normalizedTitle = recipe.title
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!seenTitles.has(normalizedTitle)) {
+        seenTitles.add(normalizedTitle);
+        deduplicatedRecipes.push(recipe);
+      } else {
+        console.log(`🔄 Deduplicated: "${recipe.title}" (from ${recipe.aiProvider})`);
       }
     }
+
+    console.log(`✨ After deduplication: ${deduplicatedRecipes.length} unique recipes`);
+
+    // Take the requested number of recipes
+    const alternateRecipes = deduplicatedRecipes.slice(0, minCount);
 
     // Warn if we didn't get enough alternatives
     if (alternateRecipes.length < 2) {
       console.warn(`⚠️ Only received ${alternateRecipes.length} alternative recipe(s), expected at least 2`);
     }
+
+    // Calculate which providers contributed
+    const aiProviders = {
+      claude: claudeResult.status === 'fulfilled' && claudeResult.value.status === 'completed',
+      grok: grokResult.status === 'fulfilled' && grokResult.value.status === 'completed',
+      openai: openaiResult.status === 'fulfilled' && openaiResult.value.status === 'completed'
+    };
+
+    const contributingProviders = Object.entries(aiProviders)
+      .filter(([_, success]) => success)
+      .map(([provider]) => provider);
 
     return res.status(200).json({
       success: true,
@@ -3179,10 +3209,14 @@ async function handleGetAlternateRecipes(
           protein: currentRecipe.protein
         },
         metadata: {
-          aiProvider: aiService,
+          parallelCalls: true,
+          aiProviders: contributingProviders,
+          totalCollected: allRecipes.length,
+          afterDeduplication: deduplicatedRecipes.length,
           generatedAt: new Date().toISOString(),
           count: alternateRecipes.length,
-          requested: minCount
+          requested: minCount,
+          parallelTimeMs: parallelTime
         }
       }
     });
