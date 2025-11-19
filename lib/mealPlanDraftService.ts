@@ -137,14 +137,26 @@ export class MealPlanDraftService {
    */
   private static normalizeEdamamIngredients(ingredients: any[]): UnifiedIngredient[] {
     if (!ingredients || !Array.isArray(ingredients)) return [];
-    
+
     return ingredients.map(ing => {
-      const unit = ing.measure || ing.unit || '';
+      let unit = ing.measure || ing.unit || '';
+
+      // Fallback: if unit is empty or '<unit>', provide a sensible default
+      if (!unit || unit === '<unit>' || unit.trim() === '') {
+        // If we have weight info, assume grams
+        if (ing.weight && ing.weight > 0) {
+          unit = 'g';
+        } else {
+          // Otherwise default to 'piece' for countable items
+          unit = 'piece';
+        }
+      }
+
       return {
         id: ing.foodId || ing.id,
         name: ing.food || ing.name || ing.text,
         amount: ing.quantity || ing.amount || 0,
-        unit: unit === '<unit>' ? '' : unit,
+        unit: unit,
         image: ing.image,
         original: ing.text || ing.original || ing.originalString || '',
         weight: ing.weight,
@@ -158,17 +170,32 @@ export class MealPlanDraftService {
    */
   private static normalizeSpoonacularIngredients(ingredients: any[]): UnifiedIngredient[] {
     if (!ingredients || !Array.isArray(ingredients)) return [];
-    
-    return ingredients.map(ing => ({
-      id: ing.id,
-      name: ing.name || ing.nameClean || ing.originalName,
-      amount: ing.amount || 0,
-      unit: ing.unit || '',
-      image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : undefined,
-      original: ing.original || ing.originalString || '',
-      aisle: ing.aisle,
-      measures: ing.measures
-    }));
+
+    return ingredients.map(ing => {
+      let unit = ing.unit || '';
+
+      // Fallback: if unit is empty, provide a sensible default
+      if (!unit || unit.trim() === '') {
+        // Check if we have measures with weight info
+        if (ing.measures?.metric?.amount && ing.measures?.metric?.unitShort === 'g') {
+          unit = 'g';
+        } else if (ing.amount && ing.amount > 0) {
+          // Default to 'piece' for countable items
+          unit = 'piece';
+        }
+      }
+
+      return {
+        id: ing.id,
+        name: ing.name || ing.nameClean || ing.originalName,
+        amount: ing.amount || 0,
+        unit: unit,
+        image: ing.image ? (ing.image.startsWith('http') ? ing.image : `https://spoonacular.com/cdn/ingredients_100x100/${ing.image}`) : undefined,
+        original: ing.original || ing.originalString || '',
+        aisle: ing.aisle,
+        measures: ing.measures
+      };
+    });
   }
 
   /**
