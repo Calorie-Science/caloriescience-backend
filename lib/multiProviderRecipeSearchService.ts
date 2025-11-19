@@ -252,8 +252,12 @@ export class MultiProviderRecipeSearchService {
       };
 
       if (httpMethod === 'POST' && params) {
-        // For POST requests with RapidAPI, send as form data
+        // For POST requests with RapidAPI, send as form-urlencoded
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
+        // Debug: log what we're sending
+        console.log('🔍 RapidAPI POST body:', params.toString());
+
         return fetch(url, {
           method: 'POST',
           headers,
@@ -2016,13 +2020,13 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         return null;
       }
 
-      const params = new URLSearchParams({
-        ingredientList: ingredientText,
-        servings: '1',
-        includeNutrition: 'true'
-      });
+      const params = new URLSearchParams();
+      params.append('ingredientList', ingredientText);
+      params.append('servings', '1');
+      params.append('includeNutrition', 'true');
+      params.append('language', 'en');
 
-      // parseIngredients requires POST method
+      // parseIngredients requires POST method for RapidAPI
       const response = await this.fetchSpoonacular('/recipes/parseIngredients', params, 'POST');
 
       if (!response.ok) {
