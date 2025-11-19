@@ -239,22 +239,39 @@ export class MultiProviderRecipeSearchService {
   /**
    * Helper method to make Spoonacular API calls (supports both direct and RapidAPI)
    */
-  private async fetchSpoonacular(endpoint: string, params?: URLSearchParams): Promise<Response> {
+  private async fetchSpoonacular(endpoint: string, params?: URLSearchParams, method?: string): Promise<Response> {
+    const httpMethod = method || 'GET';
+
     if (this.useRapidApi) {
       // Use RapidAPI
-      const url = `https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com${endpoint}${params ? '?' + params.toString() : ''}`;
-      return fetch(url, {
-        headers: {
-          'X-RapidAPI-Key': this.rapidApiKey,
-          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com'
-        }
-      });
+      const url = `https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com${endpoint}`;
+
+      const headers: Record<string, string> = {
+        'X-RapidAPI-Key': this.rapidApiKey,
+        'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com'
+      };
+
+      if (httpMethod === 'POST' && params) {
+        // For POST requests with RapidAPI, send as form data
+        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        return fetch(url, {
+          method: 'POST',
+          headers,
+          body: params.toString()
+        });
+      } else {
+        // For GET requests, append params to URL
+        return fetch(`${url}${params ? '?' + params.toString() : ''}`, {
+          method: httpMethod,
+          headers
+        });
+      }
     } else {
       // Use direct Spoonacular API
       const searchParams = params || new URLSearchParams();
       searchParams.append('apiKey', this.spoonacularApiKey);
       const url = `https://api.spoonacular.com${endpoint}?${searchParams.toString()}`;
-      return fetch(url);
+      return fetch(url, { method: httpMethod });
     }
   }
 
@@ -2005,7 +2022,8 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         includeNutrition: 'true'
       });
 
-      const response = await this.fetchSpoonacular('/recipes/parseIngredients', params);
+      // parseIngredients requires POST method
+      const response = await this.fetchSpoonacular('/recipes/parseIngredients', params, 'POST');
 
       if (!response.ok) {
         const errorText = await response.text();
