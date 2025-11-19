@@ -3089,7 +3089,18 @@ async function handleGetAlternateRecipes(
 
     // Build a focused request for just this meal with ONE alternative
     const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
-    const additionalText = `Generate EXACTLY 1 alternative recipe for ${mealName}. The recipe should have similar nutrition to: ${currentRecipe.title} (${currentRecipe.calories} cal, ${currentRecipe.protein}g protein). DO NOT include these recipes: ${excludeTitles}. Respect all dietary restrictions, allergies, and preferences.`;
+
+    // Create 3 DIFFERENT prompts to ensure variety in responses
+    // Keep prompts SHORT for faster generation
+    const variations = [
+      `Option 1: Create a UNIQUE ${mealName} recipe`,
+      `Option 2: Suggest a DIFFERENT ${mealName} recipe`,
+      `Option 3: Generate a DISTINCT ${mealName} recipe`
+    ];
+
+    const additionalTexts = variations.map((variation) =>
+      `${variation} (~${currentRecipe.calories}cal, ~${currentRecipe.protein}g protein). Skip: ${excludeTitles}.`
+    );
 
     // Import the appropriate AI service
     let serviceModule: any;
@@ -3112,8 +3123,8 @@ async function handleGetAlternateRecipes(
     const service2 = new ServiceClass();
     const service3 = new ServiceClass();
 
-    // Prepare common request parameters - each call requests ONLY 1 recipe
-    const baseRequest = {
+    // Prepare 3 DIFFERENT requests with variations to ensure diverse results
+    const request1 = {
       clientId: draft.clientId,
       nutritionistId: draft.nutritionistId,
       clientGoals,
@@ -3121,24 +3132,48 @@ async function handleGetAlternateRecipes(
         meals: [formattedMealInfo]
       },
       days: 1,
-      additionalText,
-      recipesPerMeal: 1 // Each call generates only 1 recipe
+      additionalText: additionalTexts[0],
+      recipesPerMeal: 1
     };
 
-    // Make 3 parallel calls to the SAME AI service
+    const request2 = {
+      clientId: draft.clientId,
+      nutritionistId: draft.nutritionistId,
+      clientGoals,
+      mealProgram: {
+        meals: [formattedMealInfo]
+      },
+      days: 1,
+      additionalText: additionalTexts[1],
+      recipesPerMeal: 1
+    };
+
+    const request3 = {
+      clientId: draft.clientId,
+      nutritionistId: draft.nutritionistId,
+      clientGoals,
+      mealProgram: {
+        meals: [formattedMealInfo]
+      },
+      days: 1,
+      additionalText: additionalTexts[2],
+      recipesPerMeal: 1
+    };
+
+    // Make 3 parallel calls to the SAME AI service with DIFFERENT prompts
     const startTime = Date.now();
     const methodName = (aiService === 'claude' || aiService === 'anthropic') ? 'generateMealPlan' : 'generateMealPlanSync';
 
     const [result1, result2, result3] = await Promise.allSettled([
-      service1[methodName](baseRequest).catch((err: Error) => {
+      service1[methodName](request1).catch((err: Error) => {
         console.warn(`⚠️ ${aiService} API call 1 failed:`, err.message);
         return { status: 'failed' as const, error: err.message };
       }),
-      service2[methodName](baseRequest).catch((err: Error) => {
+      service2[methodName](request2).catch((err: Error) => {
         console.warn(`⚠️ ${aiService} API call 2 failed:`, err.message);
         return { status: 'failed' as const, error: err.message };
       }),
-      service3[methodName](baseRequest).catch((err: Error) => {
+      service3[methodName](request3).catch((err: Error) => {
         console.warn(`⚠️ ${aiService} API call 3 failed:`, err.message);
         return { status: 'failed' as const, error: err.message };
       })
