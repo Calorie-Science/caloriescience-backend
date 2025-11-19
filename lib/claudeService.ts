@@ -597,7 +597,8 @@ JSON FORMAT - COMPACT VERSION (return ONLY this structure):
               "fat": 15,
               "fiber": 8,
               "nutrition": {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {"protein": {"quantity": 25, "unit": "g"}, "carbs": {"quantity": 60, "unit": "g"}, "fat": {"quantity": 15, "unit": "g"}, "fiber": {"quantity": 8, "unit": "g"}, "sugar": {"quantity": 5, "unit": "g"}, "sodium": {"quantity": 200, "unit": "mg"}, "cholesterol": {"quantity": 10, "unit": "mg"}, "saturatedFat": {"quantity": 2, "unit": "g"}, "transFat": {"quantity": 0, "unit": "g"}, "monounsaturatedFat": {"quantity": 3, "unit": "g"}, "polyunsaturatedFat": {"quantity": 2, "unit": "g"}}, "micros": {"vitamins": {"vitaminA": {"quantity": 800, "unit": "IU"}, "vitaminC": {"quantity": 90, "unit": "mg"}, "vitaminD": {"quantity": 2, "unit": "mcg"}, "vitaminE": {"quantity": 5, "unit": "mg"}, "vitaminK": {"quantity": 1, "unit": "mcg"}, "thiamin": {"quantity": 0.5, "unit": "mg"}, "riboflavin": {"quantity": 0.6, "unit": "mg"}, "niacin": {"quantity": 5, "unit": "mg"}, "vitaminB6": {"quantity": 0.8, "unit": "mg"}, "folate": {"quantity": 100, "unit": "mcg"}, "vitaminB12": {"quantity": 1, "unit": "mcg"}, "biotin": {"quantity": 10, "unit": "mcg"}, "pantothenicAcid": {"quantity": 2, "unit": "mg"}}, "minerals": {"calcium": {"quantity": 300, "unit": "mg"}, "iron": {"quantity": 8, "unit": "mg"}, "magnesium": {"quantity": 50, "unit": "mg"}, "phosphorus": {"quantity": 200, "unit": "mg"}, "potassium": {"quantity": 400, "unit": "mg"}, "zinc": {"quantity": 3, "unit": "mg"}, "copper": {"quantity": 0.5, "unit": "mg"}, "manganese": {"quantity": 1, "unit": "mg"}, "selenium": {"quantity": 20, "unit": "mcg"}, "iodine": {"quantity": 50, "unit": "mcg"}, "chromium": {"quantity": 10, "unit": "mcg"}, "molybdenum": {"quantity": 20, "unit": "mcg"}}}},
-              "ingredients": [{"text": "1 cup ingredient", "quantity": 1, "measure": "cup", "food": "ingredient", "weight": 100}],
+              "ingredients": [{"text": "1 cup ingredient", "amount": 1, "unit": "cup", "name": "ingredient", "originalString": "1 cup ingredient"}],
+              "totalWeightG": 100,
               "instructions": ["Cook ingredient", "Serve hot"],
               "isSelected": true,
               "selectedAt": "2025-10-29T12:00:00.000Z"
@@ -643,13 +644,22 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 27. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
 28. Use COMPACT JSON formatting (minimize whitespace)
 
+INGREDIENT RULES - CRITICAL FOR PROPER DISPLAY:
+29. EVERY ingredient MUST have a valid "unit" field (NEVER empty string, null, or missing)
+30. Common units: "g" (grams), "cup", "tbsp", "tsp", "oz", "lb", "piece", "whole", "ml", "l", "kg"
+31. If quantity is in grams, use "g" as unit (e.g., {"amount": 200, "unit": "g", "name": "tofu"})
+32. If ingredient is counted, use "piece" or "whole" (e.g., {"amount": 2, "unit": "piece", "name": "eggs"})
+33. totalWeightG MUST be provided and represent total weight of the recipe in grams
+34. Each ingredient MUST have: text, amount (number), unit (string, NEVER empty), name, originalString
+35. Example valid ingredient: {"text": "200g tofu", "amount": 200, "unit": "g", "name": "tofu", "originalString": "200g tofu"}
+
 NUTRITION STRUCTURE RULES:
-29. EVERY recipe MUST include BOTH complete macros AND micros
-30. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
-31. ALL micros MUST be included in nested structure with vitamins and minerals
-32. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
-33. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
-34. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
+36. EVERY recipe MUST include BOTH complete macros AND micros
+37. ALL macros MUST be included: protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturatedFat, transFat, monounsaturatedFat, polyunsaturatedFat
+38. ALL micros MUST be included in nested structure with vitamins and minerals
+39. Vitamins MUST include (all 13): vitaminA, vitaminC, vitaminD, vitaminE, vitaminK, thiamin, riboflavin, niacin, vitaminB6, folate, vitaminB12, biotin, pantothenicAcid
+40. Minerals MUST include (all 12): calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, iodine, chromium, molybdenum
+41. CRITICAL - ACCURATE NUTRITION VALUES (DO NOT IGNORE):
    - Calculate nutrient values based on actual ingredients used - BE SPECIFIC AND REALISTIC
    - For cholesterol: Only animal products contain cholesterol (eggs ~186mg, chicken ~85mg, fish ~50-70mg, dairy/ghee ~20-30mg per serving). ALL plant-based foods = 0mg (rice, dosa, vegetables, vegetable oils, grains, lentils, nuts have ZERO cholesterol).
    - For vitamin B12: Animal products are rich sources (chicken 100g = 0.3mcg, fish 100g = 2-8mcg, eggs = 0.6mcg, dairy = 0.4-1.2mcg). Plant-based meals typically 0-0.1mcg unless fortified.
@@ -661,8 +671,8 @@ NUTRITION STRUCTURE RULES:
    - Example: 100g cooked chicken breast should have ~0.3mcg B12, ~0.1mcg vitamin D, ~85mg cholesterol, ~1g saturated fat
    - Example: 1 egg should have ~0.6mcg B12, ~2mcg vitamin D, ~186mg cholesterol, ~1.6g saturated fat
    - Example: Dosa with sambar (no animal products) should have ~0mcg B12, ~0mcg vitamin D, 0mg cholesterol, ~0.5g saturated fat (from oil)
-35. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
-36. DO NOT use flat format like {"calories": 500, "protein": 25}
+42. EACH recipe's "nutrition" field MUST use structured format: {"calories": {"quantity": 500, "unit": "kcal"}, "macros": {...}, "micros": {"vitamins": {...}, "minerals": {...}}}
+43. DO NOT use flat format like {"calories": 500, "protein": 25}
 
 VALIDATION CHECKLIST BEFORE RESPONDING:
 ✓ First character is {

@@ -338,6 +338,15 @@ Please generate a comprehensive meal plan based on the following nutritional gui
 - Focus on balanced, nutritious meals that meet the client's goals
 - Follow dietary preferences strictly and incorporate preferred cuisine types
 
+CRITICAL INGREDIENT REQUIREMENTS:
+- EVERY ingredient MUST have a valid "unit" field (NEVER empty string, null, or missing)
+- Common units: "g" (grams), "cup", "tbsp", "tsp", "oz", "lb", "piece", "whole", "ml", "l", "kg"
+- If quantity is in grams, use "g" as unit (e.g., {"amount": 200, "unit": "g", "name": "tofu"})
+- If ingredient is counted, use "piece" or "whole" (e.g., {"amount": 2, "unit": "piece", "name": "eggs"})
+- totalWeightG MUST be provided for each meal and represent total weight in grams
+- Each ingredient MUST have: text, amount (number), unit (string, NEVER empty), name, originalString
+- Example: {"text": "200g tofu", "amount": 200, "unit": "g", "name": "tofu", "originalString": "200g tofu"}
+
 Return the meal plan as a valid JSON object following this exact structure:
 
 {
@@ -388,13 +397,14 @@ Return the meal plan as a valid JSON object following this exact structure:
                             ],
                             "ingredients": [
                                 {
-                                    "text": "1 cup oats",
-                                    "quantity": 80,
-                                    "measure": "gram",
-                                    "food": "oats",
-                                    "weight": 80
+                                    "text": "80g oats",
+                                    "amount": 80,
+                                    "unit": "g",
+                                    "name": "oats",
+                                    "originalString": "80g oats"
                                 }
                             ],
+                            "totalWeightG": 80,
                             "edamamRecipeId": null
                         }
                     ],
