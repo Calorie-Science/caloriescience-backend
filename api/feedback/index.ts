@@ -17,16 +17,17 @@ import Joi from 'joi';
 // Validation schemas
 const submitFeedbackSchema = Joi.object({
   feedbackType: Joi.string().valid(
-    'global',
-    'client_details',
-    'nutritional_analysis_overall',
-    'nutritional_analysis_macro',
-    'nutritional_analysis_micro',
-    'meal_planning_manual',
-    'meal_planning_automated',
-    'meal_planning_ai',
-    'meal_plan_quality',
-    'meal_plan_nutrition'
+    'overall_application',
+    'client_onboarding',
+    'client_details_dietary_goals',
+    'target_nutritional_analysis',
+    'ai_meal_planning_overall',
+    'automated_meal_planning_overall',
+    'manual_meal_planning_overall',
+    'ai_meal_recipe_quality',
+    'ai_meal_nutritional_analysis',
+    'auto_meal_nutrition_analysis',
+    'manual_meal_nutrition_analysis'
   ).required(),
   clientId: Joi.string().uuid().optional().allow(null),
   mealPlanId: Joi.string().optional().allow(null),
@@ -39,16 +40,17 @@ const submitFeedbackSchema = Joi.object({
 
 const getFeedbackSchema = Joi.object({
   feedbackType: Joi.string().valid(
-    'global',
-    'client_details',
-    'nutritional_analysis_overall',
-    'nutritional_analysis_macro',
-    'nutritional_analysis_micro',
-    'meal_planning_manual',
-    'meal_planning_automated',
-    'meal_planning_ai',
-    'meal_plan_quality',
-    'meal_plan_nutrition'
+    'overall_application',
+    'client_onboarding',
+    'client_details_dietary_goals',
+    'target_nutritional_analysis',
+    'ai_meal_planning_overall',
+    'automated_meal_planning_overall',
+    'manual_meal_planning_overall',
+    'ai_meal_recipe_quality',
+    'ai_meal_nutritional_analysis',
+    'auto_meal_nutrition_analysis',
+    'manual_meal_nutrition_analysis'
   ).optional(),
   clientId: Joi.string().uuid().optional(),
   mealPlanId: Joi.string().optional(),
@@ -123,27 +125,30 @@ async function handleSubmitFeedback(
 
   const { feedbackType, clientId, mealPlanId, title, feedbackText, rating, passFail, feedbackDate } = value;
 
-  // Validate rating is only provided for meal_plan_quality
-  if (rating && feedbackType !== 'meal_plan_quality') {
+  // Validate rating is only provided for recipe quality feedback
+  if (rating && feedbackType !== 'ai_meal_recipe_quality') {
     return res.status(400).json({
       error: 'Invalid data',
-      message: 'Rating can only be provided for meal_plan_quality feedback'
+      message: 'Rating can only be provided for ai_meal_recipe_quality feedback'
     });
   }
 
   // Validate client-specific feedback has clientId
-  if (feedbackType === 'client_details' && !clientId) {
+  if ((feedbackType === 'client_onboarding' || feedbackType === 'client_details_dietary_goals') && !clientId) {
     return res.status(400).json({
       error: 'Missing required field',
-      message: 'clientId is required for client_details feedback'
+      message: 'clientId is required for client-specific feedback'
     });
   }
 
-  // Validate meal plan feedback has mealPlanId
-  if ((feedbackType === 'meal_plan_quality' || feedbackType === 'meal_plan_nutrition') && !mealPlanId) {
+  // Validate meal-specific feedback has mealPlanId
+  if ((feedbackType === 'ai_meal_recipe_quality' ||
+       feedbackType === 'ai_meal_nutritional_analysis' ||
+       feedbackType === 'auto_meal_nutrition_analysis' ||
+       feedbackType === 'manual_meal_nutrition_analysis') && !mealPlanId) {
     return res.status(400).json({
       error: 'Missing required field',
-      message: 'mealPlanId is required for meal plan feedback'
+      message: 'mealPlanId is required for meal-specific feedback'
     });
   }
 

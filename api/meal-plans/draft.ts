@@ -3031,7 +3031,10 @@ async function handleGetAlternateRecipes(
       });
     }
 
-    console.log(`🔄 Generating ${count} alternate recipes for ${mealName} on day ${day}`);
+    // Ensure minimum of 2 alternative recipes
+    const minCount = Math.max(2, count);
+
+    console.log(`🔄 Generating ${minCount} alternate recipes for ${mealName} on day ${day}`);
 
     // Get the draft
     const draft = await draftService.getDraft(draftId);
@@ -3085,12 +3088,12 @@ async function handleGetAlternateRecipes(
       ? draft.searchParams.aiProvider
       : 'openai';
 
-    console.log(`🤖 Using ${aiService} to generate ${count} alternates`);
+    console.log(`🤖 Using ${aiService} to generate ${minCount} alternates`);
 
     // Generate alternate recipes using AI
     // Build a focused request for just this meal with alternates
     const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
-    const additionalText = `Generate ${count} alternative recipes for ${mealName}. Similar nutrition to: ${currentRecipe.title} (${currentRecipe.calories} cal, ${currentRecipe.protein}g protein). DO NOT include these recipes: ${excludeTitles}`;
+    const additionalText = `Generate EXACTLY ${minCount} alternative recipes for ${mealName} (you MUST provide at least 2 alternative recipes, no fewer). Each recipe should have similar nutrition to: ${currentRecipe.title} (${currentRecipe.calories} cal, ${currentRecipe.protein}g protein). DO NOT include these recipes: ${excludeTitles}. Return all ${minCount} recipes in the response.`;
 
     const alternateRecipes: any[] = [];
 
@@ -3113,7 +3116,7 @@ async function handleGetAlternateRecipes(
 
       // Extract recipes from the response
       if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
-        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, count));
+        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
       }
     } else {
       const { OpenAIService } = await import('../../lib/openaiService');
@@ -3133,8 +3136,13 @@ async function handleGetAlternateRecipes(
 
       // Extract recipes from the response
       if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
-        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, count));
+        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
       }
+    }
+
+    // Warn if we didn't get enough alternatives
+    if (alternateRecipes.length < 2) {
+      console.warn(`⚠️ Only received ${alternateRecipes.length} alternative recipe(s), expected at least 2`);
     }
 
     return res.status(200).json({
@@ -3150,7 +3158,8 @@ async function handleGetAlternateRecipes(
         metadata: {
           aiProvider: aiService,
           generatedAt: new Date().toISOString(),
-          count: alternateRecipes.length
+          count: alternateRecipes.length,
+          requested: minCount
         }
       }
     });

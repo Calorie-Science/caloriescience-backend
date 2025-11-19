@@ -171,16 +171,17 @@ function escapeCSV(field: string): string {
  */
 function getFeedbackTypeLabel(feedbackType: string): string {
   const labels: { [key: string]: string } = {
-    'global': 'Global / Overall Product',
-    'client_details': 'Client Details',
-    'nutritional_analysis_overall': 'Nutritional Analysis - Overall',
-    'nutritional_analysis_macro': 'Nutritional Analysis - Macros',
-    'nutritional_analysis_micro': 'Nutritional Analysis - Micros',
-    'meal_planning_manual': 'Meal Planning - Manual',
-    'meal_planning_automated': 'Meal Planning - Automated',
-    'meal_planning_ai': 'Meal Planning - AI',
-    'meal_plan_quality': 'Meal Plan - Quality Rating',
-    'meal_plan_nutrition': 'Meal Plan - Nutritional Analysis'
+    'overall_application': 'Overall Application',
+    'client_onboarding': 'Client Onboarding',
+    'client_details_dietary_goals': 'Client Details - Dietary Goals',
+    'target_nutritional_analysis': 'Target Nutritional Analysis',
+    'ai_meal_planning_overall': 'AI Meal Planning Overall',
+    'automated_meal_planning_overall': 'Automated Meal Planning Overall',
+    'manual_meal_planning_overall': 'Manual Meal Planning Overall',
+    'ai_meal_recipe_quality': 'AI Meal - Recipe Quality',
+    'ai_meal_nutritional_analysis': 'AI Meal - Nutritional Analysis',
+    'auto_meal_nutrition_analysis': 'Auto Meal - Nutrition Analysis',
+    'manual_meal_nutrition_analysis': 'Manual Meal - Nutrition Analysis'
   };
 
   return labels[feedbackType] || feedbackType;
