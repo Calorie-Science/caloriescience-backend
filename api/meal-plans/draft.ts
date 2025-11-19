@@ -3111,7 +3111,29 @@ async function handleGetAlternateRecipes(
           meals: [formattedMealInfo]
         },
         days: 1,
-        additionalText
+        additionalText,
+        recipesPerMeal: minCount // Tell Claude to generate multiple recipes
+      });
+
+      // Extract recipes from the response
+      if (result.status === 'completed' && result.data?.suggestions?.[0]?.meals?.[mealName]?.recipes) {
+        alternateRecipes.push(...result.data.suggestions[0].meals[mealName].recipes.slice(0, minCount));
+      }
+    } else if (aiService === 'grok') {
+      const { GrokService } = await import('../../lib/grokService');
+      const grokService = new GrokService();
+
+      // Generate alternates using Grok
+      const result = await grokService.generateMealPlanSync({
+        clientId: draft.clientId,
+        nutritionistId: draft.nutritionistId,
+        clientGoals,
+        mealProgram: {
+          meals: [formattedMealInfo]
+        },
+        days: 1,
+        additionalText,
+        recipesPerMeal: minCount // Tell Grok to generate multiple recipes
       });
 
       // Extract recipes from the response
@@ -3131,7 +3153,8 @@ async function handleGetAlternateRecipes(
           meals: [formattedMealInfo]
         },
         days: 1,
-        additionalText
+        additionalText,
+        recipesPerMeal: minCount // Tell OpenAI to generate multiple recipes
       });
 
       // Extract recipes from the response

@@ -5,6 +5,7 @@ export interface GrokMealPlanRequest {
   nutritionistId: string;
   mealProgram?: any;
   days?: number;
+  recipesPerMeal?: number; // Allow multiple recipes per meal (for alternates)
 }
 
 export interface GrokMealPlanResponse {
@@ -325,7 +326,7 @@ export class GrokService {
    * (Similar to Claude prompt)
    */
   private prepareInputMessage(request: GrokMealPlanRequest): string {
-    const { clientGoals, additionalText, mealProgram } = request;
+    const { clientGoals, additionalText, mealProgram, recipesPerMeal = 1 } = request;
 
     let message = `Generate a meal plan with nutrition breakdown. Return ONLY valid JSON - no markdown, no explanations.
 
@@ -452,7 +453,7 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 23. Leave nutrition.overall as empty object {} - we will calculate it on the backend
 24. Leave nutrition.dailyAverage as empty object {} - we will calculate it on the backend
 25. Generate ${request.days || 2} days of meals (ONLY ${request.days || 2} DAYS!)
-26. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
+26. Generate EXACTLY ${recipesPerMeal} recipe${recipesPerMeal > 1 ? 's' : ''} per meal (${recipesPerMeal > 1 ? 'ALL ' + recipesPerMeal + ' recipes are REQUIRED' : 'NOT multiple alternatives'})
 27. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
 28. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
 29. Dates should increment: day 1 = today, day 2 = tomorrow, etc.

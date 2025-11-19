@@ -7,6 +7,7 @@ export interface ClaudeMealPlanRequest {
   nutritionistId: string;
   mealProgram?: any;
   days?: number;
+  recipesPerMeal?: number; // Allow multiple recipes per meal (for alternates)
 }
 
 export interface ClaudeMealPlanResponse {
@@ -506,7 +507,7 @@ export class ClaudeService {
    * Prepare the input message for Claude with strong allergen exclusion instructions
    */
   private prepareInputMessage(request: ClaudeMealPlanRequest, overrideDate?: string): string {
-    const { clientGoals, additionalText, mealProgram } = request;
+    const { clientGoals, additionalText, mealProgram, recipesPerMeal = 1 } = request;
 
     // Add variation to prevent duplicate meals across days
     const dayNumber = request.days || 1;
@@ -636,7 +637,7 @@ CONTENT RULES - MUST FOLLOW EXACTLY:
 21. DO NOT include totalNutrition in meals - backend will calculate it
 22. DO NOT include nutrition.byDay, nutrition.overall, or nutrition.dailyAverage - backend will calculate them
 23. Generate ONLY 1 DAY of meals (day ${request.days || 1})
-24. Generate ONLY 1 recipe per meal (NOT multiple alternatives)
+24. Generate EXACTLY ${recipesPerMeal} recipe${recipesPerMeal > 1 ? 's' : ''} per meal (${recipesPerMeal > 1 ? 'ALL ' + recipesPerMeal + ' recipes are REQUIRED' : 'NOT multiple alternatives'})
 25. Instructions should be 5 clear steps per recipe (NOT more, NOT less)
 26. Keep ingredient lists CONCISE (4-6 ingredients per recipe)
 27. Recipe IDs format: "recipe-{dayNumber}-{mealName}"
