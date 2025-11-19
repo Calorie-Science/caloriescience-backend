@@ -316,7 +316,7 @@ async function handleUpdateFeedback(
     });
   }
 
-  const { feedbackText, rating, feedbackDate } = value;
+  const { title, feedbackText, rating, passFail, feedbackDate } = value;
 
   // Check if feedback exists and belongs to user
   const { data: existing, error: fetchError } = await supabase
@@ -341,8 +341,10 @@ async function handleUpdateFeedback(
 
   // Update feedback
   const updateData: any = {};
+  if (title !== undefined) updateData.title = title;
   if (feedbackText !== undefined) updateData.feedback_text = feedbackText;
   if (rating !== undefined) updateData.rating = rating;
+  if (passFail !== undefined) updateData.pass_fail = passFail;
   if (feedbackDate !== undefined) updateData.feedback_date = feedbackDate;
 
   const { data: updated, error: updateError } = await supabase
@@ -365,9 +367,13 @@ async function handleUpdateFeedback(
       feedbackType: updated.feedback_type,
       clientId: updated.client_id,
       mealPlanId: updated.meal_plan_id,
+      title: updated.title,
       feedbackText: updated.feedback_text,
       rating: updated.rating,
+      passFail: updated.pass_fail,
       feedbackDate: updated.feedback_date,
+      testerName: updated.tester_name,
+      testerEmail: updated.tester_email,
       updatedAt: updated.updated_at
     }
   });
