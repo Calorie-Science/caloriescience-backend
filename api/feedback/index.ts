@@ -30,8 +30,10 @@ const submitFeedbackSchema = Joi.object({
   ).required(),
   clientId: Joi.string().uuid().optional().allow(null),
   mealPlanId: Joi.string().optional().allow(null),
+  title: Joi.string().max(255).optional().allow('', null),
   feedbackText: Joi.string().max(10000).optional().allow('', null),
   rating: Joi.number().integer().min(1).max(5).optional().allow(null),
+  passFail: Joi.string().valid('pass', 'fail').optional().allow(null),
   feedbackDate: Joi.date().iso().optional().allow(null)
 });
 
@@ -55,8 +57,10 @@ const getFeedbackSchema = Joi.object({
 });
 
 const updateFeedbackSchema = Joi.object({
+  title: Joi.string().max(255).optional().allow('', null),
   feedbackText: Joi.string().max(10000).optional().allow('', null),
   rating: Joi.number().integer().min(1).max(5).optional().allow(null),
+  passFail: Joi.string().valid('pass', 'fail').optional().allow(null),
   feedbackDate: Joi.date().iso().optional().allow(null)
 });
 
@@ -117,7 +121,7 @@ async function handleSubmitFeedback(
     });
   }
 
-  const { feedbackType, clientId, mealPlanId, feedbackText, rating, feedbackDate } = value;
+  const { feedbackType, clientId, mealPlanId, title, feedbackText, rating, passFail, feedbackDate } = value;
 
   // Validate rating is only provided for meal_plan_quality
   if (rating && feedbackType !== 'meal_plan_quality') {
@@ -143,6 +147,18 @@ async function handleSubmitFeedback(
     });
   }
 
+  // Get tester (nutritionist) info for denormalization
+  const { data: tester } = await supabase
+    .from('users')
+    .select('first_name, last_name, email')
+    .eq('id', user.id)
+    .single();
+
+  const testerName = tester
+    ? `${tester.first_name || ''} ${tester.last_name || ''}`.trim() || tester.email
+    : '';
+  const testerEmail = tester?.email || '';
+
   // Insert feedback
   const { data: feedback, error: insertError } = await supabase
     .from('tester_feedback')
@@ -151,9 +167,13 @@ async function handleSubmitFeedback(
       feedback_type: feedbackType,
       client_id: clientId || null,
       meal_plan_id: mealPlanId || null,
+      title: title || null,
       feedback_text: feedbackText || null,
       rating: rating || null,
-      feedback_date: feedbackDate || new Date().toISOString().split('T')[0]
+      pass_fail: passFail || null,
+      feedback_date: feedbackDate || new Date().toISOString().split('T')[0],
+      tester_name: testerName,
+      tester_email: testerEmail
     })
     .select()
     .single();
@@ -171,9 +191,13 @@ async function handleSubmitFeedback(
       feedbackType: feedback.feedback_type,
       clientId: feedback.client_id,
       mealPlanId: feedback.meal_plan_id,
+      title: feedback.title,
       feedbackText: feedback.feedback_text,
       rating: feedback.rating,
+      passFail: feedback.pass_fail,
       feedbackDate: feedback.feedback_date,
+      testerName: feedback.tester_name,
+      testerEmail: feedback.tester_email,
       createdAt: feedback.created_at
     }
   });
@@ -238,9 +262,13 @@ async function handleGetFeedback(
     feedbackType: f.feedback_type,
     clientId: f.client_id,
     mealPlanId: f.meal_plan_id,
+    title: f.title,
     feedbackText: f.feedback_text,
     rating: f.rating,
+    passFail: f.pass_fail,
     feedbackDate: f.feedback_date,
+    testerName: f.tester_name,
+    testerEmail: f.tester_email,
     createdAt: f.created_at,
     updatedAt: f.updated_at
   }));

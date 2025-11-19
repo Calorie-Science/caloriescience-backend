@@ -14,9 +14,13 @@ CREATE TABLE tester_feedback (
     feedback_type VARCHAR(50) NOT NULL,
     client_id UUID,
     meal_plan_id VARCHAR(255),
+    title VARCHAR(255),
     feedback_text TEXT,
     rating INTEGER (1-5),
+    pass_fail VARCHAR(10) ('pass', 'fail'),
     feedback_date DATE,
+    tester_name VARCHAR(255),
+    tester_email VARCHAR(255),
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
@@ -46,8 +50,10 @@ CREATE TABLE tester_feedback (
   "feedbackType": "global",
   "clientId": "uuid",           // Optional, required for client_details
   "mealPlanId": "plan-id",      // Optional, required for meal_plan_*
+  "title": "Short summary",     // Optional
   "feedbackText": "Feedback text",
   "rating": 4,                  // Optional, only for meal_plan_quality (1-5)
+  "passFail": "pass",           // Optional, "pass" or "fail"
   "feedbackDate": "2025-11-18"  // Optional, defaults to today
 }
 ```

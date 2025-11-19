@@ -97,8 +97,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       'Client ID',
       'Feedback Type',
       'Meal Plan ID',
-      'Feedback Text',
+      'Title',
+      'Pass/Fail',
       'Rating',
+      'Feedback Text',
       'Feedback Date',
       'Created At',
       'Updated At'
@@ -112,14 +114,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       csvRows.push([
         item.id || '',
-        testerName,
-        nutritionist?.email || '',
+        item.tester_name || testerName,
+        item.tester_email || nutritionist?.email || '',
         clientName,
         item.client_id || '',
         getFeedbackTypeLabel(item.feedback_type),
         item.meal_plan_id || '',
-        item.feedback_text || '',
+        item.title || '',
+        item.pass_fail ? item.pass_fail.toUpperCase() : '',
         item.rating?.toString() || '',
+        item.feedback_text || '',
         item.feedback_date || '',
         item.created_at || '',
         item.updated_at || ''
