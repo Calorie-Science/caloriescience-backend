@@ -209,20 +209,52 @@ export interface ClientAwareSearchResponse extends UnifiedSearchResponse {
 export class MultiProviderRecipeSearchService {
   private edamamService: EdamamService;
   private spoonacularApiKey: string;
+  private rapidApiKey: string;
+  private useRapidApi: boolean;
   private bonHappeteeService: any; // Lazy loaded
 
   constructor() {
     this.edamamService = new EdamamService();
     this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '';
-    
-    if (!this.spoonacularApiKey) {
+    this.rapidApiKey = process.env.RAPIDAPI_KEY || '';
+    this.useRapidApi = process.env.USE_RAPIDAPI === 'true';
+
+    if (!this.spoonacularApiKey && !this.useRapidApi) {
       throw new Error('SPOONACULAR_API_KEY environment variable is required');
     }
-    
+
+    if (this.useRapidApi && !this.rapidApiKey) {
+      throw new Error('RAPIDAPI_KEY is required when USE_RAPIDAPI is true');
+    }
+
+    console.log(`🔧 Spoonacular mode: ${this.useRapidApi ? 'RapidAPI' : 'Direct API'}`);
+
     // Lazy load Bon Happetee service (optional dependency)
     if (process.env.BON_HAPPETEE_API_KEY) {
       const { BonHappeteeService } = require('./bonHappeteeService');
       this.bonHappeteeService = new BonHappeteeService();
+    }
+  }
+
+  /**
+   * Helper method to make Spoonacular API calls (supports both direct and RapidAPI)
+   */
+  private async fetchSpoonacular(endpoint: string, params?: URLSearchParams): Promise<Response> {
+    if (this.useRapidApi) {
+      // Use RapidAPI
+      const url = `https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com${endpoint}${params ? '?' + params.toString() : ''}`;
+      return fetch(url, {
+        headers: {
+          'X-RapidAPI-Key': this.rapidApiKey,
+          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com'
+        }
+      });
+    } else {
+      // Use direct Spoonacular API
+      const searchParams = params || new URLSearchParams();
+      searchParams.append('apiKey', this.spoonacularApiKey);
+      const url = `https://api.spoonacular.com${endpoint}?${searchParams.toString()}`;
+      return fetch(url);
     }
   }
 
@@ -450,8 +482,9 @@ export class MultiProviderRecipeSearchService {
           
           // Fetch from API if not in cache
           console.log(`  🌐 Fetching ingredients from API for ${recipe.title}`);
-          const detailsUrl = `https://api.spoonacular.com/recipes/${recipe.id}/information?apiKey=${this.spoonacularApiKey}`;
-          const detailsResponse = await fetch(detailsUrl);
+          const params = new URLSearchParams();
+          params.append('includeNutrition', 'false');
+          const detailsResponse = await this.fetchSpoonacular(`/recipes/${recipe.id}/information`, params);
           
           if (!detailsResponse.ok) {
             console.warn(`  ⚠️ Failed to fetch details for recipe ${recipe.id}`);
@@ -781,10 +814,10 @@ export class MultiProviderRecipeSearchService {
    */
   private async getSpoonacularRecipeDetails(recipeId: number): Promise<SpoonacularRecipe | null> {
     try {
-      const response = await fetch(
-        `https://api.spoonacular.com/recipes/${recipeId}/information?apiKey=${this.spoonacularApiKey}&includeNutrition=true`
-      );
-      
+      const params = new URLSearchParams();
+      params.append('includeNutrition', 'true');
+      const response = await this.fetchSpoonacular(`/recipes/${recipeId}/information`, params);
+
       if (!response.ok) {
         throw new Error(`Spoonacular recipe details API error: ${response.status} ${response.statusText}`);
       }
@@ -801,11 +834,8 @@ export class MultiProviderRecipeSearchService {
    */
   private async searchSpoonacularAPI(params: SpoonacularSearchParams): Promise<SpoonacularSearchResponse> {
     const searchParams = new URLSearchParams();
-    
-    // Add API key
-    searchParams.append('apiKey', this.spoonacularApiKey);
-    
-    // Add search parameters
+
+    // Add search parameters (API key is handled by fetchSpoonacular)
     if (params.query) searchParams.append('query', params.query);
     if (params.cuisine && params.cuisine.length > 0) {
       // Spoonacular expects comma-separated cuisine values
@@ -835,13 +865,10 @@ export class MultiProviderRecipeSearchService {
     if (params.sortDirection) searchParams.append('sortDirection', params.sortDirection);
     if (params.addRecipeNutrition) searchParams.append('addRecipeNutrition', 'true');
 
-    const url = `https://api.spoonacular.com/recipes/complexSearch?${searchParams}`;
-    console.log('🍽️ Spoonacular API URL:', url);
     console.log('🍽️ Spoonacular params:', params);
-    console.log('🍽️ CURL COMMAND:');
-    console.log(`curl -X GET "${url}"`);
+    console.log('🍽️ Using API mode:', this.useRapidApi ? 'RapidAPI' : 'Direct');
 
-    const response = await fetch(url);
+    const response = await this.fetchSpoonacular('/recipes/complexSearch', searchParams);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -1357,8 +1384,10 @@ export class MultiProviderRecipeSearchService {
    */
   async getSpoonacularRecipeDetails(recipeId: number): Promise<UnifiedRecipe | null> {
     try {
-      const response = await fetch(`https://api.spoonacular.com/recipes/${recipeId}/information?apiKey=${this.spoonacularApiKey}&includeNutrition=true`);
-      
+      const params = new URLSearchParams();
+      params.append('includeNutrition', 'true');
+      const response = await this.fetchSpoonacular(`/recipes/${recipeId}/information`, params);
+
       if (!response.ok) {
         throw new Error(`Spoonacular API error: ${response.status} ${response.statusText}`);
       }
@@ -1506,7 +1535,9 @@ export class MultiProviderRecipeSearchService {
    */
   private async getSpoonacularRecipeDetails(recipeId: string): Promise<any> {
     try {
-      const response = await fetch(`https://api.spoonacular.com/recipes/${recipeId}/information?apiKey=${this.spoonacularApiKey}&includeNutrition=true`);
+      const params = new URLSearchParams();
+      params.append('includeNutrition', 'true');
+      const response = await this.fetchSpoonacular(`/recipes/${recipeId}/information`, params);
 
       if (!response.ok) {
         throw new Error(`Spoonacular API error: ${response.status} ${response.statusText}`);
@@ -1814,21 +1845,12 @@ export class MultiProviderRecipeSearchService {
         return mode === 'units_only' ? { units: [], suggestions: [], unitSuggestions: {} } : { suggestions: [], unitSuggestions: {} };
       }
 
-      const url = 'https://api.spoonacular.com/food/ingredients/autocomplete';
       const params = new URLSearchParams({
         query: query.trim(),
-        number: '10',
-        apiKey: this.spoonacularApiKey
+        number: '10'
       });
 
-      const fullUrl = `${url}?${params.toString()}`;
-
-      const response = await fetch(fullUrl, {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json'
-        }
-      });
+      const response = await this.fetchSpoonacular('/food/ingredients/autocomplete', params);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -1977,22 +1999,13 @@ Return a JSON object where each key is an ingredient name and the value is an ar
         return null;
       }
 
-      const url = 'https://api.spoonacular.com/recipes/parseIngredients';
       const params = new URLSearchParams({
         ingredientList: ingredientText,
         servings: '1',
-        includeNutrition: 'true',
-        apiKey: this.spoonacularApiKey
+        includeNutrition: 'true'
       });
 
-      const fullUrl = `${url}?${params.toString()}`;
-
-      const response = await fetch(fullUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
+      const response = await this.fetchSpoonacular('/recipes/parseIngredients', params);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -2030,19 +2043,9 @@ Return a JSON object where each key is an ingredient name and the value is an ar
    */
   async getIngredientSubstitutes(recipeId: string, ingredientId: string): Promise<any[]> {
     try {
-      const url = `https://api.spoonacular.com/recipes/${recipeId}/substitutes/${ingredientId}`;
-      const params = new URLSearchParams({
-        apiKey: this.spoonacularApiKey
-      });
+      const params = new URLSearchParams();
 
-      const fullUrl = `${url}?${params.toString()}`;
-
-      const response = await fetch(fullUrl, {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json'
-        }
-      });
+      const response = await this.fetchSpoonacular(`/recipes/${recipeId}/substitutes/${ingredientId}`, params);
 
       if (!response.ok) {
         const errorText = await response.text();

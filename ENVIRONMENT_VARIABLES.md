@@ -36,8 +36,15 @@ EDAMAM_RECIPE_APP_KEY=your-recipe-app-key
 EDAMAM_NUTRITION_APP_ID=your-nutrition-app-id
 EDAMAM_NUTRITION_APP_KEY=your-nutrition-app-key
 
-# Required: Spoonacular API
+# Spoonacular API Configuration
+# Option 1: Direct Spoonacular API (for staging/development)
 SPOONACULAR_API_KEY=your-spoonacular-api-key
+USE_RAPIDAPI=false
+
+# Option 2: Spoonacular via RapidAPI (for production)
+# Set USE_RAPIDAPI=true and provide RAPIDAPI_KEY
+RAPIDAPI_KEY=your-rapidapi-key
+USE_RAPIDAPI=true
 
 # Optional: Bon Happetee API (for Indian food database)
 BON_HAPPETEE_API_KEY=your-bonhappetee-api-key

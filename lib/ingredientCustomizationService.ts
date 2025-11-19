@@ -24,14 +24,44 @@ export class IngredientCustomizationService {
   private edamamService: EdamamService;
   private spoonacularService: MultiProviderRecipeSearchService;
   private spoonacularApiKey: string;
+  private rapidApiKey: string;
+  private useRapidApi: boolean;
 
   constructor() {
     this.edamamService = new EdamamService();
     this.spoonacularService = new MultiProviderRecipeSearchService();
     this.spoonacularApiKey = process.env.SPOONACULAR_API_KEY || '';
-    
-    if (!this.spoonacularApiKey) {
+    this.rapidApiKey = process.env.RAPIDAPI_KEY || '';
+    this.useRapidApi = process.env.USE_RAPIDAPI === 'true';
+
+    if (!this.spoonacularApiKey && !this.useRapidApi) {
       throw new Error('SPOONACULAR_API_KEY environment variable is required');
+    }
+
+    if (this.useRapidApi && !this.rapidApiKey) {
+      throw new Error('RAPIDAPI_KEY is required when USE_RAPIDAPI is true');
+    }
+  }
+
+  /**
+   * Helper method to make Spoonacular API calls (supports both direct and RapidAPI)
+   */
+  private async fetchSpoonacular(endpoint: string, params?: URLSearchParams): Promise<Response> {
+    if (this.useRapidApi) {
+      // Use RapidAPI
+      const url = `https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com${endpoint}${params ? '?' + params.toString() : ''}`;
+      return fetch(url, {
+        headers: {
+          'X-RapidAPI-Key': this.rapidApiKey,
+          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com'
+        }
+      });
+    } else {
+      // Use direct Spoonacular API
+      const searchParams = params || new URLSearchParams();
+      searchParams.append('apiKey', this.spoonacularApiKey);
+      const url = `https://api.spoonacular.com${endpoint}?${searchParams.toString()}`;
+      return fetch(url);
     }
   }
 
@@ -142,9 +172,8 @@ export class IngredientCustomizationService {
    */
   async getIngredientSubstitutes(recipeId: string, ingredientId: string): Promise<any[]> {
     try {
-      const response = await fetch(
-        `https://api.spoonacular.com/recipes/${recipeId}/substitutes/${ingredientId}?apiKey=${this.spoonacularApiKey}`
-      );
+      const params = new URLSearchParams();
+      const response = await this.fetchSpoonacular(`/recipes/${recipeId}/substitutes/${ingredientId}`, params);
 
       if (!response.ok) {
         throw new Error(`Spoonacular substitutes API error: ${response.status}`);
