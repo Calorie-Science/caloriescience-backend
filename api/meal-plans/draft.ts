@@ -1683,10 +1683,20 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
 
           // Build nutrition from recipe data in draft
           const recipeAny = recipe as any;
-          if (recipeAny.nutrition && typeof recipeAny.nutrition === 'object') {
-            originalNutritionWithMicros = recipeAny.nutrition;
+
+          // CRITICAL FIX: For AI recipes, use baseNutrition if it exists (true original before any modifications)
+          // Otherwise use recipe.nutrition (which might already be modified)
+          const nutritionSource = recipeAny.baseNutrition || recipeAny.nutrition;
+
+          if (recipeAny.baseNutrition) {
+            console.log('  ✅ Using baseNutrition for AI recipe (true original, not modified)');
+            originalNutritionWithMicros = recipeAny.baseNutrition;
+          } else if (nutritionSource && typeof nutritionSource === 'object') {
+            console.log('  ⚠️ Using recipe.nutrition (may already be modified if no baseNutrition)');
+            originalNutritionWithMicros = nutritionSource;
           } else {
             // Build nutrition object from flat values
+            console.log('  ⚠️ Building nutrition from flat values');
             originalNutritionWithMicros = {
               calories: { quantity: getNutritionValue(recipe.calories), unit: 'kcal' },
               macros: {
@@ -2397,7 +2407,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         originalString: ing.original || ing.originalString || '',
         aisle: ing.aisle || '',
         meta: ing.meta || [],
-        measures: ing.measures || {
+        measures: {
           us: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' },
           metric: { amount: ingredientAmount, unitLong: ing.unit || '', unitShort: ing.unit || '' }
         }

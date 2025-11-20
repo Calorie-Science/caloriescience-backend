@@ -792,6 +792,36 @@ export class MealPlanDraftService {
     if (customizations.customNutrition) {
       console.log('🔄 Updating recipe top-level nutrition fields to match customNutrition');
 
+      // CRITICAL FIX for AI-generated recipes: Store the ORIGINAL BASE nutrition if this is the first modification
+      // This ensures all future modifications are calculated from the true base, not from previous modifications
+      const recipeSource = ((recipe as any).source || customizations.source || '').toLowerCase();
+      const isAIGenerated = ['claude', 'grok', 'openai', 'gpt', 'chatgpt', 'gpt-4', 'gpt-3.5'].includes(recipeSource);
+
+      if (isAIGenerated && !(recipe as any).baseNutrition) {
+        console.log('  🤖 AI-generated recipe detected - storing original base nutrition for future calculations');
+        // Deep clone the original nutrition object to prevent mutation
+        if (recipe.nutrition && typeof recipe.nutrition === 'object') {
+          (recipe as any).baseNutrition = JSON.parse(JSON.stringify(recipe.nutrition));
+        } else {
+          (recipe as any).baseNutrition = {
+            calories: { quantity: recipe.calories || 0, unit: 'kcal' },
+            macros: {
+              protein: { quantity: recipe.protein || 0, unit: 'g' },
+              carbs: { quantity: recipe.carbs || 0, unit: 'g' },
+              fat: { quantity: recipe.fat || 0, unit: 'g' },
+              fiber: { quantity: recipe.fiber || 0, unit: 'g' }
+            },
+            micros: { vitamins: {}, minerals: {} }
+          };
+        }
+        console.log('  ✅ Saved base nutrition:', {
+          calories: (recipe as any).baseNutrition.calories?.quantity,
+          protein: (recipe as any).baseNutrition.macros?.protein?.quantity
+        });
+      } else if (isAIGenerated && (recipe as any).baseNutrition) {
+        console.log('  ♻️ AI recipe: Base nutrition already exists, using it for calculations');
+      }
+
       // Extract nutrition values from customNutrition
       const extractNumber = (value: any): number => {
         if (typeof value === 'number') return value;
