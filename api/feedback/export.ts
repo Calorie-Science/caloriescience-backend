@@ -1,58 +1,30 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
 /**
- * Export Tester Feedback as CSV
+ * Export Tester Feedback as CSV (Public Endpoint)
  *
  * GET /api/feedback/export
  *
- * Query params (optional):
- * - nutritionistId: (Admin only) Filter by specific nutritionist ID
- * - clientId: Filter by client
- * - feedbackType: Filter by feedback type
- * - startDate: Filter feedback created after this date (ISO format)
- * - endDate: Filter feedback created before this date (ISO format)
+ * Query params:
+ * - testerId: (Optional) Filter by specific nutritionist/tester ID
+ * - nutritionistId: (Optional) Alias for testerId
+ * - clientId: (Optional) Filter by client
+ * - feedbackType: (Optional) Filter by feedback type
+ * - startDate: (Optional) Filter feedback created after this date (ISO format)
+ * - endDate: (Optional) Filter feedback created before this date (ISO format)
  */
 
-async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
-  const user = (req as any).user;
-
-  if (!user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  // Only nutritionists and admins can export feedback
-  if (user.role !== 'nutritionist' && user.role !== 'admin') {
-    return res.status(403).json({
-      error: 'Access denied',
-      message: 'Only nutritionists and admins can access feedback system'
-    });
-  }
-
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { clientId, feedbackType, startDate, endDate, nutritionistId } = req.query;
+    const { clientId, feedbackType, startDate, endDate, nutritionistId, testerId } = req.query;
 
-    // Determine which nutritionist's feedback to export
-    let targetNutritionistId: string;
-
-    if (user.role === 'admin' && nutritionistId && typeof nutritionistId === 'string') {
-      // Admin can specify nutritionistId
-      targetNutritionistId = nutritionistId;
-    } else if (user.role === 'admin' && !nutritionistId) {
-      // Admin must provide nutritionistId
-      return res.status(400).json({
-        error: 'Missing parameter',
-        message: 'Admin users must provide nutritionistId query parameter'
-      });
-    } else {
-      // Nutritionist can only export their own feedback
-      targetNutritionistId = user.id;
-    }
+    // Use testerId or nutritionistId (both are accepted, testerId takes precedence)
+    const targetNutritionistId = (testerId || nutritionistId) as string | undefined;
 
     // Build query to get all feedback with related data
     let query = supabase
@@ -65,8 +37,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           last_name
         )
       `)
-      .eq('nutritionist_id', targetNutritionistId)
       .order('created_at', { ascending: false });
+
+    // Filter by nutritionist/tester ID if provided
+    if (targetNutritionistId) {
+      query = query.eq('nutritionist_id', targetNutritionistId);
+    }
 
     // Apply filters
     if (clientId && typeof clientId === 'string') {
@@ -92,16 +68,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       throw new Error(`Failed to fetch feedback: ${queryError.message}`);
     }
 
-    // Get nutritionist details (use targetNutritionistId instead of user.id)
-    const { data: nutritionist } = await supabase
-      .from('users')
-      .select('first_name, last_name, email')
-      .eq('id', targetNutritionistId)
-      .single();
+    // Get nutritionist details if testerId is provided
+    let nutritionist: { first_name: string; last_name: string; email: string } | null = null;
+    if (targetNutritionistId) {
+      const { data } = await supabase
+        .from('users')
+        .select('first_name, last_name, email')
+        .eq('id', targetNutritionistId)
+        .single();
+      nutritionist = data;
+    }
 
     const testerName = nutritionist
       ? `${nutritionist.first_name} ${nutritionist.last_name}`.trim() || nutritionist.email
-      : 'Unknown';
+      : 'All Testers';
 
     // Generate CSV
     const csvRows: string[] = [];
@@ -153,7 +133,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     // Set headers for CSV download
     const nutritionistSlug = nutritionist
       ? `${nutritionist.first_name || ''}-${nutritionist.last_name || ''}`.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-      : 'nutritionist';
+      : 'all-testers';
     const filename = `feedback-${nutritionistSlug}-${new Date().toISOString().split('T')[0]}.csv`;
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -207,5 +187,3 @@ function getFeedbackTypeLabel(feedbackType: string): string {
 
   return labels[feedbackType] || feedbackType;
 }
-
-export default requireAuth(handler);
