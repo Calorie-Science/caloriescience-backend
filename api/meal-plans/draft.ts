@@ -1763,8 +1763,8 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
             vitaminsCount: Object.keys(originalNutritionWithMicros.micros?.vitamins || {}).length,
             mineralsCount: Object.keys(originalNutritionWithMicros.micros?.minerals || {}).length
           };
-        } else {
-          // Fetch from API if not in cache (for non-AI recipes)
+        } else if (!isSimpleIngredient) {
+          // Fetch from API if not in cache (for non-AI, non-simple-ingredient recipes)
           debugCacheLookup.fetchedFromAPI = true;
           let recipeDetails: any = null;
           try {
@@ -1880,6 +1880,10 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           };
         }
         } // Close else block for non-AI recipes (API fetch)
+        else {
+          // Simple ingredient - skip API call, nutrition already set earlier
+          console.log('✅ Skipping API call for simple ingredient - using nutrition from recipe/database');
+        }
       } // Close else block for when not in cache
       } // End of else block for normal recipes (not simple ingredients)
 
