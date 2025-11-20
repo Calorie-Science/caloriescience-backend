@@ -71,6 +71,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         .from('client_goals')
         .select('allergies')
         .eq('client_id', clientId)
+        .eq('is_active', true)
         .single();
 
       if (clientError) {
