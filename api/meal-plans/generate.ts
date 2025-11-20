@@ -110,7 +110,8 @@ const mealPlanGenerationSchema = Joi.object({
               if (num < 0) return helpers.error('number.min');
               if (num > 5000) return helpers.error('number.max');
               return num;
-            })
+            }),
+            Joi.valid(null)
           )
           .default(500)
           .messages({
