@@ -1,25 +1,26 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { SimpleIngredientService } from '../../lib/simpleIngredientService';
+import { supabase } from '../../lib/supabase';
 
 const simpleIngredientService = new SimpleIngredientService();
 
 /**
  * Fast Simple Ingredients Search API
- * 
+ *
  * Searches the simple_ingredients database for matching ingredients by name
  * Returns all matching results (raw + cooked variants)
- * 
+ * Automatically filters out ingredients based on client's allergen profile (if clientId provided)
+ *
  * Query Parameters:
  * - query: Search term (required, min 2 characters)
+ * - clientId: Client UUID (optional) - if provided, fetches allergen restrictions from client profile and filters results
  * - category: Filter by category (optional: vegetable, fruit, protein, grain, dairy, nuts, etc.)
  * - limit: Max results to return (optional, default: 50)
- * - allergens: Comma-separated allergens to exclude (optional)
- * 
- * Example:
- * GET /api/ingredients/search?query=broccoli
- * GET /api/ingredients/search?query=chicken&category=protein&limit=10
- * GET /api/ingredients/search?query=mushroom&allergens=dairy,soy
+ *
+ * Examples:
+ * GET /api/ingredients/search?query=paneer&clientId=123  (with allergen filtering)
+ * GET /api/ingredients/search?query=chicken&category=protein&limit=10  (without filtering)
  */
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
@@ -38,9 +39,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { query, category, limit, allergens } = req.query;
+    const { query, clientId, category, limit } = req.query;
 
-    // Validate query parameter
+    // Validate required parameters
     if (!query || typeof query !== 'string') {
       return res.status(400).json({
         error: 'Missing query parameter',
@@ -57,14 +58,33 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Parse limit (default 50, max 100)
-    const maxResults = limit && typeof limit === 'string' 
-      ? Math.min(parseInt(limit), 100) 
+    const maxResults = limit && typeof limit === 'string'
+      ? Math.min(parseInt(limit), 100)
       : 50;
 
-    // Parse allergens if provided
-    const allergenFilters = allergens && typeof allergens === 'string'
-      ? allergens.split(',').map(a => a.trim()).filter(a => a.length > 0)
-      : undefined;
+    // Fetch client allergies from client_goals (if clientId provided)
+    let clientAllergies: string[] = [];
+    let allergenFilters: string[] | undefined = undefined;
+
+    if (clientId && typeof clientId === 'string') {
+      const { data: clientGoals, error: clientError } = await supabase
+        .from('client_goals')
+        .select('allergies')
+        .eq('client_id', clientId)
+        .single();
+
+      if (clientError) {
+        console.error('❌ Error fetching client allergies:', clientError);
+        return res.status(404).json({
+          error: 'Client not found',
+          message: 'Could not find client with the specified ID'
+        });
+      }
+
+      // Extract allergies from client profile (e.g., ["dairy-free", "gluten-free"])
+      clientAllergies = clientGoals?.allergies || [];
+      allergenFilters = clientAllergies.length > 0 ? clientAllergies : undefined;
+    }
 
     // Validate category if provided
     const validCategories = [
@@ -77,10 +97,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log('🔍 Simple ingredient search:', {
       nutritionist: user.email,
+      clientId: clientId || 'none',
       query,
       category: categoryFilter || 'all',
       limit: maxResults,
-      allergens: allergenFilters || 'none'
+      clientAllergies: clientAllergies.length > 0 ? clientAllergies : 'none',
+      allergenFilters: allergenFilters || 'none'
     });
 
     // Search simple ingredients (uses in-memory cache for speed)
@@ -110,17 +132,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         grouped: groupedIngredients
       },
       metadata: {
+        clientId: clientId || null,
         query,
         category: categoryFilter || 'all',
         limit: maxResults,
-        allergenFilters: allergenFilters || [],
+        clientAllergies: clientAllergies,
+        allergenFiltersApplied: allergenFilters || [],
         totalResults: ingredients.length,
         rawIngredients: rawCount,
         cookedIngredients: cookedCount,
         searchTime: `${searchTime}ms`,
         nutritionist: user.email
       },
-      message: `Found ${ingredients.length} matching ingredient${ingredients.length !== 1 ? 's' : ''}${rawCount > 0 && cookedCount > 0 ? ` (${rawCount} raw, ${cookedCount} cooked)` : ''}`
+      message: `Found ${ingredients.length} matching ingredient${ingredients.length !== 1 ? 's' : ''}${rawCount > 0 && cookedCount > 0 ? ` (${rawCount} raw, ${cookedCount} cooked)` : ''}${clientAllergies.length > 0 ? ` (filtered by: ${clientAllergies.join(', ')})` : ''}`
     });
 
   } catch (error) {
