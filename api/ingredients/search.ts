@@ -67,24 +67,41 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     let allergenFilters: string[] | undefined = undefined;
 
     if (clientId && typeof clientId === 'string') {
-      const { data: clientGoals, error: clientError } = await supabase
-        .from('client_goals')
-        .select('allergies')
-        .eq('client_id', clientId)
-        .eq('is_active', true)
+      // First check if client exists
+      const { data: client, error: clientCheckError } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('id', clientId)
         .single();
 
-      if (clientError) {
-        console.error('❌ Error fetching client allergies:', clientError);
+      if (clientCheckError || !client) {
+        console.error('❌ Client not found:', clientId);
         return res.status(404).json({
           error: 'Client not found',
           message: 'Could not find client with the specified ID'
         });
       }
 
+      // Try to fetch client goals (may not exist, which is okay)
+      const { data: clientGoals, error: goalError } = await supabase
+        .from('client_goals')
+        .select('allergies')
+        .eq('client_id', clientId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      // If no goals found, just proceed without allergen filtering
+      if (goalError && goalError.code !== 'PGRST116') {
+        console.warn('⚠️ Error fetching client goals (proceeding without allergen filtering):', goalError);
+      }
+
       // Extract allergies from client profile (e.g., ["dairy-free", "gluten-free"])
       clientAllergies = clientGoals?.allergies || [];
       allergenFilters = clientAllergies.length > 0 ? clientAllergies : undefined;
+
+      if (clientAllergies.length === 0) {
+        console.log('ℹ️ No active allergen restrictions for client:', clientId);
+      }
     }
 
     // Validate category if provided
