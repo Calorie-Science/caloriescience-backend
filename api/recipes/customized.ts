@@ -1161,20 +1161,21 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, meal: any, 
       title: ingredientRecipe.title,
       image: ingredientRecipe.image,
       servings: ingredientRecipe.servings,
+      nutritionServings: customizations?.nutritionServings || customizations?.servings || 1, // Default to 1
       readyInMinutes: 0,
       source: 'spoonacular', // Marked as spoonacular for customization compatibility
       sourceUrl: null,
-      
+
       // Nutrition - use customized if available, otherwise original
       nutrition: customizations?.customNutrition || ingredientRecipe.nutrition,
-      
+
       // Ingredients - show modified list if customizations exist, otherwise original
       ingredients: modifiedIngredients,
       originalIngredients: ingredientRecipe.ingredients, // Keep original for reference
-      
+
       // Instructions
       instructions: ingredientRecipe.instructions,
-      
+
       // Metadata
       healthLabels: ingredientRecipe.healthLabels,
       dietLabels: ingredientRecipe.dietLabels,
@@ -1182,18 +1183,18 @@ async function handleIngredientRecipe(recipeId: string, recipe: any, meal: any, 
       cuisineType: ingredientRecipe.cuisineType,
       dishType: ingredientRecipe.dishType,
       mealType: ingredientRecipe.mealType,
-      
+
       // Customization info - NOW FROM MEAL
       currentCustomizations: customizations,
       currentServings: recipe.servings || 1,
       modifications: customizations?.modifications || [],
       customizationsApplied: customizations?.customizationsApplied || false,
-      
+
       // Special flags
       isIngredient: true,
       isSimpleIngredient: true,
       canCustomize: true, // Can modify portion size and unit
-      
+
       message: customizations ? 'Simple ingredient with customizations' : 'Simple ingredient - you can modify the portion size and unit'
     }
   });
