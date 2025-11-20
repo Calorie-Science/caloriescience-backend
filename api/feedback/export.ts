@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
  * GET /api/feedback/export
  *
  * Query params (optional):
+ * - nutritionistId: (Admin only) Filter by specific nutritionist ID
  * - clientId: Filter by client
  * - feedbackType: Filter by feedback type
  * - startDate: Filter feedback created after this date (ISO format)
@@ -21,11 +22,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // Only nutritionists can export feedback
-  if (user.role !== 'nutritionist') {
+  // Only nutritionists and admins can export feedback
+  if (user.role !== 'nutritionist' && user.role !== 'admin') {
     return res.status(403).json({
       error: 'Access denied',
-      message: 'Only nutritionists can access feedback system'
+      message: 'Only nutritionists and admins can access feedback system'
     });
   }
 
@@ -34,7 +35,24 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   }
 
   try {
-    const { clientId, feedbackType, startDate, endDate } = req.query;
+    const { clientId, feedbackType, startDate, endDate, nutritionistId } = req.query;
+
+    // Determine which nutritionist's feedback to export
+    let targetNutritionistId: string;
+
+    if (user.role === 'admin' && nutritionistId && typeof nutritionistId === 'string') {
+      // Admin can specify nutritionistId
+      targetNutritionistId = nutritionistId;
+    } else if (user.role === 'admin' && !nutritionistId) {
+      // Admin must provide nutritionistId
+      return res.status(400).json({
+        error: 'Missing parameter',
+        message: 'Admin users must provide nutritionistId query parameter'
+      });
+    } else {
+      // Nutritionist can only export their own feedback
+      targetNutritionistId = user.id;
+    }
 
     // Build query to get all feedback with related data
     let query = supabase
@@ -47,7 +65,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           last_name
         )
       `)
-      .eq('nutritionist_id', user.id)
+      .eq('nutritionist_id', targetNutritionistId)
       .order('created_at', { ascending: false });
 
     // Apply filters
@@ -74,11 +92,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       throw new Error(`Failed to fetch feedback: ${queryError.message}`);
     }
 
-    // Get nutritionist details
+    // Get nutritionist details (use targetNutritionistId instead of user.id)
     const { data: nutritionist } = await supabase
       .from('users')
       .select('first_name, last_name, email')
-      .eq('id', user.id)
+      .eq('id', targetNutritionistId)
       .single();
 
     const testerName = nutritionist
@@ -133,7 +151,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     const csvContent = csvRows.join('\n');
 
     // Set headers for CSV download
-    const filename = `feedback-export-${new Date().toISOString().split('T')[0]}.csv`;
+    const nutritionistSlug = nutritionist
+      ? `${nutritionist.first_name || ''}-${nutritionist.last_name || ''}`.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+      : 'nutritionist';
+    const filename = `feedback-${nutritionistSlug}-${new Date().toISOString().split('T')[0]}.csv`;
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
