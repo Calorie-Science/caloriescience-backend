@@ -125,13 +125,7 @@ async function handleSubmitFeedback(
 
   const { feedbackType, clientId, mealPlanId, title, feedbackText, rating, passFail, feedbackDate } = value;
 
-  // Validate client-specific feedback has clientId
-  if ((feedbackType === 'client_onboarding' || feedbackType === 'client_details_dietary_goals') && !clientId) {
-    return res.status(400).json({
-      error: 'Missing required field',
-      message: 'clientId is required for client-specific feedback'
-    });
-  }
+  // clientId is now optional - nutritionist/tester ID is fetched from token
 
   // Validate meal-specific feedback has mealPlanId
   if ((feedbackType === 'ai_meal_recipe_quality' ||
