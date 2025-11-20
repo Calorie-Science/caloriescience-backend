@@ -2106,9 +2106,35 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
         sourceUrl: recipe.sourceUrl
       };
     } else {
-      // Fetch from API to get full recipe details including ingredients
-      console.log('🔄 Recipe not in cache, fetching full details from API...');
-      const recipeDetails = await multiProviderService.getRecipeDetails(recipeId, customizations.source as any);
+      // Check if this is a simple ingredient before fetching from API
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recipeId);
+      const isSimpleIngredient = (recipe as any).isSimpleIngredient === true ||
+                                  (recipe as any).isIngredient === true ||
+                                  recipeId.startsWith('ingredient_') ||
+                                  (isUUID && recipe.ingredients?.length === 1);
+
+      if (isSimpleIngredient) {
+        // Simple ingredient - use data from draft, don't fetch from API
+        console.log('✅ Simple ingredient detected - using data from draft instead of API');
+        baseRecipe = {
+          recipeName: recipe.title,
+          ingredients: recipe.ingredients || [],
+          ingredientLines: (recipe as any).ingredientLines || [],
+          cookingInstructions: recipe.instructions || [],
+          nutritionDetails: (recipe as any).nutrition || {},
+          caloriesPerServing: (typeof recipe.calories === 'object' ? (recipe.calories as any).quantity : recipe.calories)?.toString(),
+          proteinPerServingG: (typeof recipe.protein === 'object' ? (recipe.protein as any).quantity : recipe.protein)?.toString(),
+          carbsPerServingG: (typeof recipe.carbs === 'object' ? (recipe.carbs as any).quantity : recipe.carbs)?.toString(),
+          fatPerServingG: (typeof recipe.fat === 'object' ? (recipe.fat as any).quantity : recipe.fat)?.toString(),
+          fiberPerServingG: (typeof recipe.fiber === 'object' ? (recipe.fiber as any).quantity : recipe.fiber)?.toString(),
+          servings: recipe.servings || 1,
+          recipeImageUrl: recipe.image,
+          sourceUrl: recipe.sourceUrl
+        };
+      } else {
+        // Fetch from API to get full recipe details including ingredients (non-simple-ingredient recipes)
+        console.log('🔄 Recipe not in cache, fetching full details from API...');
+        const recipeDetails = await multiProviderService.getRecipeDetails(recipeId, customizations.source as any);
       
       if (recipeDetails) {
         baseRecipe = {
@@ -2199,6 +2225,7 @@ async function handleUpdateCustomizations(req: VercelRequest, res: VercelRespons
           fiberPerServingG: recipe.fiber?.toString()
         };
       }
+      } // Close else block for non-simple-ingredient recipes
     }
 
     // Helper function to get ingredient image URL from Spoonacular
