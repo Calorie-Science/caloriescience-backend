@@ -27,7 +27,12 @@ const submitFeedbackSchema = Joi.object({
     'ai_meal_recipe_quality',
     'ai_meal_nutritional_analysis',
     'auto_meal_nutrition_analysis',
-    'manual_meal_nutrition_analysis'
+    'manual_meal_nutrition_analysis',
+    'custom_recipe',
+    'nutritionist_profile',
+    'manual_meal_plan_generation',
+    'ai_meal_plan_generation',
+    'auto_meal_plan_generation'
   ).required(),
   clientId: Joi.string().uuid().optional().allow(null),
   mealPlanId: Joi.string().optional().allow(null),
@@ -50,7 +55,12 @@ const getFeedbackSchema = Joi.object({
     'ai_meal_recipe_quality',
     'ai_meal_nutritional_analysis',
     'auto_meal_nutrition_analysis',
-    'manual_meal_nutrition_analysis'
+    'manual_meal_nutrition_analysis',
+    'custom_recipe',
+    'nutritionist_profile',
+    'manual_meal_plan_generation',
+    'ai_meal_plan_generation',
+    'auto_meal_plan_generation'
   ).optional(),
   clientId: Joi.string().uuid().optional(),
   mealPlanId: Joi.string().optional(),
