@@ -101,7 +101,23 @@ const mealPlanGenerationSchema = Joi.object({
         mealOrder: Joi.number().integer().min(1).required(),
         mealName: Joi.string().required(),
         mealTime: Joi.string().pattern(/^\d{2}:\d{2}$/).required(),
-        targetCalories: Joi.number().min(0).max(5000).required(),
+        targetCalories: Joi.alternatives()
+          .try(
+            Joi.number().min(0).max(5000),
+            Joi.string().pattern(/^\d+(\.\d+)?$/).custom((value, helpers) => {
+              const num = parseFloat(value);
+              if (isNaN(num)) return helpers.error('number.base');
+              if (num < 0) return helpers.error('number.min');
+              if (num > 5000) return helpers.error('number.max');
+              return num;
+            })
+          )
+          .default(500)
+          .messages({
+            'number.base': 'Target calories must be a number',
+            'number.min': 'Target calories must be at least 0',
+            'number.max': 'Target calories cannot exceed 5000'
+          }),
         mealType: Joi.string().required()
       })
     ).required()
