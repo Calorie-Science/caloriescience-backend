@@ -75,101 +75,56 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       sortOrder
     } = value;
 
-    const allPlans: any[] = [];
-    let totalCount = 0;
+    // Build query for meal_plan_drafts (which contains both drafts and finalized plans)
+    let query = supabase
+      .from('meal_plan_drafts')
+      .select('*', { count: 'exact' })
+      .eq('nutritionist_id', user.id);
 
-    // Fetch drafts if requested
+    // Apply filters
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    }
+
+    if (type) {
+      query = query.eq('creation_method', type);
+    }
+
+    // Apply status filters based on includeDrafts and includeFinalized
+    const statusFilters: string[] = [];
     if (includeDrafts) {
-      let draftsQuery = supabase
-        .from('meal_plan_drafts')
-        .select('*', { count: 'exact' })
-        .eq('nutritionist_id', user.id);
-
-      // Apply filters
-      if (clientId) {
-        draftsQuery = draftsQuery.eq('client_id', clientId);
-      }
-
-      if (type) {
-        draftsQuery = draftsQuery.eq('creation_method', type);
-      }
-
-      // Map status filter for drafts
-      if (status) {
-        if (status === 'draft') {
-          draftsQuery = draftsQuery.eq('status', 'draft');
-        } else if (status === 'finalized') {
-          draftsQuery = draftsQuery.eq('status', 'finalized');
-        }
-      }
-
-      const { data: drafts, error: draftsError, count: draftsCount } = await draftsQuery;
-
-      if (draftsError) {
-        console.error('❌ Error fetching drafts:', draftsError);
-        throw new Error(`Failed to fetch drafts: ${draftsError.message}`);
-      }
-
-      // Add plan_type to distinguish drafts from finalized
-      const enrichedDrafts = (drafts || []).map(draft => ({
-        ...draft,
-        plan_type: 'draft',
-        // Standardize field names
-        plan_date: draft.plan_date,
-        plan_name: draft.plan_name,
-        creation_method: draft.creation_method,
-        duration_days: draft.plan_duration_days
-      }));
-
-      allPlans.push(...enrichedDrafts);
-      totalCount += draftsCount || 0;
+      statusFilters.push('draft');
     }
-
-    // Fetch finalized meal plans if requested
     if (includeFinalized) {
-      let finalizedQuery = supabase
-        .from('meal_plans')
-        .select('*', { count: 'exact' })
-        .eq('nutritionist_id', user.id);
-
-      // Apply filters
-      if (clientId) {
-        finalizedQuery = finalizedQuery.eq('client_id', clientId);
-      }
-
-      if (type) {
-        finalizedQuery = finalizedQuery.eq('creation_method', type);
-      }
-
-      // Map status filter for finalized plans
-      if (status) {
-        if (status !== 'draft') {
-          // For finalized plans, filter by their status (active, completed, cancelled)
-          finalizedQuery = finalizedQuery.eq('status', status);
-        }
-      }
-
-      const { data: finalized, error: finalizedError, count: finalizedCount } = await finalizedQuery;
-
-      if (finalizedError) {
-        console.error('❌ Error fetching finalized plans:', finalizedError);
-        throw new Error(`Failed to fetch finalized plans: ${finalizedError.message}`);
-      }
-
-      // Add plan_type to distinguish
-      const enrichedFinalized = (finalized || []).map(plan => ({
-        ...plan,
-        plan_type: 'finalized',
-        // Standardize field names
-        plan_date: plan.start_date,
-        plan_name: plan.plan_name,
-        creation_method: plan.creation_method,
-        duration_days: plan.duration_days
-      }));
-
-      allPlans.push(...enrichedFinalized);
-      totalCount += finalizedCount || 0;
+      statusFilters.push('finalized');
     }
+
+    if (status) {
+      // If specific status is requested, use it
+      query = query.eq('status', status);
+    } else if (statusFilters.length > 0 && statusFilters.length < 2) {
+      // If only one of includeDrafts/includeFinalized is true, filter by that status
+      query = query.eq('status', statusFilters[0]);
+    }
+    // If both are true or both are false, don't filter by status
+
+    const { data: plans, error: plansError, count: totalCount } = await query;
+
+    if (plansError) {
+      console.error('❌ Error fetching meal plans:', plansError);
+      throw new Error(`Failed to fetch meal plans: ${plansError.message}`);
+    }
+
+    // Enrich plans with plan_type based on status
+    const allPlans = (plans || []).map(plan => ({
+      ...plan,
+      plan_type: plan.status === 'draft' ? 'draft' : 'finalized',
+      // Standardize field names
+      plan_date: plan.plan_date,
+      plan_name: plan.plan_name,
+      creation_method: plan.creation_method,
+      duration_days: plan.plan_duration_days
+    }));
 
     // Sort all plans
     const sortField = sortBy === 'plan_date' ? 'plan_date' : sortBy;
@@ -206,38 +161,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           completionPercentage: 0
         };
 
-        if (plan.plan_type === 'draft') {
-          // For drafts, calculate from suggestions
-          const suggestions = plan.suggestions || [];
-          summary.totalMeals = suggestions.reduce((sum: number, day: any) =>
-            sum + Object.keys(day.meals || {}).length, 0
-          );
-          summary.selectedMeals = suggestions.reduce((sum: number, day: any) =>
-            sum + Object.values(day.meals || {}).filter((meal: any) => meal.selectedRecipeId).length, 0
-          );
-          summary.completionPercentage = summary.totalMeals > 0
-            ? Math.round((summary.selectedMeals / summary.totalMeals) * 100)
-            : 0;
-        } else {
-          // For finalized plans, use meal_plan_days
-          const { data: planDays } = await supabase
-            .from('meal_plan_days')
-            .select('id, day_number, meals')
-            .eq('meal_plan_id', plan.id);
-
-          if (planDays) {
-            summary.totalDays = planDays.length;
-            summary.totalMeals = planDays.reduce((sum: number, day: any) =>
-              sum + Object.keys(day.meals || {}).length, 0
-            );
-            summary.selectedMeals = planDays.reduce((sum: number, day: any) =>
-              sum + Object.values(day.meals || {}).filter((meal: any) => meal.recipe_id).length, 0
-            );
-            summary.completionPercentage = summary.totalMeals > 0
-              ? Math.round((summary.selectedMeals / summary.totalMeals) * 100)
-              : 0;
-          }
-        }
+        // Calculate from suggestions (same for both draft and finalized in meal_plan_drafts)
+        const suggestions = plan.suggestions || [];
+        summary.totalMeals = suggestions.reduce((sum: number, day: any) =>
+          sum + Object.keys(day.meals || {}).length, 0
+        );
+        summary.selectedMeals = suggestions.reduce((sum: number, day: any) =>
+          sum + Object.values(day.meals || {}).filter((meal: any) => meal.selectedRecipeId).length, 0
+        );
+        summary.completionPercentage = summary.totalMeals > 0
+          ? Math.round((summary.selectedMeals / summary.totalMeals) * 100)
+          : 0;
 
         return {
           id: plan.id,
