@@ -25,7 +25,8 @@ const editBasicDetailsSchema = Joi.object({
   healthLabels: Joi.array().items(Joi.string()).optional(),
   dietLabels: Joi.array().items(Joi.string()).optional(),
   allergens: Joi.array().items(Joi.string()).optional(),
-  portionSizeId: Joi.string().uuid().allow(null).optional() // Default portion size for this recipe
+  portionSizeId: Joi.string().uuid().allow(null).optional(), // Default portion size for this recipe
+  foodCategoryId: Joi.string().uuid().allow(null).optional() // Food category for this recipe
 }).min(1); // At least one field must be provided
 
 /**
