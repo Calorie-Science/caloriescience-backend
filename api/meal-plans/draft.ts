@@ -3103,6 +3103,8 @@ async function handleGetAlternateRecipes(
 
     // Extract client goals and meal requirements
     const clientGoals = draft.searchParams?.clientGoals || {};
+    const dietaryPreferences = draft.searchParams?.dietaryPreferences || {};
+    const additionalTextFromDraft = draft.searchParams?.additionalText || '';
     const mealProgram = draft.searchParams?.mealProgram;
     const mealInfo = mealProgram?.meals?.find((m: any) => m.mealName === mealName);
 
@@ -3131,17 +3133,32 @@ async function handleGetAlternateRecipes(
     // Build a focused request for just this meal with ONE alternative
     const excludeTitles = meal.recipes.map((r: any) => r.title).join(', ');
 
-    // Build allergen and preference constraints
+    // Build allergen and preference constraints from dietaryPreferences
     let constraints = '';
-    if (clientGoals.allergies && clientGoals.allergies.length > 0) {
-      constraints += ` EXCLUDE ALLERGENS: ${clientGoals.allergies.join(', ')}.`;
+    const allergies = dietaryPreferences.allergies || [];
+    const preferences = dietaryPreferences.dietaryPreferences || [];
+    const cuisineTypes = dietaryPreferences.cuisineTypes || [];
+
+    if (allergies.length > 0) {
+      constraints += ` EXCLUDE ALLERGENS: ${allergies.join(', ')}.`;
     }
-    if (clientGoals.preferences && clientGoals.preferences.length > 0) {
-      constraints += ` Preferences: ${clientGoals.preferences.join(', ')}.`;
+    if (preferences.length > 0) {
+      constraints += ` Preferences: ${preferences.join(', ')}.`;
     }
-    if (clientGoals.cuisineTypes && clientGoals.cuisineTypes.length > 0) {
-      constraints += ` Cuisine: ${clientGoals.cuisineTypes.join(', ')}.`;
+    if (cuisineTypes.length > 0) {
+      constraints += ` Cuisine: ${cuisineTypes.join(', ')}.`;
     }
+    if (additionalTextFromDraft) {
+      constraints += ` Additional Notes: ${additionalTextFromDraft}.`;
+    }
+
+    console.log(`🔍 Using dietary constraints for alternate recipes:`, {
+      allergies,
+      preferences,
+      cuisineTypes,
+      additionalText: additionalTextFromDraft,
+      constraints
+    });
 
     // Create 3 DIFFERENT prompts to ensure variety in responses
     // Use "skip first N ideas" technique to force diversity
@@ -3176,11 +3193,19 @@ async function handleGetAlternateRecipes(
     const service2 = new ServiceClass();
     const service3 = new ServiceClass();
 
+    // Merge dietary preferences into clientGoals for AI service compatibility
+    const enrichedClientGoals = {
+      ...clientGoals,
+      allergies,
+      preferences,
+      cuisineTypes
+    };
+
     // Prepare 3 DIFFERENT requests with variations to ensure diverse results
     const request1 = {
       clientId: draft.clientId,
       nutritionistId: draft.nutritionistId,
-      clientGoals,
+      clientGoals: enrichedClientGoals,
       mealProgram: {
         meals: [formattedMealInfo]
       },
@@ -3192,7 +3217,7 @@ async function handleGetAlternateRecipes(
     const request2 = {
       clientId: draft.clientId,
       nutritionistId: draft.nutritionistId,
-      clientGoals,
+      clientGoals: enrichedClientGoals,
       mealProgram: {
         meals: [formattedMealInfo]
       },
@@ -3204,7 +3229,7 @@ async function handleGetAlternateRecipes(
     const request3 = {
       clientId: draft.clientId,
       nutritionistId: draft.nutritionistId,
-      clientGoals,
+      clientGoals: enrichedClientGoals,
       mealProgram: {
         meals: [formattedMealInfo]
       },

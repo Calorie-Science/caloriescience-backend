@@ -295,7 +295,8 @@ export class AsyncMealPlanService {
           generatedMealPlan,
           days,
           startDate,
-          aiModel
+          aiModel,
+          additionalText
         );
         
         // Also save to meal_plan_drafts table so it shows up in drafts list
@@ -848,7 +849,8 @@ export class AsyncMealPlanService {
     generatedMealPlan: any,
     days: number,
     startDate?: string,
-    aiModel: 'claude' | 'grok' | 'openai' = 'claude'
+    aiModel: 'claude' | 'grok' | 'openai' = 'claude',
+    additionalText?: string
   ): any {
     try {
       console.log('🔍 Received generatedMealPlan:', JSON.stringify(generatedMealPlan, null, 2).substring(0, 500));
@@ -914,6 +916,7 @@ export class AsyncMealPlanService {
           days,
           startDate: planStartDate,
           aiProvider: aiModel,
+          additionalText: additionalText || null,
           clientGoals: {
             calories: clientGoals.eerGoalCalories || 0,
             protein: clientGoals.proteinGoalMin || 0,
