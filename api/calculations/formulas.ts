@@ -72,7 +72,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
       // Create a flat list for dropdown
       const formulaOptions = formulas?.map(formula => ({
-        formulaId: formula.id,
+        id: formula.id,
         label: formula.display_name,
         formulaName: formula.formula_name,
         category: formula.category,
