@@ -127,7 +127,10 @@ export const FIELD_MAPPINGS = {
     bmiLastCalculated: 'bmi_last_calculated',
     bmrLastCalculated: 'bmr_last_calculated',
     micronutrientsData: 'micronutrients_data',
-    guidelineUsed: 'guideline_used'
+    guidelineUsed: 'guideline_used',
+    waistCircumferenceCm: 'waist_circumference_cm',
+    hipCircumferenceCm: 'hip_circumference_cm',
+    bodyFatPercentage: 'body_fat_percentage'
   },
   // Database (snake_case) -> API (camelCase)
   snakeToCamel: {} as Record<string, string>

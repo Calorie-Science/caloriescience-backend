@@ -85,6 +85,9 @@ CREATE TABLE clients (
   height_cm NUMERIC(5,2),
   weight_kg NUMERIC(5,2),
   activity_level activity_level,
+  waist_circumference_cm NUMERIC(5,2),
+  hip_circumference_cm NUMERIC(5,2),
+  body_fat_percentage NUMERIC(5,2),
   
   -- Health Information
   medical_conditions TEXT[],
@@ -130,7 +133,10 @@ CREATE TABLE clients (
   CONSTRAINT chk_phone_country_code CHECK (phone_country_code ~ '^\+[1-9][0-9]{0,3}$'),
   CONSTRAINT chk_first_name_length CHECK (LENGTH(first_name) >= 1 AND LENGTH(first_name) <= 100),
   CONSTRAINT chk_last_name_length CHECK (LENGTH(last_name) <= 100),
-  CONSTRAINT clients_preferred_measurement_system_check CHECK (preferred_measurement_system IN ('metric', 'imperial'))
+  CONSTRAINT clients_preferred_measurement_system_check CHECK (preferred_measurement_system IN ('metric', 'imperial')),
+  CONSTRAINT chk_waist_circumference CHECK (waist_circumference_cm IS NULL OR (waist_circumference_cm > 0 AND waist_circumference_cm < 500)),
+  CONSTRAINT chk_hip_circumference CHECK (hip_circumference_cm IS NULL OR (hip_circumference_cm > 0 AND hip_circumference_cm < 500)),
+  CONSTRAINT chk_body_fat_percentage CHECK (body_fat_percentage IS NULL OR (body_fat_percentage >= 0 AND body_fat_percentage <= 100))
 );
 
 -- ========================================
