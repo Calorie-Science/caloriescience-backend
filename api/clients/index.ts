@@ -685,8 +685,17 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Remove system fields that shouldn't be in response
       const { eer_guideline, ...clientWithoutSystemFields } = createdClient;
 
+      // Build response with nutrition data if available
+      const responseData: any = { ...clientWithoutSystemFields };
+
+      // Add formula_used if nutrition requirements were calculated
+      if (nutritionRequirements) {
+        responseData.formulaUsed = nutritionRequirements.formula_used;
+        responseData.eerCalories = nutritionRequirements.eer_calories;
+      }
+
       // Transform to camelCase for response
-      const transformedClient = transformWithMapping(clientWithoutSystemFields, FIELD_MAPPINGS.snakeToCamel);
+      const transformedClient = transformWithMapping(responseData, FIELD_MAPPINGS.snakeToCamel);
 
       // Return response immediately
       res.status(201).json({

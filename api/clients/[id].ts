@@ -79,11 +79,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         eerCalories: nutritionReq?.eer_calories ?? null,
         nutritionistNotes: nutritionReq?.nutritionist_notes || null,
         eerLastUpdated: nutritionReq?.updated_at || null,
-        
+
         // Guideline tracking
         eerGuidelineCountry: nutritionReq?.eer_guideline_country || null,
         macroGuidelineCountry: nutritionReq?.macro_guideline_country || null,
         guidelineNotes: nutritionReq?.guideline_notes || null,
+        formulaUsed: nutritionReq?.formula_used || null,
         
         // Target Macros data
         proteinGrams: nutritionReq?.protein_grams ?? null,
