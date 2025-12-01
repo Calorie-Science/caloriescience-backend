@@ -20,7 +20,8 @@ const eerSchema = Joi.object({
   weightKg: Joi.number().min(1).max(500).required(),
   activityLevel: Joi.string().valid('sedentary', 'lightly_active', 'moderately_active', 'very_active', 'extra_active').required(),
   pregnancyStatus: Joi.string().valid('not_pregnant', 'first_trimester', 'second_trimester', 'third_trimester').optional().default('not_pregnant'),
-  lactationStatus: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating')
+  lactationStatus: Joi.string().valid('not_lactating', 'lactating_0_6_months', 'lactating_7_12_months').optional().default('not_lactating'),
+  formulaId: Joi.number().integer().optional() // Optional: specific formula to use
 });
 
 const macrosSchema = Joi.object({
@@ -115,7 +116,8 @@ async function handleEERCalculation(req: VercelRequest, res: VercelResponse): Pr
     weight_kg: value.weightKg,
     activity_level: value.activityLevel,
     pregnancy_status: value.pregnancyStatus,
-    lactation_status: value.lactationStatus
+    lactation_status: value.lactationStatus,
+    formula_id: value.formulaId // Pass formula_id if provided
   };
 
   const eerResult = await calculateEER(eerData);

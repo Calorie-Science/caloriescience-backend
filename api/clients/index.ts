@@ -78,7 +78,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       console.log('Creating new client with data:', req.body);
       
       // Extract EER and macros data before validation
-      const { eerCalories, proteinGrams, carbsGrams, fatGrams, fiberGrams, status, ...extractedClientData } = req.body;
+      const { eerCalories, proteinGrams, carbsGrams, fatGrams, fiberGrams, status, formulaId, ...extractedClientData } = req.body;
       const macrosData = req.body.macrosData;
       const micronutrientsData = req.body.micronutrientsData;
       
@@ -240,7 +240,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             weight_kg: validation.value.weight_kg,
             activity_level: validation.value.activity_level,
             pregnancy_status: validation.value.pregnancy_status,
-            lactation_status: validation.value.lactation_status
+            lactation_status: validation.value.lactation_status,
+            formula_id: formulaId // Use selected formula if provided
           };
 
           const eerResult = await calculateEER(eerData);
@@ -723,7 +724,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               weight_kg: validation.value.weight_kg,
               activity_level: validation.value.activity_level,
               pregnancy_status: validation.value.pregnancy_status,
-              lactation_status: validation.value.lactation_status
+              lactation_status: validation.value.lactation_status,
+              formula_id: formulaId // Use selected formula if provided
             };
 
             const eerResult = await calculateEER(eerData);
