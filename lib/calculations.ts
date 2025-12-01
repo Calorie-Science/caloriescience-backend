@@ -11,6 +11,7 @@ export interface EERCalculationInput {
   activity_level: 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extra_active';
   pregnancy_status?: 'not_pregnant' | 'first_trimester' | 'second_trimester' | 'third_trimester';
   lactation_status?: 'not_lactating' | 'lactating_0_6_months' | 'lactating_7_12_months';
+  formula_id?: number; // Optional: specific formula ID to use instead of country-based lookup
 }
 
 export interface MacrosCalculationInput {
@@ -93,7 +94,7 @@ export interface MacrosCalculationResult {
 
 // Calculate EER using database formulas
 export async function calculateEER(input: EERCalculationInput): Promise<EERCalculationResult> {
-  const { country, age, gender, height_cm, weight_kg, activity_level, pregnancy_status, lactation_status } = input;
+  const { country, age, gender, height_cm, weight_kg, activity_level, pregnancy_status, lactation_status, formula_id } = input;
 
   // Round age to nearest integer for database query since EER formulas use integer age ranges
   const roundedAge = Math.round(age);
@@ -102,33 +103,65 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   // Normalize country to lowercase (e.g., 'INDIA' → 'india')
   const normalizedCountry = normalizeCountry(country);
 
-  // 1. Get EER formula
-  const { data: formulas, error: formulaError } = await supabase
-    .from('eer_formulas')
-    .select('*')
-    .eq('country', normalizedCountry)  // Use normalized country
-    .eq('gender', gender)
-    .lte('age_min', roundedAge)  // age_min <= roundedAge
-    .gte('age_max', roundedAge)  // age_max >= roundedAge
-    .order('age_min', { ascending: false })  // Prefer more specific age ranges (higher age_min)
-    .limit(1);
+  // 1. Get EER formula - either by specific ID or by country/age/gender
+  let formula: any;
 
-  if (formulaError || !formulas || formulas.length === 0) {
-    throw new Error(`No EER formula found for ${country}, ${gender}, age ${age} (rounded to ${roundedAge})`);
+  if (formula_id) {
+    // User selected a specific formula from dropdown
+    console.log(`🎯 Using user-selected formula ID: ${formula_id}`);
+    const { data: selectedFormula, error: formulaError } = await supabase
+      .from('eer_formulas')
+      .select('*')
+      .eq('id', formula_id)
+      .single();
+
+    if (formulaError || !selectedFormula) {
+      throw new Error(`Selected formula (ID: ${formula_id}) not found`);
+    }
+
+    // Verify the formula matches the user's gender and age
+    if (selectedFormula.gender !== gender) {
+      throw new Error(`Selected formula is for ${selectedFormula.gender}, but user is ${gender}`);
+    }
+
+    if (roundedAge < selectedFormula.age_min || roundedAge > selectedFormula.age_max) {
+      throw new Error(`Selected formula is for ages ${selectedFormula.age_min}-${selectedFormula.age_max}, but user is ${roundedAge} years old`);
+    }
+
+    formula = selectedFormula;
+    console.log(`✅ Using selected formula: ${formula.bmr_formula} (${formula.country.toUpperCase()})`);
+  } else {
+    // Fallback to country-based automatic formula selection
+    console.log(`🌍 Using country-based formula selection for: ${normalizedCountry}`);
+    const { data: formulas, error: formulaError } = await supabase
+      .from('eer_formulas')
+      .select('*')
+      .eq('country', normalizedCountry)  // Use normalized country
+      .eq('gender', gender)
+      .lte('age_min', roundedAge)  // age_min <= roundedAge
+      .gte('age_max', roundedAge)  // age_max >= roundedAge
+      .order('age_min', { ascending: false })  // Prefer more specific age ranges (higher age_min)
+      .limit(1);
+
+    if (formulaError || !formulas || formulas.length === 0) {
+      throw new Error(`No EER formula found for ${country}, ${gender}, age ${age} (rounded to ${roundedAge})`);
+    }
+
+    formula = formulas[0];
+    console.log(`✅ Auto-selected formula: ${formula.bmr_formula} (${formula.country.toUpperCase()})`);
   }
 
-  const formula = formulas[0];
-
-  // 2. Get PAL value
+  // 2. Get PAL value - use the formula's country (which might be different from input country if user selected a specific formula)
+  const formulaCountry = formula.country;
   const { data: palData, error: palError } = await supabase
     .from('pal_values')
     .select('pal_value')
-    .eq('country', normalizedCountry)  // Use normalized country
+    .eq('country', formulaCountry)
     .eq('activity_level', activity_level)
     .single();
 
   if (palError || !palData) {
-    throw new Error(`No PAL value found for ${country}, ${activity_level}`);
+    throw new Error(`No PAL value found for ${formulaCountry}, ${activity_level}`);
   }
 
   const pal = palData.pal_value;
@@ -232,13 +265,16 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   const finalEER = eer + totalAdjustment;
   const adjustmentString = adjustments.length > 0 ? ` ${adjustments.join(', ')}` : '';
 
+  // Use the formula's country as the guideline country (important when user selects a different country's formula)
+  const guidelineCountry = formula.country.toUpperCase();
+
   return {
     bmr: Math.round(bmr),
     pal: pal,
     eer: Math.round(finalEER),
     formula_used: `${formula.bmr_formula} (${formulaType})` + adjustmentString,
     input: input,
-    guideline_country: country,
+    guideline_country: guidelineCountry,
     calculation_details: calculationDetails // Add this for debugging
   };
 }
