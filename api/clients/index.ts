@@ -300,6 +300,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             eer_guideline_country: eerResult.guideline_country,
             macro_guideline_country: macrosResult.guideline_country,
             guideline_notes: macrosResult.guideline_notes || null,
+            formula_used: eerResult.formula_used, // Store the actual formula used
             // Add macro ranges
             protein_min_grams: macrosResult.Protein?.min || null,
             protein_max_grams: macrosResult.Protein?.max || null,
@@ -784,6 +785,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               eer_guideline_country: eerResult.guideline_country,
               macro_guideline_country: macrosResult.guideline_country,
               guideline_notes: macrosResult.guideline_notes || null,
+              formula_used: eerResult.formula_used, // Store the actual formula used
               // Add macro ranges
               protein_min_grams: macrosResult.Protein?.min || null,
               protein_max_grams: macrosResult.Protein?.max || null,
