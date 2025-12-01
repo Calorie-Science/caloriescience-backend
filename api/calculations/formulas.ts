@@ -7,14 +7,10 @@ import Joi from 'joi';
  * GET /api/calculations/formulas - Get available BMR/EER formulas for user selection
  *
  * Query params:
- * - age: number (required)
- * - gender: male|female (required)
  * - country: string (optional) - filter by specific country
  */
 
 const querySchema = Joi.object({
-  age: Joi.number().min(0).max(120).required(),
-  gender: Joi.string().valid('male', 'female').required(),
   country: Joi.string().optional()
 });
 
@@ -50,22 +46,18 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      const { age, gender, country } = validatedData;
-      const roundedAge = Math.round(age);
+      const { country } = validatedData;
 
-      // Build query to get formulas that match the age range
+      // Fetch all formulas from formula_definitions table
       let query = supabase
-        .from('eer_formulas')
+        .from('formula_definitions')
         .select('*')
-        .eq('gender', gender)
-        .lte('age_min', roundedAge)
-        .gte('age_max', roundedAge)
-        .order('country', { ascending: true })
-        .order('age_min', { ascending: false });
+        .order('category', { ascending: true })
+        .order('year_published', { ascending: false });
 
-      // Optionally filter by country
+      // Optionally filter by country (check if country is in primary_countries array)
       if (country) {
-        query = query.eq('country', country.toLowerCase());
+        query = query.contains('primary_countries', [country.toLowerCase()]);
       }
 
       const { data: formulas, error: formulaError } = await query;
@@ -78,68 +70,33 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         });
       }
 
-      // Group formulas by country and formula type for better UI presentation
-      const groupedFormulas: any = {};
-
-      // Get formula details for all formulas
-      for (const formula of formulas || []) {
-        const countryKey = formula.country.toUpperCase();
-
-        if (!groupedFormulas[countryKey]) {
-          groupedFormulas[countryKey] = [];
-        }
-
-        // Create a human-readable formula name
-        let formulaName = formula.bmr_formula;
-        if (formula.age_category && formula.age_category !== 'adult') {
-          formulaName += ` (${formula.age_category})`;
-        }
-        formulaName += ` - Ages ${formula.age_min}-${formula.age_max}`;
-
-        const description = await getFormulaDescription(formula);
-
-        groupedFormulas[countryKey].push({
-          id: formula.id,
-          country: formula.country,
-          gender: formula.gender,
-          ageCategory: formula.age_category,
-          ageMin: formula.age_min,
-          ageMax: formula.age_max,
-          formulaName: formulaName,
-          bmrFormula: formula.bmr_formula,
-          description: description,
-          isApplicable: roundedAge >= formula.age_min && roundedAge <= formula.age_max
-        });
-      }
-
-      // Create a flat list for dropdown with country prefix
-      const formulaOptions = formulas?.map(formula => {
-        let displayName = `${formula.country.toUpperCase()} - ${formula.bmr_formula}`;
-        if (formula.age_category && formula.age_category !== 'adult') {
-          displayName += ` (${formula.age_category})`;
-        }
-        displayName += ` [Ages ${formula.age_min}-${formula.age_max}]`;
-
-        return {
-          value: formula.id,
-          label: displayName,
-          country: formula.country,
-          bmrFormula: formula.bmr_formula,
-          ageRange: `${formula.age_min}-${formula.age_max}`,
-          isRecommended: false // Will be set based on user's country
-        };
-      }) || [];
+      // Create a flat list for dropdown
+      const formulaOptions = formulas?.map(formula => ({
+        value: formula.id,
+        label: formula.display_name,
+        formulaName: formula.formula_name,
+        category: formula.category,
+        description: formula.description,
+        ageGroup: formula.age_group,
+        ageMin: formula.age_min,
+        ageMax: formula.age_max,
+        primaryCountries: formula.primary_countries,
+        yearPublished: formula.year_published,
+        source: formula.source,
+        notes: formula.notes,
+        bmrEquationMale: formula.bmr_equation_male,
+        bmrEquationFemale: formula.bmr_equation_female,
+        eerEquationMale: formula.eer_equation_male,
+        eerEquationFemale: formula.eer_equation_female
+      })) || [];
 
       return res.status(200).json({
         success: true,
         data: {
-          age: roundedAge,
-          gender: gender,
-          formulaOptions: formulaOptions,
-          groupedByCountry: groupedFormulas,
+          formulas: formulaOptions,
           totalFormulas: formulas?.length || 0
         },
-        message: `Found ${formulas?.length || 0} applicable formulas`
+        message: `Found ${formulas?.length || 0} formulas`
       });
 
     } catch (error) {
@@ -154,57 +111,5 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
-/**
- * Get formula details from formula_definitions table
- */
-async function getFormulaDetails(formulaName: string): Promise<any> {
-  try {
-    const { data, error } = await supabase
-      .from('formula_definitions')
-      .select('*')
-      .eq('formula_name', formulaName)
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error('Error fetching formula details:', error);
-    return null;
-  }
-}
-
-/**
- * Generate a human-readable description of the formula
- */
-async function getFormulaDescription(formula: any): Promise<string> {
-  // Try to get from database first
-  const details = await getFormulaDetails(formula.bmr_formula);
-  if (details && details.description) {
-    return details.description;
-  }
-
-  // Fallback to hardcoded descriptions
-  const descriptions: { [key: string]: string } = {
-    'Harris-Benedict (revised)': 'Classic BMR formula revised in 1984, widely used for adults',
-    'Mifflin-St Jeor': 'Modern BMR formula (1990), considered more accurate for modern populations',
-    'Schofield': 'WHO-recommended formula (1985), used internationally',
-    'Henry Oxford': 'Updated formula (2005) based on Oxford database, more accurate for diverse populations',
-    'IOM': 'Institute of Medicine EER equation, accounts for age, activity, and growth needs',
-    'ICMR-NIN': 'Indian Council of Medical Research formula, specific to Indian population',
-    'MHLW': 'Japanese Ministry of Health formula, calibrated for Japanese population'
-  };
-
-  // Try to match formula name
-  for (const [key, desc] of Object.entries(descriptions)) {
-    if (formula.bmr_formula.includes(key)) {
-      return desc;
-    }
-  }
-
-  return 'BMR/EER calculation formula';
-}
 
 export default requireAuth(handler);
