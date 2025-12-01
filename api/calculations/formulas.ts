@@ -81,7 +81,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Group formulas by country and formula type for better UI presentation
       const groupedFormulas: any = {};
 
-      formulas?.forEach(formula => {
+      // Get formula details for all formulas
+      for (const formula of formulas || []) {
         const countryKey = formula.country.toUpperCase();
 
         if (!groupedFormulas[countryKey]) {
@@ -95,6 +96,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
         formulaName += ` - Ages ${formula.age_min}-${formula.age_max}`;
 
+        const description = await getFormulaDescription(formula);
+
         groupedFormulas[countryKey].push({
           id: formula.id,
           country: formula.country,
@@ -104,10 +107,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           ageMax: formula.age_max,
           formulaName: formulaName,
           bmrFormula: formula.bmr_formula,
-          description: getFormulaDescription(formula),
+          description: description,
           isApplicable: roundedAge >= formula.age_min && roundedAge <= formula.age_max
         });
-      });
+      }
 
       // Create a flat list for dropdown with country prefix
       const formulaOptions = formulas?.map(formula => {
@@ -152,9 +155,38 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 }
 
 /**
+ * Get formula details from formula_definitions table
+ */
+async function getFormulaDetails(formulaName: string): Promise<any> {
+  try {
+    const { data, error } = await supabase
+      .from('formula_definitions')
+      .select('*')
+      .eq('formula_name', formulaName)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error fetching formula details:', error);
+    return null;
+  }
+}
+
+/**
  * Generate a human-readable description of the formula
  */
-function getFormulaDescription(formula: any): string {
+async function getFormulaDescription(formula: any): Promise<string> {
+  // Try to get from database first
+  const details = await getFormulaDetails(formula.bmr_formula);
+  if (details && details.description) {
+    return details.description;
+  }
+
+  // Fallback to hardcoded descriptions
   const descriptions: { [key: string]: string } = {
     'Harris-Benedict (revised)': 'Classic BMR formula revised in 1984, widely used for adults',
     'Mifflin-St Jeor': 'Modern BMR formula (1990), considered more accurate for modern populations',
