@@ -199,6 +199,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       let autoCalculatedEER: number | undefined;
       let autoCalculatedMacros: any | undefined;
       let autoCalculatedLocation: string | undefined;
+      let autoCalculatedFormulaUsed: string | undefined;
+      let autoCalculatedFormulaId: number | undefined;
 
       // Helper function to normalize macro keys (support both camelCase and lowercase)
       const normalizeMacroKey = (key: string): string => {
@@ -596,13 +598,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             // Store the recalculated values
             autoCalculatedEER = eerResult.eer;
             autoCalculatedLocation = normalizedLocation;
-
-            // Store formula_used for later
-            if (!autoCalculatedMacros) {
-              autoCalculatedMacros = {};
-            }
-            (autoCalculatedMacros as any).formula_used = eerResult.formula_used;
-            (autoCalculatedMacros as any).formula_id = eerResult.formula_id;
+            autoCalculatedFormulaUsed = eerResult.formula_used;
+            autoCalculatedFormulaId = eerResult.formula_id || undefined;
 
             // Update BMR in client record
             await supabase
@@ -682,12 +679,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
 
         // Add formula_id and formula_used if we recalculated with a new formula
-        if (formulaId !== undefined && autoCalculatedMacros && (autoCalculatedMacros as any).formula_used) {
-          nutritionData.formula_id = formulaId;
-          nutritionData.formula_used = (autoCalculatedMacros as any).formula_used;
+        if (autoCalculatedFormulaUsed && autoCalculatedFormulaId) {
+          nutritionData.formula_id = autoCalculatedFormulaId;
+          nutritionData.formula_used = autoCalculatedFormulaUsed;
           console.log('📝 Formula ID and formula_used added to nutrition data:', {
-            formula_id: formulaId,
-            formula_used: nutritionData.formula_used
+            formula_id: autoCalculatedFormulaId,
+            formula_used: autoCalculatedFormulaUsed
           });
         } else if (formulaId !== undefined) {
           // Just update formula_id without formula_used (manual update case)
