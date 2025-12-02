@@ -85,6 +85,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         macroGuidelineCountry: nutritionReq?.macro_guideline_country || null,
         guidelineNotes: nutritionReq?.guideline_notes || null,
         formulaUsed: nutritionReq?.formula_used || null,
+        formulaId: nutritionReq?.formula_id || null,
         
         // Target Macros data
         proteinGrams: nutritionReq?.protein_grams ?? null,
@@ -1492,7 +1493,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         eerGuidelineCountry: nutritionReq?.eer_guideline_country || null,
         macroGuidelineCountry: nutritionReq?.macro_guideline_country || null,
         guidelineNotes: nutritionReq?.guideline_notes || null,
-        
+        formulaUsed: nutritionReq?.formula_used || null,
+        formulaId: nutritionReq?.formula_id || null,
+
         // Target Macros data
         proteinGrams: nutritionReq?.protein_grams || null,
         carbsGrams: nutritionReq?.carbs_grams || null,

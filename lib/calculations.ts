@@ -28,6 +28,7 @@ export interface EERCalculationResult {
   pal: number;
   eer: number;
   formula_used: string;
+  formula_id: number | null; // Added to track which formula was used
   input: EERCalculationInput;
   guideline_country: string; // Added to track which country's guideline was used
   calculation_details?: string; // Added for debugging formula calculations
@@ -333,6 +334,7 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
     pal: pal,
     eer: Math.round(finalEER),
     formula_used: `${formulaName} (${formulaType})` + adjustmentString,
+    formula_id: formula.id || null, // Include the formula ID used
     input: input,
     guideline_country: guidelineCountry,
     calculation_details: calculationDetails // Add this for debugging

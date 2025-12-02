@@ -202,7 +202,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
 
       // Auto-calculate nutrition requirements if we have the necessary data
-      let nutritionRequirements = null;
+      let nutritionRequirements: any = null;
       let micronutrientRequirements: any = null;
 
       // Check if we have required data for calculations
@@ -301,6 +301,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             macro_guideline_country: macrosResult.guideline_country,
             guideline_notes: macrosResult.guideline_notes || null,
             formula_used: eerResult.formula_used, // Store the actual formula used
+            formula_id: eerResult.formula_id, // Store the formula ID
             // Add macro ranges
             protein_min_grams: macrosResult.Protein?.min || null,
             protein_max_grams: macrosResult.Protein?.max || null,
@@ -688,9 +689,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       // Build response with nutrition data if available
       const responseData: any = { ...clientWithoutSystemFields };
 
-      // Add formula_used if nutrition requirements were calculated
+      // Add formula_used and formula_id if nutrition requirements were calculated
       if (nutritionRequirements) {
         responseData.formulaUsed = nutritionRequirements.formula_used;
+        responseData.formulaId = nutritionRequirements.formula_id;
         responseData.eerCalories = nutritionRequirements.eer_calories;
       }
 
@@ -795,6 +797,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               macro_guideline_country: macrosResult.guideline_country,
               guideline_notes: macrosResult.guideline_notes || null,
               formula_used: eerResult.formula_used, // Store the actual formula used
+              formula_id: eerResult.formula_id, // Store the formula ID
               // Add macro ranges
               protein_min_grams: macrosResult.Protein?.min || null,
               protein_max_grams: macrosResult.Protein?.max || null,
