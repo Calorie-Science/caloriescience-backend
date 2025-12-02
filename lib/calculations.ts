@@ -105,31 +105,79 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
 
   // 1. Get EER formula - either by specific ID or by country/age/gender
   let formula: any;
+  let useFormulaDefinitions = false;
+  let formulaDisplayName: string | null = null;
 
   if (formula_id) {
     // User selected a specific formula from dropdown
     console.log(`🎯 Using user-selected formula ID: ${formula_id}`);
-    const { data: selectedFormula, error: formulaError } = await supabase
-      .from('eer_formulas')
+
+    // First, try to get from new formula_definitions table
+    const { data: formulaDefinition, error: defError } = await supabase
+      .from('formula_definitions')
       .select('*')
       .eq('id', formula_id)
       .single();
 
-    if (formulaError || !selectedFormula) {
-      throw new Error(`Selected formula (ID: ${formula_id}) not found`);
-    }
+    if (formulaDefinition && !defError) {
+      // Found in formula_definitions table
+      console.log(`✅ Found formula in formula_definitions: ${formulaDefinition.formula_name}`);
+      useFormulaDefinitions = true;
+      formulaDisplayName = formulaDefinition.display_name;
 
-    // Verify the formula matches the user's gender and age
-    if (selectedFormula.gender !== gender) {
-      throw new Error(`Selected formula is for ${selectedFormula.gender}, but user is ${gender}`);
-    }
+      // Verify age range
+      if (roundedAge < formulaDefinition.age_min || roundedAge > formulaDefinition.age_max) {
+        throw new Error(`Selected formula is for ages ${formulaDefinition.age_min}-${formulaDefinition.age_max}, but user is ${roundedAge} years old`);
+      }
 
-    if (roundedAge < selectedFormula.age_min || roundedAge > selectedFormula.age_max) {
-      throw new Error(`Selected formula is for ages ${selectedFormula.age_min}-${selectedFormula.age_max}, but user is ${roundedAge} years old`);
-    }
+      // Convert formula_definitions structure to eer_formulas-compatible structure
+      const genderSuffix = gender === 'male' ? '_male' : '_female';
 
-    formula = selectedFormula;
-    console.log(`✅ Using selected formula: ${formula.bmr_formula} (${formula.country.toUpperCase()})`);
+      formula = {
+        id: formulaDefinition.id,
+        formula_name: formulaDefinition.formula_name,
+        display_name: formulaDefinition.display_name,
+        bmr_formula: formulaDefinition.formula_name,
+        country: formulaDefinition.primary_countries?.[0] || normalizedCountry,
+        gender: gender,
+        age_min: formulaDefinition.age_min,
+        age_max: formulaDefinition.age_max,
+        bmr_constant: formulaDefinition[`bmr_constant${genderSuffix}`] || 0,
+        bmr_weight_coefficient: formulaDefinition[`bmr_weight_coefficient${genderSuffix}`] || 0,
+        bmr_height_coefficient: formulaDefinition[`bmr_height_coefficient${genderSuffix}`] || 0,
+        bmr_age_coefficient: formulaDefinition[`bmr_age_coefficient${genderSuffix}`] || 0,
+        eer_base: formulaDefinition[`eer_base${genderSuffix}`],
+        eer_age_coefficient: formulaDefinition[`eer_age_coefficient${genderSuffix}`],
+        eer_weight_coefficient: formulaDefinition[`eer_weight_coefficient${genderSuffix}`],
+        eer_height_coefficient: formulaDefinition[`eer_height_coefficient${genderSuffix}`],
+        pa_coefficients: formulaDefinition.pa_coefficients
+      };
+
+      console.log(`✅ Using formula from formula_definitions: ${formula.display_name}`);
+    } else {
+      // Fallback to old eer_formulas table
+      const { data: selectedFormula, error: formulaError } = await supabase
+        .from('eer_formulas')
+        .select('*')
+        .eq('id', formula_id)
+        .single();
+
+      if (formulaError || !selectedFormula) {
+        throw new Error(`Selected formula (ID: ${formula_id}) not found in either table`);
+      }
+
+      // Verify the formula matches the user's gender and age
+      if (selectedFormula.gender !== gender) {
+        throw new Error(`Selected formula is for ${selectedFormula.gender}, but user is ${gender}`);
+      }
+
+      if (roundedAge < selectedFormula.age_min || roundedAge > selectedFormula.age_max) {
+        throw new Error(`Selected formula is for ages ${selectedFormula.age_min}-${selectedFormula.age_max}, but user is ${roundedAge} years old`);
+      }
+
+      formula = selectedFormula;
+      console.log(`✅ Using selected formula from eer_formulas: ${formula.bmr_formula} (${formula.country.toUpperCase()})`);
+    }
   } else {
     // Fallback to country-based automatic formula selection
     console.log(`🌍 Using country-based formula selection for: ${normalizedCountry}`);
@@ -152,19 +200,28 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   }
 
   // 2. Get PAL value - use the formula's country (which might be different from input country if user selected a specific formula)
-  const formulaCountry = formula.country;
-  const { data: palData, error: palError } = await supabase
-    .from('pal_values')
-    .select('pal_value')
-    .eq('country', formulaCountry)
-    .eq('activity_level', activity_level)
-    .single();
+  let pal: number;
 
-  if (palError || !palData) {
-    throw new Error(`No PAL value found for ${formulaCountry}, ${activity_level}`);
+  // Check if formula has custom PA coefficients (from formula_definitions)
+  if (formula.pa_coefficients && formula.pa_coefficients[activity_level]) {
+    pal = formula.pa_coefficients[activity_level][gender];
+    console.log(`✅ Using custom PAL from formula: ${pal} for ${activity_level} (${gender})`);
+  } else {
+    // Fall back to database PAL values
+    const formulaCountry = formula.country;
+    const { data: palData, error: palError } = await supabase
+      .from('pal_values')
+      .select('pal_value')
+      .eq('country', formulaCountry)
+      .eq('activity_level', activity_level)
+      .single();
+
+    if (palError || !palData) {
+      throw new Error(`No PAL value found for ${formulaCountry}, ${activity_level}`);
+    }
+
+    pal = palData.pal_value;
   }
-
-  const pal = palData.pal_value;
 
   // 3. Calculate BMR using Harris-Benedict formula
   const bmr = formula.bmr_constant + 
@@ -268,11 +325,14 @@ export async function calculateEER(input: EERCalculationInput): Promise<EERCalcu
   // Use the formula's country as the guideline country (important when user selects a different country's formula)
   const guidelineCountry = formula.country.toUpperCase();
 
+  // Use display_name if available (from formula_definitions), otherwise use bmr_formula name
+  const formulaName = formulaDisplayName || formula.display_name || formula.bmr_formula;
+
   return {
     bmr: Math.round(bmr),
     pal: pal,
     eer: Math.round(finalEER),
-    formula_used: `${formula.bmr_formula} (${formulaType})` + adjustmentString,
+    formula_used: `${formulaName} (${formulaType})` + adjustmentString,
     input: input,
     guideline_country: guidelineCountry,
     calculation_details: calculationDetails // Add this for debugging
