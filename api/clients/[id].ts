@@ -270,6 +270,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         fatGrams,
         fiberGrams,
         status,
+        formulaId,
         ...clientUpdateData
       } = req.body;
 
@@ -555,8 +556,87 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
       }
 
+      // Handle formula change - recalculate EER if formulaId is provided
+      if (formulaId !== undefined && !autoCalculatedEER) {
+        console.log('🔄 Formula change detected, recalculating EER with new formula:', formulaId);
+
+        // Get current client data for calculations
+        const { data: currentClient } = await supabase
+          .from('clients')
+          .select('height_cm, weight_kg, location, gender, activity_level, date_of_birth, pregnancy_status, lactation_status')
+          .eq('id', id)
+          .eq('nutritionist_id', req.user.id)
+          .single();
+
+        if (currentClient && currentClient.height_cm && currentClient.weight_kg && currentClient.date_of_birth) {
+          const age = calculateAge(currentClient.date_of_birth);
+          const normalizedLocation = getEERGuidelineFromLocation(currentClient.location || 'uk');
+
+          try {
+            // Calculate EER with new formula
+            const eerResult = await calculateEER({
+              country: normalizedLocation,
+              age: age,
+              gender: currentClient.gender,
+              height_cm: currentClient.height_cm,
+              weight_kg: currentClient.weight_kg,
+              activity_level: currentClient.activity_level,
+              pregnancy_status: currentClient.pregnancy_status,
+              lactation_status: currentClient.lactation_status,
+              formula_id: formulaId // Use the new formula ID
+            });
+
+            console.log('✅ EER recalculated with new formula:', {
+              formulaId: formulaId,
+              formula_used: eerResult.formula_used,
+              eer: eerResult.eer,
+              bmr: eerResult.bmr
+            });
+
+            // Store the recalculated values
+            autoCalculatedEER = eerResult.eer;
+            autoCalculatedLocation = normalizedLocation;
+
+            // Store formula_used for later
+            if (!autoCalculatedMacros) {
+              autoCalculatedMacros = {};
+            }
+            (autoCalculatedMacros as any).formula_used = eerResult.formula_used;
+            (autoCalculatedMacros as any).formula_id = eerResult.formula_id;
+
+            // Update BMR in client record
+            await supabase
+              .from('clients')
+              .update({
+                bmr: eerResult.bmr,
+                bmr_last_calculated: new Date().toISOString()
+              })
+              .eq('id', id);
+
+            // Calculate macros based on new EER
+            const macrosResult = await calculateMacros({
+              eer: eerResult.eer,
+              country: normalizedLocation,
+              age: age,
+              gender: currentClient.gender,
+              weight_kg: currentClient.weight_kg
+            });
+
+            autoCalculatedMacros = macrosResult;
+            console.log('✅ Macros recalculated with new EER');
+
+          } catch (error) {
+            console.error('❌ Error recalculating with new formula:', error);
+            return res.status(500).json({
+              error: 'Failed to recalculate with new formula',
+              message: error instanceof Error ? error.message : 'Unknown error'
+            });
+          }
+        }
+      }
+
       // Handle EER and Macros data if provided or auto-calculated
-      if (eerCalories !== undefined || macrosData !== undefined || autoCalculatedEER !== undefined || autoCalculatedMacros !== undefined) {
+      if (eerCalories !== undefined || macrosData !== undefined || autoCalculatedEER !== undefined || autoCalculatedMacros !== undefined || formulaId !== undefined) {
         // Validate EER data if provided
         if (eerCalories !== undefined && (eerCalories < 500 || eerCalories > 8000)) {
           return res.status(400).json({
@@ -599,6 +679,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         if (autoCalculatedEER && !eerCalories) {
           nutritionData.eer_guideline_country = autoCalculatedLocation || 'uk';
           console.log('🌍 EER guideline tracking added:', nutritionData.eer_guideline_country);
+        }
+
+        // Add formula_id and formula_used if we recalculated with a new formula
+        if (formulaId !== undefined && autoCalculatedMacros && (autoCalculatedMacros as any).formula_used) {
+          nutritionData.formula_id = formulaId;
+          nutritionData.formula_used = (autoCalculatedMacros as any).formula_used;
+          console.log('📝 Formula ID and formula_used added to nutrition data:', {
+            formula_id: formulaId,
+            formula_used: nutritionData.formula_used
+          });
+        } else if (formulaId !== undefined) {
+          // Just update formula_id without formula_used (manual update case)
+          nutritionData.formula_id = formulaId;
+          console.log('📝 Formula ID added to nutrition data:', formulaId);
         }
 
         // If macros_data is provided, handle individual macro updates
