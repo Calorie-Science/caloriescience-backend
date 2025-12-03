@@ -7,7 +7,7 @@ const createMealSlotSchema = Joi.object({
   action: Joi.string().valid('create').required(),
   draftId: Joi.string().required(),
   day: Joi.number().integer().min(1).required(),
-  mealName: Joi.string().required(),
+  mealName: Joi.string().trim().required(),
   mealTime: Joi.string().optional(), // HH:MM format
   targetCalories: Joi.number().min(0).allow(null).optional()
 });
@@ -16,7 +16,7 @@ const updateMealSlotSchema = Joi.object({
   action: Joi.string().valid('update').required(),
   draftId: Joi.string().required(),
   day: Joi.number().integer().min(1).required(),
-  mealName: Joi.string().required(),
+  mealName: Joi.string().trim().required(),
   mealTime: Joi.string().optional(),
   targetCalories: Joi.number().min(0).allow(null).optional()
 });
@@ -25,7 +25,7 @@ const deleteMealSlotSchema = Joi.object({
   action: Joi.string().valid('delete').required(),
   draftId: Joi.string().required(),
   day: Joi.number().integer().min(1).required(),
-  mealName: Joi.string().required()
+  mealName: Joi.string().trim().required()
 });
 
 /**

@@ -86,9 +86,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       throw new Error(`Failed to fetch drafts: ${queryError.message}`);
     }
 
+    // Handle empty results - ensure drafts is always an array
+    const draftsList = drafts || [];
+
     // Calculate nutrition for each draft if requested
     const enrichedDrafts = await Promise.all(
-      (drafts || []).map(async (draft: any) => {
+      draftsList.map(async (draft: any) => {
         const baseInfo = {
           id: draft.id,
           clientId: draft.client_id,
@@ -295,8 +298,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     );
 
     // Prepare response
-    const totalCount = count || 0;
-    const totalPages = Math.ceil(totalCount / pageSize);
+    const totalCount = count ?? 0;
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
 
     return res.status(200).json({
       success: true,

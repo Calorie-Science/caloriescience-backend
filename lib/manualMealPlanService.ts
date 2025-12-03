@@ -1773,22 +1773,25 @@ export class ManualMealPlanService {
 
     const suggestions = draft.suggestions as DayStructure[];
     const dayPlan = suggestions.find((d: DayStructure) => d.day === params.day);
-    
+
     if (!dayPlan) {
       throw new Error(`Day ${params.day} not found in draft`);
     }
 
+    // Trim meal name to prevent trailing/leading spaces
+    const trimmedMealName = params.mealName.trim();
+
     // Check if meal already exists (case-insensitive)
     const existingMeal = Object.keys(dayPlan.meals).find(
-      key => key.toLowerCase() === params.mealName.toLowerCase()
+      key => key.toLowerCase() === trimmedMealName.toLowerCase()
     );
 
     if (existingMeal) {
       throw new Error(`Meal slot "${existingMeal}" already exists for day ${params.day}`);
     }
 
-    // Create new meal slot
-    dayPlan.meals[params.mealName] = {
+    // Create new meal slot with trimmed name
+    dayPlan.meals[trimmedMealName] = {
       recipes: [],
       customizations: {},
       mealTime: params.mealTime || undefined,
@@ -1808,7 +1811,7 @@ export class ManualMealPlanService {
       throw new Error(`Failed to update draft: ${updateError.message}`);
     }
 
-    console.log(`✅ Created meal slot "${params.mealName}" on day ${params.day}`);
+    console.log(`✅ Created meal slot "${trimmedMealName}" on day ${params.day}`);
   }
 
   /**
@@ -1829,18 +1832,19 @@ export class ManualMealPlanService {
 
     const suggestions = draft.suggestions as DayStructure[];
     const dayPlan = suggestions.find((d: DayStructure) => d.day === params.day);
-    
+
     if (!dayPlan) {
       throw new Error(`Day ${params.day} not found in draft`);
     }
 
-    // Find meal (case-insensitive)
+    // Trim and find meal (case-insensitive)
+    const trimmedMealName = params.mealName.trim();
     const mealKey = Object.keys(dayPlan.meals).find(
-      key => key.toLowerCase() === params.mealName.toLowerCase()
+      key => key.toLowerCase() === trimmedMealName.toLowerCase()
     );
 
     if (!mealKey) {
-      throw new Error(`Meal slot "${params.mealName}" not found for day ${params.day}`);
+      throw new Error(`Meal slot "${trimmedMealName}" not found for day ${params.day}`);
     }
 
     // Update properties
