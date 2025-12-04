@@ -57,10 +57,14 @@ export class GoogleCalendarService {
   constructor() {
     this.clientId = process.env.GOOGLE_CLIENT_ID || '';
     this.clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-    this.redirectUri = process.env.GOOGLE_REDIRECT_URI || '';
+    this.redirectUri = process.env.GOOGLE_REDIRECT_URI ||
+                       `${process.env.VERCEL_URL || process.env.NEXT_PUBLIC_VERCEL_URL || ''}/api/calendar/oauth-callback`;
 
-    if (!this.clientId || !this.clientSecret) {
+    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
       console.warn('⚠️ Google Calendar OAuth credentials not configured');
+      console.warn(`   GOOGLE_CLIENT_ID: ${this.clientId ? 'SET' : 'MISSING'}`);
+      console.warn(`   GOOGLE_CLIENT_SECRET: ${this.clientSecret ? 'SET' : 'MISSING'}`);
+      console.warn(`   GOOGLE_REDIRECT_URI: ${this.redirectUri || 'MISSING'}`);
     }
   }
 
