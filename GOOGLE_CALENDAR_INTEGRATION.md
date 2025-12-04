@@ -35,7 +35,7 @@ Add these to your `.env` file:
 # Google Calendar OAuth
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REDIRECT_URI=https://your-domain.com/api/calendar/oauth-callback
+GOOGLE_REDIRECT_URI=https://your-domain.com/api/auth/google/callback
 
 # Frontend URL for redirects
 FRONTEND_URL=https://your-app.com
@@ -60,8 +60,8 @@ FRONTEND_URL=https://your-app.com
 
 5. Configure **Authorized redirect URIs**:
    ```
-   https://your-domain.vercel.app/api/calendar/oauth-callback
-   http://localhost:3000/api/calendar/oauth-callback  (for development)
+   https://your-domain.vercel.app/api/auth/google/callback
+   http://localhost:3000/api/auth/google/callback  (for development)
    ```
 
 6. Copy **Client ID** and **Client Secret** to `.env`
