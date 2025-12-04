@@ -123,9 +123,10 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // Get nutritionist and client emails for calendar invite
     const { data: nutritionist } = await supabase
-      .from('nutritionists')
+      .from('users')
       .select('email, first_name, last_name')
       .eq('id', nutritionistId)
+      .eq('role', 'nutritionist')
       .single();
 
     const { data: client } = await supabase
