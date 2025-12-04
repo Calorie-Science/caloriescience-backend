@@ -99,6 +99,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
           enrichedMeals[mealName] = {
             ...(meal as any),
+            mealName: mealName, // Add meal slot name to the meal object
             recipes: enrichedRecipes
           };
         }
