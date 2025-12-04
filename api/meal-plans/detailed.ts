@@ -104,9 +104,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           };
         }
 
+        // Sort meals by mealTime
+        const sortedMeals: any = {};
+        const mealEntries = Object.entries(enrichedMeals).sort((a, b) => {
+          const timeA = (a[1] as any).mealTime || '00:00';
+          const timeB = (b[1] as any).mealTime || '00:00';
+          return timeA.localeCompare(timeB);
+        });
+
+        for (const [mealName, meal] of mealEntries) {
+          sortedMeals[mealName] = meal;
+        }
+
         return {
           ...dayPlan,
-          meals: enrichedMeals
+          meals: sortedMeals
         };
       })
     );
