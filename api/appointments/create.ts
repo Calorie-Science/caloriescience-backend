@@ -37,7 +37,8 @@ const createAppointmentSchema = Joi.object({
   location: Joi.string().optional().max(500),
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
-  createMeetLink: Joi.boolean().optional().default(false)
+  createMeetLink: Joi.boolean().optional().default(false),
+  additionalAttendees: Joi.array().items(Joi.string().email()).optional()
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -59,29 +60,32 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     // Determine participants
     let nutritionistId: string;
-    let clientId: string;
+    let clientId: string | null = null;
 
     if (user.role === 'nutritionist') {
       nutritionistId = user.id;
-      if (!value.clientId) {
+
+      // clientId is optional if additionalAttendees are provided
+      if (value.clientId) {
+        clientId = value.clientId;
+
+        // Verify client belongs to nutritionist
+        const { data: client } = await supabase
+          .from('clients')
+          .select('id, nutritionist_id')
+          .eq('id', clientId)
+          .single();
+
+        if (!client || client.nutritionist_id !== nutritionistId) {
+          return res.status(403).json({
+            error: 'Access denied',
+            message: 'Client does not belong to this nutritionist'
+          });
+        }
+      } else if (!value.additionalAttendees || value.additionalAttendees.length === 0) {
         return res.status(400).json({
           error: 'Validation error',
-          message: 'clientId is required when nutritionist creates appointment'
-        });
-      }
-      clientId = value.clientId;
-
-      // Verify client belongs to nutritionist
-      const { data: client } = await supabase
-        .from('clients')
-        .select('id, nutritionist_id')
-        .eq('id', clientId)
-        .single();
-
-      if (!client || client.nutritionist_id !== nutritionistId) {
-        return res.status(403).json({
-          error: 'Access denied',
-          message: 'Client does not belong to this nutritionist'
+          message: 'Either clientId or additionalAttendees is required when nutritionist creates appointment'
         });
       }
     } else {
@@ -121,7 +125,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       });
     }
 
-    // Get nutritionist and client emails for calendar invite
+    // Get nutritionist email for calendar invite
     const { data: nutritionist } = await supabase
       .from('users')
       .select('email, first_name, last_name')
@@ -129,17 +133,29 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       .eq('role', 'nutritionist')
       .single();
 
-    const { data: client } = await supabase
-      .from('clients')
-      .select('email, first_name, last_name')
-      .eq('id', clientId)
-      .single();
-
-    if (!nutritionist || !client) {
+    if (!nutritionist) {
       return res.status(404).json({
         error: 'Not found',
-        message: 'Nutritionist or client not found'
+        message: 'Nutritionist not found'
       });
+    }
+
+    // Get client email if clientId is provided
+    let client: any = null;
+    if (clientId) {
+      const { data: clientData } = await supabase
+        .from('clients')
+        .select('email, first_name, last_name')
+        .eq('id', clientId)
+        .single();
+
+      if (!clientData) {
+        return res.status(404).json({
+          error: 'Not found',
+          message: 'Client not found'
+        });
+      }
+      client = clientData;
     }
 
     // Create appointment in database
@@ -190,18 +206,27 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       if (connection) {
         console.log('📅 Syncing appointment to Google Calendar...');
 
+        // Prepare attendees list
+        const attendees = [nutritionist.email];
+        if (client && client.email) {
+          attendees.push(client.email);
+        }
+        if (value.additionalAttendees && value.additionalAttendees.length > 0) {
+          attendees.push(...value.additionalAttendees);
+        }
+
         // Create calendar event
         const calendarEvent = await googleCalendarService.createEvent(
           nutritionistId,
           'nutritionist',
           {
             summary: value.title,
-            description: `${value.description || ''}\n\nWith: ${client.first_name} ${client.last_name} (${client.email})`,
+            description: value.description || '',
             startTime: value.startTime,
             endTime: value.endTime,
             timezone: value.timezone,
             location: value.location,
-            attendees: [client.email, nutritionist.email],
+            attendees: attendees,
             meetLink: value.createMeetLink
           }
         );
