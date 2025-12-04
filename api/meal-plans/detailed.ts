@@ -134,6 +134,26 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 }
 
 /**
+ * Normalize ingredient format to consistent structure with id, name, amount, unit
+ */
+function normalizeIngredients(ingredients: any[]): any[] {
+  return ingredients.map((ing: any) => ({
+    id: ing.id || ing.food || ing.name,
+    name: ing.name || ing.food || ing.text,
+    unit: ing.unit || ing.measure || '',
+    amount: ing.amount !== undefined ? ing.amount : (ing.quantity || 0),
+    image: ing.image || '',
+    originalString: ing.original || ing.originalString || ing.text || `${ing.amount || ing.quantity || ''} ${ing.unit || ing.measure || ''} ${ing.name || ing.food || ''}`.trim(),
+    aisle: ing.aisle || '',
+    meta: ing.meta || [],
+    measures: ing.measures || {
+      us: { amount: ing.amount || ing.quantity || 0, unitLong: ing.unit || ing.measure || '', unitShort: ing.unit || ing.measure || '' },
+      metric: { amount: ing.amount || ing.quantity || 0, unitLong: ing.unit || ing.measure || '', unitShort: ing.unit || ing.measure || '' }
+    }
+  }));
+}
+
+/**
  * Get full recipe details including ingredients, instructions, and nutrition
  */
 async function getFullRecipeDetails(
@@ -395,10 +415,7 @@ async function handleManualRecipe(recipeId: string, recipe: any, meal: any): Pro
     if (cachedRecipe) {
       const cached = cachedRecipe as any;
       baseRecipe = {
-        ingredients: (cached.ingredients || []).map((ing: any) => ({
-          ...ing,
-          amount: ing.amount || ing.quantity || 0
-        })),
+        ingredients: normalizeIngredients(cached.ingredients || []),
         ingredientLines: cached.ingredient_lines || cached.ingredientLines || [],
         cookingInstructions: cached.cooking_instructions || cached.cookingInstructions || [],
         nutritionDetails: cached.nutrition_details || cached.nutritionDetails || {},
@@ -416,10 +433,7 @@ async function handleManualRecipe(recipeId: string, recipe: any, meal: any): Pro
 
   if (!baseRecipe) {
     baseRecipe = {
-      ingredients: (recipe.ingredients || []).map((ing: any) => ({
-        ...ing,
-        amount: ing.amount || ing.quantity || 0
-      })),
+      ingredients: normalizeIngredients(recipe.ingredients || []),
       cookingInstructions: recipe.instructions || [],
       nutritionDetails: recipe.nutrition || {},
       servings: recipe.servings || 1
@@ -449,11 +463,7 @@ async function handleRegularRecipe(recipeId: string, recipe: any, meal: any): Pr
   if (cachedRecipe) {
     const cached = cachedRecipe as any;
     baseRecipe = {
-      ingredients: (cached.ingredients || []).map((ing: any) => ({
-        ...ing,
-        amount: ing.amount !== undefined ? ing.amount : ing.quantity,
-        unit: ing.unit !== undefined ? ing.unit : ing.measure
-      })),
+      ingredients: normalizeIngredients(cached.ingredients || []),
       ingredientLines: cached.ingredient_lines || cached.ingredientLines || [],
       cookingInstructions: cached.cooking_instructions || cached.cookingInstructions || [],
       nutritionDetails: cached.nutrition_details || cached.nutritionDetails || {},
@@ -472,7 +482,7 @@ async function handleRegularRecipe(recipeId: string, recipe: any, meal: any): Pr
     const recipeDetails = await multiProviderService.getRecipeDetails(recipeId);
     if (recipeDetails) {
       baseRecipe = {
-        ingredients: recipeDetails.ingredients || [],
+        ingredients: normalizeIngredients(recipeDetails.ingredients || []),
         ingredientLines: recipeDetails.ingredientLines || [],
         cookingInstructions: recipeDetails.instructions || [],
         nutritionDetails: recipeDetails.nutrition || {},
