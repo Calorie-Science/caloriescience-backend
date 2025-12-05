@@ -82,6 +82,28 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       throw new Error('Failed to get user email from Google');
     }
 
+    // Fetch the logged-in user's email from the database
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', stateData.user_id)
+      .single();
+
+    if (userError || !userData) {
+      console.error('❌ Failed to fetch user data:', userError);
+      throw new Error('Failed to verify user identity');
+    }
+
+    // Validate that Google email matches the logged-in user's email
+    if (userInfo.email.toLowerCase() !== userData.email.toLowerCase()) {
+      console.error(`❌ Email mismatch: Google=${userInfo.email}, CalorieScience=${userData.email}`);
+      throw new Error(
+        `Email mismatch: You must connect the same Google account (${userData.email}) that you use to log in to CalorieScience`
+      );
+    }
+
+    console.log(`✅ Email validation passed: ${userInfo.email}`);
+
     // Save connection to database
     const connection = await googleCalendarService.saveConnection(
       stateData.user_id,
