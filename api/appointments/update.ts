@@ -1,7 +1,7 @@
 /**
  * PUT /api/appointments/update
  *
- * Update an appointment and sync changes to Google Calendar
+ * Update an appointment and sync changes to Google Calendar (only for online appointments)
  *
  * Request body:
  * {
@@ -14,7 +14,8 @@
  *   location?: string,
  *   meetingLink?: string,
  *   notes?: string,
- *   status?: string
+ *   status?: string,
+ *   appointmentType?: 'online' | 'offline'
  * }
  */
 
@@ -34,7 +35,8 @@ const updateAppointmentSchema = Joi.object({
   location: Joi.string().optional().max(500),
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
-  status: Joi.string().valid('scheduled', 'completed', 'cancelled', 'no_show', 'rescheduled').optional()
+  status: Joi.string().valid('scheduled', 'completed', 'cancelled', 'no_show', 'rescheduled').optional(),
+  appointmentType: Joi.string().valid('online', 'offline').optional()
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -106,6 +108,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     if (value.location !== undefined) updates.location = value.location;
     if (value.meetingLink !== undefined) updates.meeting_link = value.meetingLink;
     if (value.notes !== undefined) updates.notes = value.notes;
+    if (value.appointmentType) updates.appointment_type = value.appointmentType;
     if (value.status) {
       updates.status = value.status;
       if (value.status === 'cancelled') {
@@ -131,11 +134,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log(`✅ Appointment updated: ${value.appointmentId}`);
 
-    // Try to sync to Google Calendar if event ID exists
+    // Try to sync to Google Calendar if event ID exists and appointment is online
     let syncStatus = appointment.sync_status;
     let syncError: string | null = null;
 
-    if (appointment.google_event_id && appointment.nutritionist_id) {
+    // Determine if appointment is online (use updated value if provided, otherwise use existing)
+    const appointmentType = value.appointmentType || appointment.appointment_type || 'online';
+
+    if (appointmentType === 'online' && appointment.google_event_id && appointment.nutritionist_id) {
       try {
         console.log('📅 Syncing update to Google Calendar...');
 

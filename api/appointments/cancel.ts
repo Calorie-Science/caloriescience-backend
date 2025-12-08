@@ -1,7 +1,7 @@
 /**
  * POST /api/appointments/cancel
  *
- * Cancel an appointment and remove from Google Calendar
+ * Cancel an appointment and remove from Google Calendar (only for online appointments)
  *
  * Request body:
  * {
@@ -78,8 +78,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log(`✅ Appointment cancelled: ${appointmentId}`);
 
-    // Try to remove from Google Calendar if event ID exists
-    if (appointment.google_event_id && appointment.nutritionist_id) {
+    // Try to remove from Google Calendar if event ID exists and appointment is online
+    const appointmentType = appointment.appointment_type || 'online';
+    if (appointmentType === 'online' && appointment.google_event_id && appointment.nutritionist_id) {
       try {
         console.log('📅 Removing from Google Calendar...');
 

@@ -2,7 +2,7 @@
  * POST /api/appointments/create
  *
  * Create an appointment between nutritionist and client
- * Automatically syncs to Google Calendar if connected
+ * Automatically syncs to Google Calendar if appointmentType is 'online' and Google Calendar is connected
  *
  * Request body:
  * {
@@ -16,7 +16,8 @@
  *   location?: string,
  *   meetingLink?: string,
  *   notes?: string,
- *   createMeetLink?: boolean
+ *   createMeetLink?: boolean,
+ *   appointmentType?: 'online' | 'offline' (default: 'online')
  * }
  */
 
@@ -38,7 +39,8 @@ const createAppointmentSchema = Joi.object({
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
   createMeetLink: Joi.boolean().optional().default(false),
-  additionalAttendees: Joi.array().items(Joi.string().email()).optional()
+  additionalAttendees: Joi.array().items(Joi.string().email()).optional(),
+  appointmentType: Joi.string().valid('online', 'offline').optional().default('online')
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -145,7 +147,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     if (clientId) {
       const { data: clientData } = await supabase
         .from('clients')
-        .select('email, first_name, last_name')
+        .select('id, email, first_name, last_name')
         .eq('id', clientId)
         .single();
 
@@ -175,7 +177,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         created_by_user_id: user.id,
         created_by_user_type: user.role,
         status: 'scheduled',
-        sync_status: 'pending'
+        sync_status: 'pending',
+        appointment_type: value.appointmentType
       })
       .select()
       .single();
@@ -190,20 +193,21 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log(`✅ Appointment created: ${appointment.id}`);
 
-    // Try to sync to Google Calendar
+    // Try to sync to Google Calendar (only for online appointments)
     let googleEventId: string | null = null;
     let syncStatus = 'pending';
     let syncError: string | null = null;
     let meetLink: string | null = value.meetingLink || null;
 
-    try {
-      // Check if nutritionist has Google Calendar connected
-      const connection = await googleCalendarService.getConnection(
-        nutritionistId,
-        'nutritionist'
-      );
+    if (value.appointmentType === 'online') {
+      try {
+        // Check if nutritionist has Google Calendar connected
+        const connection = await googleCalendarService.getConnection(
+          nutritionistId,
+          'nutritionist'
+        );
 
-      if (connection) {
+        if (connection) {
         console.log('📅 Syncing appointment to Google Calendar...');
 
         // Prepare attendees list
@@ -240,14 +244,19 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
 
         console.log(`✅ Synced to Google Calendar: ${googleEventId}`);
-      } else {
-        console.log('ℹ️ Google Calendar not connected, skipping sync');
-        syncStatus = 'not_connected';
+        } else {
+          console.log('ℹ️ Google Calendar not connected, skipping sync');
+          syncStatus = 'not_connected';
+        }
+      } catch (error) {
+        console.error('⚠️ Error syncing to Google Calendar:', error);
+        syncStatus = 'failed';
+        syncError = error instanceof Error ? error.message : 'Unknown error';
       }
-    } catch (error) {
-      console.error('⚠️ Error syncing to Google Calendar:', error);
-      syncStatus = 'failed';
-      syncError = error instanceof Error ? error.message : 'Unknown error';
+    } else {
+      // Offline appointment - no Google Calendar sync
+      syncStatus = 'offline';
+      console.log('ℹ️ Offline appointment - skipping Google Calendar sync');
     }
 
     // Update appointment with sync status
@@ -273,20 +282,22 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         sync_error: syncError,
         meeting_link: meetLink,
         nutritionist: {
-          id: nutritionist.id,
+          id: nutritionistId,
           name: `${nutritionist.first_name} ${nutritionist.last_name}`,
           email: nutritionist.email
         },
-        client: {
+        client: client ? {
           id: client.id,
           name: `${client.first_name} ${client.last_name}`,
           email: client.email
-        }
+        } : null
       },
       message: syncStatus === 'synced'
         ? 'Appointment created and synced to Google Calendar'
         : syncStatus === 'not_connected'
         ? 'Appointment created (Google Calendar not connected)'
+        : syncStatus === 'offline'
+        ? 'Offline appointment created successfully'
         : 'Appointment created but sync failed'
     });
   } catch (error) {
