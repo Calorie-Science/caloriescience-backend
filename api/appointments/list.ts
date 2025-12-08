@@ -44,7 +44,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         client:clients!appointments_client_id_fkey(
           id,
           email,
-          name
+          full_name
         )
       `);
 
