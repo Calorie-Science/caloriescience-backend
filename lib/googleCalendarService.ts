@@ -57,7 +57,8 @@ export class GoogleCalendarService {
   constructor() {
     this.clientId = process.env.GOOGLE_CLIENT_ID || '';
     this.clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-    this.redirectUri = process.env.GOOGLE_REDIRECT_URI ||
+    // Always use /api/calendar/oauth-callback for calendar OAuth
+    this.redirectUri = process.env.GOOGLE_REDIRECT_URI?.replace('/api/auth/google/callback', '/api/calendar/oauth-callback') ||
                        `${process.env.VERCEL_URL || process.env.NEXT_PUBLIC_VERCEL_URL || ''}/api/calendar/oauth-callback`;
 
     if (!this.clientId || !this.clientSecret || !this.redirectUri) {
