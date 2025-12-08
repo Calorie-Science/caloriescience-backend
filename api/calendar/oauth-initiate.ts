@@ -3,6 +3,9 @@
  *
  * Initiate Google Calendar OAuth flow
  *
+ * Query parameters:
+ * - redirect_uri: (required) URL to redirect user after OAuth completes
+ *
  * This endpoint generates a secure state token and redirects the user to Google's OAuth consent screen
  */
 
@@ -20,6 +23,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   const user = (req as any).user;
 
   try {
+    // Validate redirect_uri parameter is provided
+    const redirectUri = req.query.redirect_uri as string;
+    if (!redirectUri) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: 'redirect_uri query parameter is required'
+      });
+    }
+
     // Determine user type
     const userType = user.role === 'nutritionist' ? 'nutritionist' : 'client';
 
@@ -36,7 +48,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         state: state,
         user_id: user.id,
         user_type: userType,
-        redirect_uri: req.query.redirect_uri as string || null,
+        redirect_uri: redirectUri,
         expires_at: expiresAt.toISOString()
       });
 
