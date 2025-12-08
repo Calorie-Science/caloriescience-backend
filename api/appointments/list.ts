@@ -36,17 +36,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       .from('appointments')
       .select(`
         *,
-        nutritionist:nutritionists!appointments_nutritionist_id_fkey(
+        nutritionist:users!appointments_nutritionist_id_fkey(
           id,
-          first_name,
-          last_name,
-          email
+          email,
+          full_name
         ),
-        client:clients!appointments_client_id_fkey(
+        client:users!appointments_client_id_fkey(
           id,
-          first_name,
-          last_name,
-          email
+          email,
+          full_name
         )
       `);
 
