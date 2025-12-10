@@ -3,8 +3,8 @@
  *
  * Create an appointment between nutritionist and client
  * Automatically syncs to Google Calendar if connected
- * - Online appointments: Creates Google Meet link if createMeetLink is true
- * - Offline appointments: Syncs to calendar but WITHOUT Google Meet link
+ * - Online appointments: Automatically creates Google Meet link
+ * - Offline appointments: Syncs to calendar WITHOUT Google Meet link
  *
  * Request body:
  * {
@@ -18,7 +18,6 @@
  *   location?: string,
  *   meetingLink?: string,
  *   notes?: string,
- *   createMeetLink?: boolean (only for online appointments),
  *   appointmentType?: 'online' | 'offline' (default: 'online')
  * }
  */
@@ -40,7 +39,6 @@ const createAppointmentSchema = Joi.object({
   location: Joi.string().optional().max(500),
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
-  createMeetLink: Joi.boolean().optional().default(false),
   additionalAttendees: Joi.array().items(Joi.string().email()).optional(),
   appointmentType: Joi.string().valid('online', 'offline').optional().default('online')
 });
@@ -221,8 +219,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           attendees.push(...value.additionalAttendees);
         }
 
-        // For offline appointments, don't create Meet link even if requested
-        const shouldCreateMeetLink = value.appointmentType === 'online' && value.createMeetLink;
+        // Automatically create Meet link for online appointments only
+        const shouldCreateMeetLink = value.appointmentType === 'online';
 
         // Create calendar event
         const calendarEvent = await googleCalendarService.createEvent(
