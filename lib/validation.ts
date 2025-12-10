@@ -90,7 +90,7 @@ export const clientSchema = Joi.object({
       'any.only': 'Lactation status must be one of: not_lactating, lactating_0_6_months, lactating_7_12_months'
     }),
   heightCm: Joi.number().min(50).max(300).optional(),
-  weightKg: Joi.number().min(20).max(500).optional(),
+  weightKg: Joi.number().min(1).max(500).optional(),
   waistCircumferenceCm: Joi.number().min(1).max(500).optional(),
   hipCircumferenceCm: Joi.number().min(1).max(500).optional(),
   bodyFatPercentage: Joi.number().min(0).max(100).optional(),
@@ -100,7 +100,7 @@ export const clientSchema = Joi.object({
   medications: Joi.array().items(Joi.string()).optional(),
   dietaryPreferences: Joi.array().items(Joi.string()).optional(),
   healthGoals: Joi.array().items(Joi.string()).optional(),
-  targetWeightKg: Joi.number().min(20).max(500).optional(),
+  targetWeightKg: Joi.number().min(1).max(500).optional(),
   // EER-related fields that can be passed from EER calculation API
   bmi: Joi.number().min(10).max(100).optional(),
   bmiCategory: Joi.string().valid('underweight', 'normal', 'overweight', 'obese_class_1', 'obese_class_2', 'obese_class_3').optional(),
@@ -249,7 +249,7 @@ export const clientUpdateSchema = Joi.object({
       'any.only': 'Lactation status must be one of: not_lactating, lactating_0_6_months, lactating_7_12_months'
     }),
   heightCm: Joi.number().min(50).max(300).optional(),
-  weightKg: Joi.number().min(20).max(500).optional(),
+  weightKg: Joi.number().min(1).max(500).optional(),
   waistCircumferenceCm: Joi.number().min(1).max(500).optional(),
   hipCircumferenceCm: Joi.number().min(1).max(500).optional(),
   bodyFatPercentage: Joi.number().min(0).max(100).optional(),
@@ -259,7 +259,7 @@ export const clientUpdateSchema = Joi.object({
   medications: Joi.array().items(Joi.string()).optional(),
   dietaryPreferences: Joi.array().items(Joi.string()).optional(),
   healthGoals: Joi.array().items(Joi.string()).optional(),
-  targetWeightKg: Joi.number().min(20).max(500).optional(),
+  targetWeightKg: Joi.number().min(1).max(500).optional(),
   // EER-related fields that can be passed from EER calculation API
   bmi: Joi.number().min(10).max(100).optional(),
   bmiCategory: Joi.string().valid('underweight', 'normal', 'overweight', 'obese_class_1', 'obese_class_2', 'obese_class_3').optional(),
