@@ -140,6 +140,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     // Try to sync to Google Calendar if event ID exists
     let syncStatus = appointment.sync_status;
     let syncError: string | null = null;
+    let newGoogleEventId = appointment.google_event_id;
+    let newMeetingLink = updatedAppointment.meeting_link;
 
     if (appointment.google_event_id && appointment.nutritionist_id) {
       try {
@@ -159,8 +161,61 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               appointment.google_event_id
             );
             syncStatus = 'cancelled';
-          } else {
-            // Update calendar event
+          }
+          // If appointment type changed, we need to recreate the event
+          else if (value.appointmentType && value.appointmentType !== appointment.appointment_type) {
+            console.log(`🔄 Appointment type changed from ${appointment.appointment_type} to ${value.appointmentType}, recreating event...`);
+
+            // Delete old event
+            await googleCalendarService.cancelEvent(
+              appointment.nutritionist_id,
+              'nutritionist',
+              appointment.google_event_id
+            );
+
+            // Get nutritionist and client info
+            const { data: nutritionist } = await supabase
+              .from('users')
+              .select('email, first_name, last_name')
+              .eq('id', appointment.nutritionist_id)
+              .single();
+
+            let attendees = [nutritionist?.email];
+            if (appointment.client_id) {
+              const { data: client } = await supabase
+                .from('clients')
+                .select('email')
+                .eq('id', appointment.client_id)
+                .single();
+              if (client?.email) attendees.push(client.email);
+            }
+            if (updatedAppointment.additional_attendees && updatedAppointment.additional_attendees.length > 0) {
+              attendees.push(...updatedAppointment.additional_attendees);
+            }
+
+            // Create new event with correct type
+            const newEvent = await googleCalendarService.createEvent(
+              appointment.nutritionist_id,
+              'nutritionist',
+              {
+                summary: updatedAppointment.title,
+                description: updatedAppointment.description || '',
+                startTime: updatedAppointment.start_time,
+                endTime: updatedAppointment.end_time,
+                timezone: updatedAppointment.timezone,
+                location: updatedAppointment.location,
+                attendees: attendees,
+                meetLink: value.appointmentType === 'online' // Create Meet link only for online
+              }
+            );
+
+            newGoogleEventId = newEvent.id;
+            newMeetingLink = newEvent.hangoutLink || null;
+            syncStatus = 'synced';
+            console.log(`✅ Event recreated with new type: ${value.appointmentType}`);
+          }
+          else {
+            // Regular update - no type change
             const eventUpdates: any = {};
             if (value.title) eventUpdates.summary = value.title;
             if (value.description !== undefined) eventUpdates.description = value.description;
@@ -187,10 +242,12 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         syncError = error instanceof Error ? error.message : 'Unknown error';
       }
 
-      // Update sync status
+      // Update sync status and event ID if changed
       await supabase
         .from('appointments')
         .update({
+          google_event_id: newGoogleEventId,
+          meeting_link: newMeetingLink,
           sync_status: syncStatus,
           sync_error: syncError,
           last_synced_at: syncStatus === 'synced' ? new Date().toISOString() : appointment.last_synced_at
@@ -202,6 +259,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       success: true,
       data: {
         ...updatedAppointment,
+        google_event_id: newGoogleEventId,
+        meeting_link: newMeetingLink,
         sync_status: syncStatus,
         sync_error: syncError
       },
