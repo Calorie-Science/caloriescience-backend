@@ -2,7 +2,9 @@
  * POST /api/appointments/create
  *
  * Create an appointment between nutritionist and client
- * Automatically syncs to Google Calendar if appointmentType is 'online' and Google Calendar is connected
+ * Automatically syncs to Google Calendar if connected
+ * - Online appointments: Creates Google Meet link if createMeetLink is true
+ * - Offline appointments: Syncs to calendar but WITHOUT Google Meet link
  *
  * Request body:
  * {
@@ -16,7 +18,7 @@
  *   location?: string,
  *   meetingLink?: string,
  *   notes?: string,
- *   createMeetLink?: boolean,
+ *   createMeetLink?: boolean (only for online appointments),
  *   appointmentType?: 'online' | 'offline' (default: 'online')
  * }
  */
@@ -194,21 +196,20 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log(`✅ Appointment created: ${appointment.id}`);
 
-    // Try to sync to Google Calendar (only for online appointments)
+    // Try to sync to Google Calendar
     let googleEventId: string | null = null;
     let syncStatus = 'pending';
     let syncError: string | null = null;
     let meetLink: string | null = value.meetingLink || null;
 
-    if (value.appointmentType === 'online') {
-      try {
-        // Check if nutritionist has Google Calendar connected
-        const connection = await googleCalendarService.getConnection(
-          nutritionistId,
-          'nutritionist'
-        );
+    try {
+      // Check if nutritionist has Google Calendar connected
+      const connection = await googleCalendarService.getConnection(
+        nutritionistId,
+        'nutritionist'
+      );
 
-        if (connection) {
+      if (connection) {
         console.log('📅 Syncing appointment to Google Calendar...');
 
         // Prepare attendees list
@@ -219,6 +220,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         if (value.additionalAttendees && value.additionalAttendees.length > 0) {
           attendees.push(...value.additionalAttendees);
         }
+
+        // For offline appointments, don't create Meet link even if requested
+        const shouldCreateMeetLink = value.appointmentType === 'online' && value.createMeetLink;
 
         // Create calendar event
         const calendarEvent = await googleCalendarService.createEvent(
@@ -232,7 +236,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             timezone: value.timezone,
             location: value.location,
             attendees: attendees,
-            meetLink: value.createMeetLink
+            meetLink: shouldCreateMeetLink
           }
         );
 
@@ -245,19 +249,14 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         }
 
         console.log(`✅ Synced to Google Calendar: ${googleEventId}`);
-        } else {
-          console.log('ℹ️ Google Calendar not connected, skipping sync');
-          syncStatus = 'not_connected';
-        }
-      } catch (error) {
-        console.error('⚠️ Error syncing to Google Calendar:', error);
-        syncStatus = 'failed';
-        syncError = error instanceof Error ? error.message : 'Unknown error';
+      } else {
+        console.log('ℹ️ Google Calendar not connected, skipping sync');
+        syncStatus = 'not_connected';
       }
-    } else {
-      // Offline appointment - no Google Calendar sync
-      syncStatus = 'offline';
-      console.log('ℹ️ Offline appointment - skipping Google Calendar sync');
+    } catch (error) {
+      console.error('⚠️ Error syncing to Google Calendar:', error);
+      syncStatus = 'failed';
+      syncError = error instanceof Error ? error.message : 'Unknown error';
     }
 
     // Update appointment with sync status
@@ -294,11 +293,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         } : null
       },
       message: syncStatus === 'synced'
-        ? 'Appointment created and synced to Google Calendar'
+        ? `Appointment created and synced to Google Calendar${value.appointmentType === 'offline' ? ' (in-person meeting)' : ''}`
         : syncStatus === 'not_connected'
         ? 'Appointment created (Google Calendar not connected)'
-        : syncStatus === 'offline'
-        ? 'Offline appointment created successfully'
         : 'Appointment created but sync failed'
     });
   } catch (error) {

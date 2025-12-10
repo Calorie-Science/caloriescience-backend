@@ -1,7 +1,7 @@
 /**
  * PUT /api/appointments/update
  *
- * Update an appointment and sync changes to Google Calendar (only for online appointments)
+ * Update an appointment and sync changes to Google Calendar
  *
  * Request body:
  * {
@@ -137,14 +137,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
 
     console.log(`✅ Appointment updated: ${value.appointmentId}`);
 
-    // Try to sync to Google Calendar if event ID exists and appointment is online
+    // Try to sync to Google Calendar if event ID exists
     let syncStatus = appointment.sync_status;
     let syncError: string | null = null;
 
-    // Determine if appointment is online (use updated value if provided, otherwise use existing)
-    const appointmentType = value.appointmentType || appointment.appointment_type || 'online';
-
-    if (appointmentType === 'online' && appointment.google_event_id && appointment.nutritionist_id) {
+    if (appointment.google_event_id && appointment.nutritionist_id) {
       try {
         console.log('📅 Syncing update to Google Calendar...');
 
