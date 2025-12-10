@@ -178,7 +178,8 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         created_by_user_type: user.role,
         status: 'scheduled',
         sync_status: 'pending',
-        appointment_type: value.appointmentType
+        appointment_type: value.appointmentType,
+        additional_attendees: value.additionalAttendees || []
       })
       .select()
       .single();

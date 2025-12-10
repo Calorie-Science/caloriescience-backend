@@ -15,7 +15,8 @@
  *   meetingLink?: string,
  *   notes?: string,
  *   status?: string,
- *   appointmentType?: 'online' | 'offline'
+ *   appointmentType?: 'online' | 'offline',
+ *   additionalAttendees?: string[] (email addresses)
  * }
  */
 
@@ -36,7 +37,8 @@ const updateAppointmentSchema = Joi.object({
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
   status: Joi.string().valid('scheduled', 'completed', 'cancelled', 'no_show', 'rescheduled').optional(),
-  appointmentType: Joi.string().valid('online', 'offline').optional()
+  appointmentType: Joi.string().valid('online', 'offline').optional(),
+  additionalAttendees: Joi.array().items(Joi.string().email()).optional()
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -109,6 +111,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     if (value.meetingLink !== undefined) updates.meeting_link = value.meetingLink;
     if (value.notes !== undefined) updates.notes = value.notes;
     if (value.appointmentType) updates.appointment_type = value.appointmentType;
+    if (value.additionalAttendees !== undefined) updates.additional_attendees = value.additionalAttendees;
     if (value.status) {
       updates.status = value.status;
       if (value.status === 'cancelled') {
