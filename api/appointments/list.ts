@@ -5,6 +5,7 @@
  *
  * Query parameters:
  * - status: filter by status (scheduled, completed, cancelled, etc.)
+ * - clientId: filter by client ID (nutritionists only)
  * - from: start date (ISO 8601)
  * - to: end date (ISO 8601)
  * - limit: number of results (default: 50)
@@ -25,6 +26,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
   try {
     const {
       status,
+      clientId,
       from,
       to,
       limit = '50',
@@ -53,6 +55,11 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       query = query.eq('nutritionist_id', user.id);
     } else {
       query = query.eq('client_id', user.id);
+    }
+
+    // Filter by client ID (nutritionists only)
+    if (clientId && typeof clientId === 'string' && user.role === 'nutritionist') {
+      query = query.eq('client_id', clientId);
     }
 
     // Filter by status
