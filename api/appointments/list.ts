@@ -15,6 +15,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { RecurringAppointmentService } from '../../lib/recurringAppointmentService';
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
   if (req.method !== 'GET') {
@@ -68,6 +69,9 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Filter by date range
+    const startDate = from && typeof from === 'string' ? new Date(from) : new Date();
+    const endDate = to && typeof to === 'string' ? new Date(to) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // Default: 30 days ahead
+
     if (from && typeof from === 'string') {
       query = query.gte('start_time', from);
     }
@@ -91,6 +95,67 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         error: 'Failed to fetch appointments',
         message: error.message
       });
+    }
+
+    // Generate missing recurring appointment instances if date range is provided
+    if ((from || to) && user.role === 'nutritionist') {
+      try {
+        const recurringService = new RecurringAppointmentService();
+        await recurringService.getAppointmentsForCalendarView(
+          user.id,
+          startDate,
+          endDate
+        );
+
+        // Fetch again to get newly generated instances
+        let updatedQuery = supabase
+          .from('appointments')
+          .select(`
+            *,
+            nutritionist:users!appointments_nutritionist_id_fkey(
+              id,
+              email,
+              full_name
+            ),
+            client:clients!appointments_client_id_fkey(
+              id,
+              email,
+              full_name
+            )
+          `)
+          .eq('nutritionist_id', user.id);
+
+        if (from && typeof from === 'string') {
+          updatedQuery = updatedQuery.gte('start_time', from);
+        }
+        if (to && typeof to === 'string') {
+          updatedQuery = updatedQuery.lte('start_time', to);
+        }
+        if (clientId && typeof clientId === 'string') {
+          updatedQuery = updatedQuery.eq('client_id', clientId);
+        }
+        if (status && typeof status === 'string') {
+          updatedQuery = updatedQuery.eq('status', status);
+        }
+
+        updatedQuery = updatedQuery
+          .order('start_time', { ascending: true })
+          .range(offsetNum, offsetNum + limitNum - 1);
+
+        const { data: updatedData } = await updatedQuery;
+        return res.status(200).json({
+          success: true,
+          data: updatedData || [],
+          pagination: {
+            limit: limitNum,
+            offset: offsetNum,
+            total: updatedData?.length || 0
+          }
+        });
+      } catch (recurringError) {
+        console.error('⚠️ Error generating recurring instances:', recurringError);
+        // Continue with original data if generation fails
+      }
     }
 
     return res.status(200).json({

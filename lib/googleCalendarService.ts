@@ -6,6 +6,7 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { supabase } from './supabase';
+import { RecurrencePattern, RecurrencePatternService } from './recurrencePatternService';
 
 export interface CalendarConnection {
   id: string;
@@ -367,6 +368,105 @@ export class GoogleCalendarService {
         .eq('id', connection.id);
 
       throw new Error(`Failed to create calendar event: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Create a recurring calendar event
+   */
+  async createRecurringEvent(
+    userId: string,
+    userType: 'nutritionist' | 'client',
+    eventParams: CreateEventParams,
+    recurrencePattern: RecurrencePattern
+  ): Promise<CalendarEvent> {
+    // Get connection
+    const connection = await this.getConnection(userId, userType);
+    if (!connection) {
+      throw new Error('Google Calendar not connected');
+    }
+
+    // Ensure valid token
+    const accessToken = await this.ensureValidToken(connection);
+
+    // Create OAuth client with token
+    const oauth2Client = this.createOAuth2Client();
+    oauth2Client.setCredentials({ access_token: accessToken });
+
+    // Create calendar API client
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    // Convert recurrence pattern to RRULE
+    const patternService = new RecurrencePatternService();
+    const startDate = new Date(eventParams.startTime);
+    const rrule = patternService.convertToGoogleRRULE(recurrencePattern, startDate);
+
+    // Prepare recurring event
+    const event: any = {
+      summary: eventParams.summary,
+      description: eventParams.description,
+      start: {
+        dateTime: eventParams.startTime,
+        timeZone: eventParams.timezone || connection.timezone || 'UTC'
+      },
+      end: {
+        dateTime: eventParams.endTime,
+        timeZone: eventParams.timezone || connection.timezone || 'UTC'
+      },
+      recurrence: [rrule] // Google Calendar expects array of RRULE strings
+    };
+
+    if (eventParams.location) {
+      event.location = eventParams.location;
+    }
+
+    if (eventParams.attendees && eventParams.attendees.length > 0) {
+      event.attendees = eventParams.attendees.map(email => ({ email }));
+    }
+
+    if (eventParams.meetLink) {
+      event.conferenceData = {
+        createRequest: {
+          requestId: `meet-${Date.now()}`,
+          conferenceSolutionKey: { type: 'hangoutsMeet' }
+        }
+      };
+    }
+
+    try {
+      const response = await calendar.events.insert({
+        calendarId: connection.primaryCalendarId,
+        requestBody: event,
+        conferenceDataVersion: eventParams.meetLink ? 1 : 0,
+        sendUpdates: 'all' // Send email notifications to attendees
+      });
+
+      console.log(`✅ Recurring calendar event created: ${response.data.id}`);
+
+      return {
+        id: response.data.id!,
+        summary: response.data.summary!,
+        description: response.data.description,
+        start: response.data.start!,
+        end: response.data.end!,
+        location: response.data.location,
+        hangoutLink: response.data.hangoutLink,
+        htmlLink: response.data.htmlLink!,
+        status: response.data.status!
+      };
+    } catch (error) {
+      console.error('❌ Error creating recurring calendar event:', error);
+
+      // Update sync error
+      await supabase
+        .from('google_calendar_connections')
+        .update({
+          sync_error: error instanceof Error ? error.message : 'Failed to create recurring event',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', connection.id);
+
+      throw new Error(`Failed to create recurring calendar event: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
