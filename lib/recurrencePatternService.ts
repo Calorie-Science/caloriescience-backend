@@ -7,7 +7,7 @@ export interface RecurrencePattern {
   type: 'daily' | 'weekly' | 'monthly' | 'yearly';
   interval: number; // Every N days/weeks/months/years
   daysOfWeek?: number[]; // For weekly: [1,3,5] = Mon, Wed, Fri (0=Sunday, 6=Saturday)
-  dayOfMonth?: number; // For monthly: day of month (1-31)
+  daysOfMonth?: number[]; // For monthly: [1,2,4,6] = 1st, 2nd, 4th, 6th of each month (1-31)
   endDate?: string; // ISO date string
   occurrenceCount?: number; // Max number of occurrences
 }
@@ -16,7 +16,7 @@ export interface ParsedPattern {
   type: 'daily' | 'weekly' | 'monthly' | 'yearly';
   interval: number;
   daysOfWeek?: number[];
-  dayOfMonth?: number;
+  daysOfMonth?: number[];
   endDate?: Date | null;
   occurrenceCount?: number | null;
 }
@@ -26,11 +26,17 @@ export class RecurrencePatternService {
    * Parse recurrence pattern from JSON
    */
   parseRecurrencePattern(pattern: RecurrencePattern): ParsedPattern {
+    // Handle backward compatibility: convert old dayOfMonth (single number) to daysOfMonth (array)
+    let daysOfMonth = pattern.daysOfMonth;
+    if (!daysOfMonth && (pattern as any).dayOfMonth) {
+      daysOfMonth = [(pattern as any).dayOfMonth];
+    }
+
     return {
       type: pattern.type,
       interval: pattern.interval || 1,
       daysOfWeek: pattern.daysOfWeek,
-      dayOfMonth: pattern.dayOfMonth,
+      daysOfMonth: daysOfMonth,
       endDate: pattern.endDate ? new Date(pattern.endDate) : null,
       occurrenceCount: pattern.occurrenceCount || null
     };
@@ -109,15 +115,24 @@ export class RecurrencePatternService {
       }
     }
 
-    // For monthly patterns with specific day of month
-    if (parsed.type === 'monthly' && parsed.dayOfMonth) {
-      const firstOccurrence = new Date(startDate);
-      firstOccurrence.setDate(parsed.dayOfMonth);
-      if (firstOccurrence < startDate) {
-        // Move to next month
+    // For monthly patterns with specific days of month
+    if (parsed.type === 'monthly' && parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
+      // Find the first matching day of month on or after startDate
+      const startDay = startDate.getDate();
+      const matchingDays = parsed.daysOfMonth.filter(d => d >= startDay).sort((a, b) => a - b);
+      
+      if (matchingDays.length > 0) {
+        // Use first matching day in current month
+        const firstOccurrence = new Date(startDate);
+        firstOccurrence.setDate(matchingDays[0]);
+        return firstOccurrence;
+      } else {
+        // No matching day in current month, use first day of next month
+        const firstOccurrence = new Date(startDate);
         firstOccurrence.setMonth(firstOccurrence.getMonth() + parsed.interval);
+        firstOccurrence.setDate(Math.min(parsed.daysOfMonth[0], new Date(firstOccurrence.getFullYear(), firstOccurrence.getMonth() + 1, 0).getDate()));
+        return firstOccurrence;
       }
-      return firstOccurrence;
     }
 
     // For daily, yearly, or weekly without specific days
@@ -160,16 +175,28 @@ export class RecurrencePatternService {
         break;
 
       case 'monthly':
-        if (parsed.dayOfMonth) {
-          // Move to next month and set day
-          nextDate.setMonth(nextDate.getMonth() + parsed.interval);
-          // Handle month end (e.g., Feb 31 -> Feb 28/29)
-          const lastDayOfMonth = new Date(
-            nextDate.getFullYear(),
-            nextDate.getMonth() + 1,
-            0
-          ).getDate();
-          nextDate.setDate(Math.min(parsed.dayOfMonth, lastDayOfMonth));
+        if (parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
+          const currentDay = currentDate.getDate();
+          const currentMonth = currentDate.getMonth();
+          const currentYear = currentDate.getFullYear();
+          
+          // Find next matching day in current month
+          const matchingDays = parsed.daysOfMonth.filter(d => d > currentDay).sort((a, b) => a - b);
+          
+          if (matchingDays.length > 0) {
+            // Use next matching day in current month
+            nextDate.setDate(matchingDays[0]);
+          } else {
+            // Move to next month and use first matching day
+            nextDate.setMonth(currentMonth + parsed.interval);
+            const lastDayOfMonth = new Date(
+              nextDate.getFullYear(),
+              nextDate.getMonth() + 1,
+              0
+            ).getDate();
+            const firstMatchingDay = Math.min(parsed.daysOfMonth[0], lastDayOfMonth);
+            nextDate.setDate(firstMatchingDay);
+          }
         } else {
           // Same day of month, next interval months
           nextDate.setMonth(nextDate.getMonth() + parsed.interval);
@@ -227,9 +254,10 @@ export class RecurrencePatternService {
       parts.push(`BYDAY=${days}`);
     }
 
-    // Day of month (for monthly)
-    if (parsed.type === 'monthly' && parsed.dayOfMonth) {
-      parts.push(`BYMONTHDAY=${parsed.dayOfMonth}`);
+    // Days of month (for monthly)
+    if (parsed.type === 'monthly' && parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
+      const days = parsed.daysOfMonth.sort((a, b) => a - b).join(',');
+      parts.push(`BYMONTHDAY=${days}`);
     }
 
     // End date or occurrence count
@@ -269,9 +297,12 @@ export class RecurrencePatternService {
       }
     }
 
-    if (pattern.type === 'monthly' && pattern.dayOfMonth) {
-      if (pattern.dayOfMonth < 1 || pattern.dayOfMonth > 31) {
-        return { valid: false, error: 'Day of month must be between 1 and 31' };
+    if (pattern.type === 'monthly' && pattern.daysOfMonth) {
+      if (pattern.daysOfMonth.length === 0) {
+        return { valid: false, error: 'At least one day of month is required for monthly pattern' };
+      }
+      if (pattern.daysOfMonth.some(d => d < 1 || d > 31)) {
+        return { valid: false, error: 'Days of month must be between 1 and 31' };
       }
     }
 

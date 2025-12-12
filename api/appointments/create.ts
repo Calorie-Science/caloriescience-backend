@@ -1,32 +1,25 @@
-/**
- * POST /api/appointments/create
- *
- * Create an appointment between nutritionist and client
- * Automatically syncs to Google Calendar if connected
- * - Online appointments: Automatically creates Google Meet link
- * - Offline appointments: Syncs to calendar WITHOUT Google Meet link
- *
- * Request body:
- * {
- *   clientId: string (required if user is nutritionist),
- *   nutritionistId: string (required if user is client),
- *   title: string,
- *   description?: string,
- *   startTime: string (ISO 8601),
- *   endTime: string (ISO 8601),
- *   timezone?: string,
- *   location?: string,
- *   meetingLink?: string,
- *   notes?: string,
- *   appointmentType?: 'online' | 'offline' (default: 'online')
- * }
- */
+
 
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { googleCalendarService } from '../../lib/googleCalendarService';
+import { RecurringAppointmentService } from '../../lib/recurringAppointmentService';
 import { supabase } from '../../lib/supabase';
 import Joi from 'joi';
+
+const recurrencePatternSchema = Joi.object({
+  type: Joi.string().valid('daily', 'weekly', 'monthly', 'yearly').required(),
+  interval: Joi.number().integer().min(1).required(),
+  daysOfWeek: Joi.array().items(Joi.number().integer().min(0).max(6)).optional(),
+  daysOfMonth: Joi.array().items(Joi.number().integer().min(1).max(31)).optional(),
+  endDate: Joi.string().isoDate().optional(),
+  occurrenceCount: Joi.number().integer().min(1).optional()
+}).custom((value, helpers) => {
+  if (value.endDate && value.occurrenceCount) {
+    return helpers.error('any.invalid', { message: 'Cannot specify both endDate and occurrenceCount' });
+  }
+  return value;
+});
 
 const createAppointmentSchema = Joi.object({
   clientId: Joi.string().uuid().optional(),
@@ -40,7 +33,8 @@ const createAppointmentSchema = Joi.object({
   meetingLink: Joi.string().uri().optional().max(500),
   notes: Joi.string().optional(),
   additionalAttendees: Joi.array().items(Joi.string().email()).optional(),
-  appointmentType: Joi.string().valid('online', 'offline').optional().default('online')
+  appointmentType: Joi.string().valid('online', 'offline').optional().default('online'),
+  recurrencePattern: recurrencePatternSchema.optional()
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -160,7 +154,54 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       client = clientData;
     }
 
-    // Create appointment in database
+    // If recurrencePattern provided, route to recurring service
+    if (value.recurrencePattern) {
+      if (!clientId) {
+        return res.status(400).json({
+          error: 'Validation error',
+          message: 'clientId is required for recurring appointments'
+        });
+      }
+
+      const recurringService = new RecurringAppointmentService();
+
+      const result = await recurringService.createRecurringAppointment({
+        nutritionistId,
+        clientId: clientId as string, // ensured above when required
+        title: value.title,
+        description: value.description,
+        startTime: value.startTime,
+        endTime: value.endTime,
+        timezone: value.timezone,
+        location: value.location,
+        meetingLink: value.meetingLink,
+        notes: value.notes,
+        appointmentType: value.appointmentType,
+        additionalAttendees: value.additionalAttendees,
+        recurrencePattern: value.recurrencePattern,
+        createdByUserId: user.id,
+        createdByUserType: user.role
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          parent: result.parent,
+          children: result.children,
+          googleCalendarSynced: result.googleCalendarSynced,
+          googleCalendarEventId: result.googleCalendarEventId,
+          googleCalendarSyncStatus: result.googleCalendarSyncStatus,
+          googleCalendarSyncError: result.googleCalendarSyncError
+        },
+        message: result.googleCalendarSynced
+          ? 'Recurring appointment created and synced to Google Calendar'
+          : result.googleCalendarSyncStatus === 'not_connected'
+          ? 'Recurring appointment created (Google Calendar not connected)'
+          : 'Recurring appointment created but sync failed'
+      });
+    }
+
+    // Create single appointment in database
     const { data: appointment, error: appointmentError } = await supabase
       .from('appointments')
       .insert({
