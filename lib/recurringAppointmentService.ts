@@ -220,10 +220,19 @@ export class RecurringAppointmentService {
     parent: any
   ): Promise<any[]> {
     const startDate = new Date(data.startTime);
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + 1); // One month ahead
+    
+    // Calculate end date: use pattern endDate if provided, otherwise one month ahead
+    let endDate: Date;
+    if (data.recurrencePattern.endDate) {
+      endDate = new Date(data.recurrencePattern.endDate);
+      // Set to end of day
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      endDate = new Date(startDate);
+      endDate.setMonth(endDate.getMonth() + 1); // One month ahead
+    }
 
-    // Generate dates for first month
+    // Generate dates up to end date (or one month, whichever comes first)
     const dates = this.patternService.generateDates(
       data.recurrencePattern,
       startDate,
@@ -291,8 +300,54 @@ export class RecurringAppointmentService {
     startDate: Date,
     endDate: Date
   ): Promise<any[]> {
-    // Fetch existing appointments in range
-    const { data: existingAppointments, error } = await supabase
+    // Find ALL active recurring parents for this nutritionist (not just those in date range)
+    // This ensures we generate instances even if parent is outside the requested range
+    const { data: allRecurringParents, error: parentsError } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('nutritionist_id', nutritionistId)
+      .eq('is_recurring', true)
+      .is('parent_appointment_id', null)
+      .eq('recurrence_status', 'active');
+
+    if (parentsError) {
+      console.error('Error fetching recurring parents:', parentsError);
+      throw new Error(`Failed to fetch recurring parents: ${parentsError.message}`);
+    }
+
+    // Generate missing instances for each parent that should have instances in the date range
+    for (const parent of allRecurringParents || []) {
+      // Check if parent's pattern should generate instances in the requested range
+      const parentStartDate = new Date(parent.start_time);
+      const parentEndDate = parent.recurrence_end_date 
+        ? new Date(parent.recurrence_end_date)
+        : null;
+
+      // Skip if parent ends before the requested start date
+      if (parentEndDate && parentEndDate < startDate) {
+        continue;
+      }
+
+      // Skip if parent starts after the requested end date
+      if (parentStartDate > endDate) {
+        continue;
+      }
+
+      // Generate instances for this parent in the requested range
+      try {
+        await this.generateAndStoreMissingInstances(
+          parent.id,
+          startDate,
+          endDate
+        );
+      } catch (error) {
+        console.error(`Error generating instances for parent ${parent.id}:`, error);
+        // Continue with other parents even if one fails
+      }
+    }
+
+    // Fetch all appointments in the date range (including newly generated ones)
+    const { data: allAppointments, error } = await supabase
       .from('appointments')
       .select('*')
       .eq('nutritionist_id', nutritionistId)
@@ -304,29 +359,6 @@ export class RecurringAppointmentService {
       console.error('Error fetching appointments:', error);
       throw new Error(`Failed to fetch appointments: ${error.message}`);
     }
-
-    // Find recurring parents that might need instances generated
-    const recurringParents = existingAppointments?.filter(
-      apt => apt.is_recurring && apt.parent_appointment_id === null
-    ) || [];
-
-    // Generate missing instances for each parent
-    for (const parent of recurringParents) {
-      await this.generateAndStoreMissingInstances(
-        parent.id,
-        startDate,
-        endDate
-      );
-    }
-
-    // Fetch again to get newly generated instances
-    const { data: allAppointments } = await supabase
-      .from('appointments')
-      .select('*')
-      .eq('nutritionist_id', nutritionistId)
-      .gte('start_time', startDate.toISOString())
-      .lte('start_time', endDate.toISOString())
-      .order('start_time', { ascending: true });
 
     return allAppointments || [];
   }
