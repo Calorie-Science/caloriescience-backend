@@ -34,7 +34,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       offset = '0'
     } = req.query;
 
-    // Build query - include parent appointment for child instances
+    // Build query
     let query = supabase
       .from('appointments')
       .select(`
@@ -48,15 +48,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           id,
           email,
           full_name
-        ),
-        parent_appointment:appointments!appointments_parent_appointment_id_fkey(
-          id,
-          title,
-          recurrence_pattern,
-          recurrence_status,
-          recurrence_end_date,
-          recurrence_occurrence_count,
-          google_event_id
         )
       `);
 
@@ -130,15 +121,6 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               id,
               email,
               full_name
-            ),
-            parent_appointment:appointments!appointments_parent_appointment_id_fkey(
-              id,
-              title,
-              recurrence_pattern,
-              recurrence_status,
-              recurrence_end_date,
-              recurrence_occurrence_count,
-              google_event_id
             )
           `)
           .eq('nutritionist_id', user.id);
@@ -196,24 +178,46 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
     }
 
+    // Fetch parent appointments for child instances
+    const childAppointments = (data || []).filter((apt: any) => apt.parent_appointment_id);
+    const parentIds = [...new Set(childAppointments.map((apt: any) => apt.parent_appointment_id))];
+    
+    let parentMap: { [key: string]: any } = {};
+    if (parentIds.length > 0) {
+      const { data: parents } = await supabase
+        .from('appointments')
+        .select('id, title, recurrence_pattern, recurrence_status, recurrence_end_date, recurrence_occurrence_count, google_event_id')
+        .in('id', parentIds);
+      
+      if (parents) {
+        parentMap = parents.reduce((acc: any, parent: any) => {
+          acc[parent.id] = parent;
+          return acc;
+        }, {});
+      }
+    }
+    
     // Enhance response with recurring event details
-    const enhancedData = (data || []).map((apt: any) => ({
-      ...apt,
-      recurringDetails: apt.is_recurring ? {
-        isRecurring: apt.is_recurring,
-        isParent: apt.parent_appointment_id === null,
-        isChild: apt.parent_appointment_id !== null,
-        parentAppointmentId: apt.parent_appointment_id,
-        sequenceNumber: apt.recurrence_sequence_number,
-        recurrencePattern: apt.recurrence_pattern,
-        recurrenceStatus: apt.recurrence_status,
-        recurrenceEndDate: apt.recurrence_end_date,
-        recurrenceOccurrenceCount: apt.recurrence_occurrence_count,
-        isModified: apt.is_modified || false,
-        originalTemplateData: apt.original_template_data,
-        parentAppointment: apt.parent_appointment || null
-      } : null
-    }));
+    const enhancedData = (data || []).map((apt: any) => {
+      const parentAppointment = apt.parent_appointment_id ? parentMap[apt.parent_appointment_id] : null;
+      return {
+        ...apt,
+        recurringDetails: apt.is_recurring ? {
+          isRecurring: apt.is_recurring,
+          isParent: apt.parent_appointment_id === null,
+          isChild: apt.parent_appointment_id !== null,
+          parentAppointmentId: apt.parent_appointment_id,
+          sequenceNumber: apt.recurrence_sequence_number,
+          recurrencePattern: apt.recurrence_pattern || parentAppointment?.recurrence_pattern,
+          recurrenceStatus: apt.recurrence_status,
+          recurrenceEndDate: apt.recurrence_end_date || parentAppointment?.recurrence_end_date,
+          recurrenceOccurrenceCount: apt.recurrence_occurrence_count || parentAppointment?.recurrence_occurrence_count,
+          isModified: apt.is_modified || false,
+          originalTemplateData: apt.original_template_data,
+          parentAppointment: parentAppointment || null
+        } : null
+      };
+    });
 
     return res.status(200).json({
       success: true,
