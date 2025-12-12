@@ -23,8 +23,23 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { googleCalendarService } from '../../lib/googleCalendarService';
+import { RecurringAppointmentService } from '../../lib/recurringAppointmentService';
 import { supabase } from '../../lib/supabase';
 import Joi from 'joi';
+
+const recurrencePatternSchema = Joi.object({
+  type: Joi.string().valid('daily', 'weekly', 'monthly', 'yearly').required(),
+  interval: Joi.number().integer().min(1).required(),
+  daysOfWeek: Joi.array().items(Joi.number().integer().min(0).max(6)).optional(),
+  daysOfMonth: Joi.array().items(Joi.number().integer().min(1).max(31)).optional(),
+  endDate: Joi.string().isoDate().optional(),
+  occurrenceCount: Joi.number().integer().min(1).optional()
+}).custom((value, helpers) => {
+  if (value.endDate && value.occurrenceCount) {
+    return helpers.error('any.invalid', { message: 'Cannot specify both endDate and occurrenceCount' });
+  }
+  return value;
+});
 
 const updateAppointmentSchema = Joi.object({
   appointmentId: Joi.string().uuid().required(),
@@ -38,7 +53,9 @@ const updateAppointmentSchema = Joi.object({
   notes: Joi.string().optional(),
   status: Joi.string().valid('scheduled', 'completed', 'cancelled', 'no_show', 'rescheduled').optional(),
   appointmentType: Joi.string().valid('online', 'offline').optional(),
-  additionalAttendees: Joi.array().items(Joi.string().email()).optional()
+  additionalAttendees: Joi.array().items(Joi.string().email()).optional(),
+  recurrencePattern: recurrencePatternSchema.optional(),
+  updateAllInstances: Joi.boolean().optional().default(false)
 });
 
 async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse> {
@@ -97,42 +114,89 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
     }
 
-    // Prepare updates
-    const updates: any = {
-      updated_at: new Date().toISOString()
-    };
+    // Handle recurring appointments
+    const isRecurring = appointment.is_recurring;
+    const isParent = appointment.parent_appointment_id === null;
+    const updateAllInstances = value.updateAllInstances || false;
 
-    if (value.title) updates.title = value.title;
-    if (value.description !== undefined) updates.description = value.description;
-    if (value.startTime) updates.start_time = value.startTime;
-    if (value.endTime) updates.end_time = value.endTime;
-    if (value.timezone) updates.timezone = value.timezone;
-    if (value.location !== undefined) updates.location = value.location;
-    if (value.meetingLink !== undefined) updates.meeting_link = value.meetingLink;
-    if (value.notes !== undefined) updates.notes = value.notes;
-    if (value.appointmentType) updates.appointment_type = value.appointmentType;
-    if (value.additionalAttendees !== undefined) updates.additional_attendees = value.additionalAttendees;
-    if (value.status) {
-      updates.status = value.status;
-      if (value.status === 'cancelled') {
-        updates.cancelled_at = new Date().toISOString();
+    let updatedAppointment: any;
+
+    if (isRecurring) {
+      // Use RecurringAppointmentService for recurring appointments
+      const recurringService = new RecurringAppointmentService();
+
+      // Prepare updates
+      const updates: any = {};
+      if (value.title) updates.title = value.title;
+      if (value.description !== undefined) updates.description = value.description;
+      if (value.startTime) updates.start_time = value.startTime;
+      if (value.endTime) updates.end_time = value.endTime;
+      if (value.timezone) updates.timezone = value.timezone;
+      if (value.location !== undefined) updates.location = value.location;
+      if (value.meetingLink !== undefined) updates.meeting_link = value.meetingLink;
+      if (value.notes !== undefined) updates.notes = value.notes;
+      if (value.appointmentType) updates.appointment_type = value.appointmentType;
+      if (value.additionalAttendees !== undefined) updates.additional_attendees = value.additionalAttendees;
+      if (value.status) {
+        updates.status = value.status;
+        if (value.status === 'cancelled') {
+          updates.cancelled_at = new Date().toISOString();
+        }
       }
-    }
 
-    // Update in database
-    const { data: updatedAppointment, error: updateError } = await supabase
-      .from('appointments')
-      .update(updates)
-      .eq('id', value.appointmentId)
-      .select()
-      .single();
+      // Update recurrence pattern if provided (only for parent)
+      if (value.recurrencePattern && isParent) {
+        await recurringService.updateRecurrencePattern(
+          value.appointmentId,
+          value.recurrencePattern
+        );
+      }
 
-    if (updateError) {
-      console.error('❌ Error updating appointment:', updateError);
-      return res.status(500).json({
-        error: 'Failed to update appointment',
-        message: updateError.message
-      });
+      // Update the appointment
+      updatedAppointment = await recurringService.updateRecurringAppointment(
+        value.appointmentId,
+        updates,
+        updateAllInstances && isParent
+      );
+    } else {
+      // Regular appointment update
+      const updates: any = {
+        updated_at: new Date().toISOString()
+      };
+
+      if (value.title) updates.title = value.title;
+      if (value.description !== undefined) updates.description = value.description;
+      if (value.startTime) updates.start_time = value.startTime;
+      if (value.endTime) updates.end_time = value.endTime;
+      if (value.timezone) updates.timezone = value.timezone;
+      if (value.location !== undefined) updates.location = value.location;
+      if (value.meetingLink !== undefined) updates.meeting_link = value.meetingLink;
+      if (value.notes !== undefined) updates.notes = value.notes;
+      if (value.appointmentType) updates.appointment_type = value.appointmentType;
+      if (value.additionalAttendees !== undefined) updates.additional_attendees = value.additionalAttendees;
+      if (value.status) {
+        updates.status = value.status;
+        if (value.status === 'cancelled') {
+          updates.cancelled_at = new Date().toISOString();
+        }
+      }
+
+      const { data, error: updateError } = await supabase
+        .from('appointments')
+        .update(updates)
+        .eq('id', value.appointmentId)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('❌ Error updating appointment:', updateError);
+        return res.status(500).json({
+          error: 'Failed to update appointment',
+          message: updateError.message
+        });
+      }
+
+      updatedAppointment = data;
     }
 
     console.log(`✅ Appointment updated: ${value.appointmentId}`);
@@ -153,85 +217,180 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
         );
 
         if (connection) {
-          // If status is cancelled, delete from calendar
-          if (value.status === 'cancelled') {
-            await googleCalendarService.cancelEvent(
-              appointment.nutritionist_id,
-              'nutritionist',
-              appointment.google_event_id
-            );
-            syncStatus = 'cancelled';
-          }
-          // If appointment type changed, we need to recreate the event
-          else if (value.appointmentType && value.appointmentType !== appointment.appointment_type) {
-            console.log(`🔄 Appointment type changed from ${appointment.appointment_type} to ${value.appointmentType}, recreating event...`);
-
-            // Delete old event
-            await googleCalendarService.cancelEvent(
-              appointment.nutritionist_id,
-              'nutritionist',
-              appointment.google_event_id
-            );
-
-            // Get nutritionist and client info
-            const { data: nutritionist } = await supabase
-              .from('users')
-              .select('email, first_name, last_name')
-              .eq('id', appointment.nutritionist_id)
-              .single();
-
-            let attendees = [nutritionist?.email];
-            if (appointment.client_id) {
-              const { data: client } = await supabase
-                .from('clients')
-                .select('email')
-                .eq('id', appointment.client_id)
+          // Handle recurring appointments
+          if (isRecurring && isParent) {
+            // Update recurring event in Google Calendar
+            if (value.status === 'cancelled') {
+              await googleCalendarService.cancelEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id
+              );
+              syncStatus = 'cancelled';
+            } else if (value.recurrencePattern) {
+              // Recurrence pattern changed - need to recreate recurring event
+              const { data: nutritionist } = await supabase
+                .from('users')
+                .select('email, first_name, last_name')
+                .eq('id', appointment.nutritionist_id)
                 .single();
-              if (client?.email) attendees.push(client.email);
-            }
-            if (updatedAppointment.additional_attendees && updatedAppointment.additional_attendees.length > 0) {
-              attendees.push(...updatedAppointment.additional_attendees);
-            }
 
-            // Create new event with correct type
-            const newEvent = await googleCalendarService.createEvent(
-              appointment.nutritionist_id,
-              'nutritionist',
-              {
-                summary: updatedAppointment.title,
-                description: updatedAppointment.description || '',
-                startTime: updatedAppointment.start_time,
-                endTime: updatedAppointment.end_time,
-                timezone: updatedAppointment.timezone,
-                location: updatedAppointment.location,
-                attendees: attendees,
-                meetLink: value.appointmentType === 'online' // Create Meet link only for online
+              let attendees = [nutritionist?.email];
+              if (appointment.client_id) {
+                const { data: client } = await supabase
+                  .from('clients')
+                  .select('email')
+                  .eq('id', appointment.client_id)
+                  .single();
+                if (client?.email) attendees.push(client.email);
               }
-            );
+              if (updatedAppointment.additional_attendees && updatedAppointment.additional_attendees.length > 0) {
+                attendees.push(...updatedAppointment.additional_attendees);
+              }
 
-            newGoogleEventId = newEvent.id;
-            newMeetingLink = newEvent.hangoutLink || null;
-            syncStatus = 'synced';
-            console.log(`✅ Event recreated with new type: ${value.appointmentType}`);
-          }
-          else {
-            // Regular update - no type change
-            const eventUpdates: any = {};
-            if (value.title) eventUpdates.summary = value.title;
-            if (value.description !== undefined) eventUpdates.description = value.description;
-            if (value.startTime) eventUpdates.startTime = value.startTime;
-            if (value.endTime) eventUpdates.endTime = value.endTime;
-            if (value.timezone) eventUpdates.timezone = value.timezone;
-            if (value.location !== undefined) eventUpdates.location = value.location;
+              // Delete old recurring event
+              await googleCalendarService.cancelEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id
+              );
 
-            await googleCalendarService.updateEvent(
-              appointment.nutritionist_id,
-              'nutritionist',
-              appointment.google_event_id,
-              eventUpdates
-            );
+              // Create new recurring event
+              const newEvent = await googleCalendarService.createRecurringEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                {
+                  summary: updatedAppointment.title || appointment.title,
+                  description: updatedAppointment.description || appointment.description || '',
+                  startTime: updatedAppointment.start_time || appointment.start_time,
+                  endTime: updatedAppointment.end_time || appointment.end_time,
+                  timezone: updatedAppointment.timezone || appointment.timezone,
+                  location: updatedAppointment.location || appointment.location,
+                  attendees: attendees,
+                  meetLink: (updatedAppointment.appointment_type || appointment.appointment_type) === 'online'
+                },
+                value.recurrencePattern
+              );
 
-            syncStatus = 'synced';
+              newGoogleEventId = newEvent.id;
+              newMeetingLink = newEvent.hangoutLink || null;
+              syncStatus = 'synced';
+
+              // Update parent and all children with new event ID
+              await supabase
+                .from('appointments')
+                .update({
+                  google_event_id: newGoogleEventId,
+                  meeting_link: newMeetingLink
+                })
+                .or(`id.eq.${appointment.id},parent_appointment_id.eq.${appointment.id}`);
+
+              console.log(`✅ Recurring event updated in Google Calendar`);
+            } else {
+              // Regular update to recurring event (no pattern change)
+              const eventUpdates: any = {};
+              if (value.title) eventUpdates.summary = value.title;
+              if (value.description !== undefined) eventUpdates.description = value.description;
+              if (value.startTime) eventUpdates.startTime = value.startTime;
+              if (value.endTime) eventUpdates.endTime = value.endTime;
+              if (value.timezone) eventUpdates.timezone = value.timezone;
+              if (value.location !== undefined) eventUpdates.location = value.location;
+
+              // For recurring events, we need to update the parent event
+              // Note: Google Calendar doesn't support partial updates to recurring events easily
+              // This is a simplified approach - in production you might want to handle this differently
+              await googleCalendarService.updateRecurringEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id,
+                eventUpdates,
+                updatedAppointment.recurrence_pattern || appointment.recurrence_pattern
+              );
+
+              syncStatus = 'synced';
+            }
+          } else {
+            // Non-recurring or child instance update
+            // If status is cancelled, delete from calendar
+            if (value.status === 'cancelled') {
+              await googleCalendarService.cancelEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id
+              );
+              syncStatus = 'cancelled';
+            }
+            // If appointment type changed, we need to recreate the event
+            else if (value.appointmentType && value.appointmentType !== appointment.appointment_type) {
+              console.log(`🔄 Appointment type changed from ${appointment.appointment_type} to ${value.appointmentType}, recreating event...`);
+
+              // Delete old event
+              await googleCalendarService.cancelEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id
+              );
+
+              // Get nutritionist and client info
+              const { data: nutritionist } = await supabase
+                .from('users')
+                .select('email, first_name, last_name')
+                .eq('id', appointment.nutritionist_id)
+                .single();
+
+              let attendees = [nutritionist?.email];
+              if (appointment.client_id) {
+                const { data: client } = await supabase
+                  .from('clients')
+                  .select('email')
+                  .eq('id', appointment.client_id)
+                  .single();
+                if (client?.email) attendees.push(client.email);
+              }
+              if (updatedAppointment.additional_attendees && updatedAppointment.additional_attendees.length > 0) {
+                attendees.push(...updatedAppointment.additional_attendees);
+              }
+
+              // Create new event with correct type
+              const newEvent = await googleCalendarService.createEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                {
+                  summary: updatedAppointment.title,
+                  description: updatedAppointment.description || '',
+                  startTime: updatedAppointment.start_time,
+                  endTime: updatedAppointment.end_time,
+                  timezone: updatedAppointment.timezone,
+                  location: updatedAppointment.location,
+                  attendees: attendees,
+                  meetLink: value.appointmentType === 'online' // Create Meet link only for online
+                }
+              );
+
+              newGoogleEventId = newEvent.id;
+              newMeetingLink = newEvent.hangoutLink || null;
+              syncStatus = 'synced';
+              console.log(`✅ Event recreated with new type: ${value.appointmentType}`);
+            }
+            else {
+              // Regular update - no type change
+              const eventUpdates: any = {};
+              if (value.title) eventUpdates.summary = value.title;
+              if (value.description !== undefined) eventUpdates.description = value.description;
+              if (value.startTime) eventUpdates.startTime = value.startTime;
+              if (value.endTime) eventUpdates.endTime = value.endTime;
+              if (value.timezone) eventUpdates.timezone = value.timezone;
+              if (value.location !== undefined) eventUpdates.location = value.location;
+
+              await googleCalendarService.updateEvent(
+                appointment.nutritionist_id,
+                'nutritionist',
+                appointment.google_event_id,
+                eventUpdates
+              );
+
+              syncStatus = 'synced';
+            }
           }
 
           console.log(`✅ Synced update to Google Calendar`);

@@ -34,7 +34,7 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       offset = '0'
     } = req.query;
 
-    // Build query
+    // Build query - include parent appointment for child instances
     let query = supabase
       .from('appointments')
       .select(`
@@ -48,6 +48,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           id,
           email,
           full_name
+        ),
+        parent_appointment:appointments!appointments_parent_appointment_id_fkey(
+          id,
+          title,
+          recurrence_pattern,
+          recurrence_status,
+          recurrence_end_date,
+          recurrence_occurrence_count,
+          google_event_id
         )
       `);
 
@@ -121,6 +130,15 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
               id,
               email,
               full_name
+            ),
+            parent_appointment:appointments!appointments_parent_appointment_id_fkey(
+              id,
+              title,
+              recurrence_pattern,
+              recurrence_status,
+              recurrence_end_date,
+              recurrence_occurrence_count,
+              google_event_id
             )
           `)
           .eq('nutritionist_id', user.id);
@@ -143,13 +161,33 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
           .range(offsetNum, offsetNum + limitNum - 1);
 
         const { data: updatedData } = await updatedQuery;
+        
+        // Enhance response with recurring event details
+        const enhancedData = (updatedData || []).map((apt: any) => ({
+          ...apt,
+          recurringDetails: apt.is_recurring ? {
+            isRecurring: apt.is_recurring,
+            isParent: apt.parent_appointment_id === null,
+            isChild: apt.parent_appointment_id !== null,
+            parentAppointmentId: apt.parent_appointment_id,
+            sequenceNumber: apt.recurrence_sequence_number,
+            recurrencePattern: apt.recurrence_pattern || (apt.parent_appointment?.recurrence_pattern),
+            recurrenceStatus: apt.recurrence_status,
+            recurrenceEndDate: apt.recurrence_end_date || apt.parent_appointment?.recurrence_end_date,
+            recurrenceOccurrenceCount: apt.recurrence_occurrence_count || apt.parent_appointment?.recurrence_occurrence_count,
+            isModified: apt.is_modified || false,
+            originalTemplateData: apt.original_template_data,
+            parentAppointment: apt.parent_appointment || null
+          } : null
+        }));
+
         return res.status(200).json({
           success: true,
-          data: updatedData || [],
+          data: enhancedData,
           pagination: {
             limit: limitNum,
             offset: offsetNum,
-            total: updatedData?.length || 0
+            total: enhancedData?.length || 0
           }
         });
       } catch (recurringError) {
@@ -158,13 +196,32 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
       }
     }
 
+    // Enhance response with recurring event details
+    const enhancedData = (data || []).map((apt: any) => ({
+      ...apt,
+      recurringDetails: apt.is_recurring ? {
+        isRecurring: apt.is_recurring,
+        isParent: apt.parent_appointment_id === null,
+        isChild: apt.parent_appointment_id !== null,
+        parentAppointmentId: apt.parent_appointment_id,
+        sequenceNumber: apt.recurrence_sequence_number,
+        recurrencePattern: apt.recurrence_pattern,
+        recurrenceStatus: apt.recurrence_status,
+        recurrenceEndDate: apt.recurrence_end_date,
+        recurrenceOccurrenceCount: apt.recurrence_occurrence_count,
+        isModified: apt.is_modified || false,
+        originalTemplateData: apt.original_template_data,
+        parentAppointment: apt.parent_appointment || null
+      } : null
+    }));
+
     return res.status(200).json({
       success: true,
-      data: data || [],
+      data: enhancedData,
       pagination: {
         limit: limitNum,
         offset: offsetNum,
-        total: count || data?.length || 0
+        total: count || enhancedData?.length || 0
       }
     });
   } catch (error) {

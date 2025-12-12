@@ -471,6 +471,82 @@ export class GoogleCalendarService {
   }
 
   /**
+   * Update a recurring calendar event
+   */
+  async updateRecurringEvent(
+    userId: string,
+    userType: 'nutritionist' | 'client',
+    eventId: string,
+    eventParams: Partial<CreateEventParams>,
+    recurrencePattern?: RecurrencePattern
+  ): Promise<CalendarEvent> {
+    const connection = await this.getConnection(userId, userType);
+    if (!connection) {
+      throw new Error('Google Calendar not connected');
+    }
+
+    const accessToken = await this.ensureValidToken(connection);
+    const oauth2Client = this.createOAuth2Client();
+    oauth2Client.setCredentials({ access_token: accessToken });
+
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    // Get existing event
+    const existingEvent = await calendar.events.get({
+      calendarId: connection.primaryCalendarId,
+      eventId: eventId
+    });
+
+    // Prepare updates
+    const event: any = { ...existingEvent.data };
+
+    if (eventParams.summary) event.summary = eventParams.summary;
+    if (eventParams.description !== undefined) event.description = eventParams.description;
+    if (eventParams.location !== undefined) event.location = eventParams.location;
+    if (eventParams.startTime) {
+      event.start = {
+        dateTime: eventParams.startTime,
+        timeZone: eventParams.timezone || connection.timezone || 'UTC'
+      };
+    }
+    if (eventParams.endTime) {
+      event.end = {
+        dateTime: eventParams.endTime,
+        timeZone: eventParams.timezone || connection.timezone || 'UTC'
+      };
+    }
+
+    // Update recurrence pattern if provided
+    if (recurrencePattern) {
+      const patternService = new RecurrencePatternService();
+      const startDate = eventParams.startTime ? new Date(eventParams.startTime) : new Date(event.start.dateTime);
+      const rrule = patternService.convertToGoogleRRULE(recurrencePattern, startDate);
+      event.recurrence = [rrule];
+    }
+
+    const response = await calendar.events.update({
+      calendarId: connection.primaryCalendarId,
+      eventId: eventId,
+      requestBody: event,
+      sendUpdates: 'all'
+    });
+
+    console.log(`✅ Recurring calendar event updated: ${eventId}`);
+
+    return {
+      id: response.data.id!,
+      summary: response.data.summary!,
+      description: response.data.description,
+      start: response.data.start!,
+      end: response.data.end!,
+      location: response.data.location,
+      hangoutLink: response.data.hangoutLink,
+      htmlLink: response.data.htmlLink!,
+      status: response.data.status!
+    };
+  }
+
+  /**
    * Update a calendar event
    */
   async updateEvent(

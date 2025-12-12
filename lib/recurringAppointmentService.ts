@@ -442,4 +442,157 @@ export class RecurringAppointmentService {
 
     return inserted || [];
   }
+
+  /**
+   * Update a recurring appointment (parent or child)
+   */
+  async updateRecurringAppointment(
+    appointmentId: string,
+    updates: any,
+    updateAllInstances: boolean = false
+  ): Promise<any> {
+    // Get the appointment
+    const { data: appointment, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', appointmentId)
+      .single();
+
+    if (error || !appointment) {
+      throw new Error('Appointment not found');
+    }
+
+    if (!appointment.is_recurring) {
+      throw new Error('Appointment is not a recurring appointment');
+    }
+
+    const isParent = appointment.parent_appointment_id === null;
+
+    // If updating parent and updateAllInstances is true, update all future instances
+    if (isParent && updateAllInstances) {
+      // Update parent
+      const { data: updatedParent, error: updateError } = await supabase
+        .from('appointments')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', appointmentId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Failed to update parent: ${updateError.message}`);
+      }
+
+      // Update all future child instances
+      const { data: children } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('parent_appointment_id', appointmentId)
+        .gte('start_time', new Date().toISOString());
+
+      if (children && children.length > 0) {
+        const childUpdates: any = {};
+        if (updates.title) childUpdates.title = updates.title;
+        if (updates.description !== undefined) childUpdates.description = updates.description;
+        if (updates.start_time) {
+          // Calculate duration and apply to children
+          const durationMs = new Date(updates.end_time).getTime() - new Date(updates.start_time).getTime();
+          // This would need more complex logic to update each child's time
+        }
+        if (updates.location !== undefined) childUpdates.location = updates.location;
+        if (updates.meeting_link !== undefined) childUpdates.meeting_link = updates.meeting_link;
+        if (updates.appointment_type) childUpdates.appointment_type = updates.appointment_type;
+
+        await supabase
+          .from('appointments')
+          .update(childUpdates)
+          .in('id', children.map(c => c.id));
+      }
+
+      return updatedParent;
+    } else {
+      // Update single instance (child or parent without updateAllInstances)
+      const updateData: any = {
+        ...updates,
+        updated_at: new Date().toISOString()
+      };
+
+      // If updating a child instance, mark as modified
+      if (!isParent && !appointment.is_modified) {
+        updateData.is_modified = true;
+        updateData.original_template_data = {
+          title: appointment.title,
+          description: appointment.description,
+          start_time: appointment.start_time,
+          end_time: appointment.end_time,
+          location: appointment.location,
+          meeting_link: appointment.meeting_link,
+          appointment_type: appointment.appointment_type
+        };
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from('appointments')
+        .update(updateData)
+        .eq('id', appointmentId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Failed to update appointment: ${updateError.message}`);
+      }
+
+      return updated;
+    }
+  }
+
+  /**
+   * Update recurrence pattern of a parent appointment
+   */
+  async updateRecurrencePattern(
+    parentId: string,
+    newPattern: RecurrencePattern
+  ): Promise<any> {
+    // Validate pattern
+    const validation = this.patternService.validatePattern(newPattern);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    // Get parent
+    const { data: parent, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', parentId)
+      .single();
+
+    if (error || !parent) {
+      throw new Error('Parent appointment not found');
+    }
+
+    if (!parent.is_recurring || parent.parent_appointment_id !== null) {
+      throw new Error('Appointment is not a recurring parent');
+    }
+
+    // Update parent with new pattern
+    const { data: updatedParent, error: updateError } = await supabase
+      .from('appointments')
+      .update({
+        recurrence_pattern: newPattern,
+        recurrence_end_date: newPattern.endDate || null,
+        recurrence_occurrence_count: newPattern.occurrenceCount || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', parentId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw new Error(`Failed to update recurrence pattern: ${updateError.message}`);
+    }
+
+    return updatedParent;
+  }
 }
