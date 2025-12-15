@@ -137,31 +137,56 @@ export class RecurrencePatternService {
     // For monthly patterns with specific days of month
     if (parsed.type === 'monthly' && parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
       // Find the first matching day of month on or after startDate
-      const startDay = startUtc.getUTCDate();
-      const lastDayThisMonth = new Date(Date.UTC(
-        startUtc.getUTCFullYear(),
-        startUtc.getUTCMonth() + 1,
-        0
-      )).getUTCDate();
-      const matchingDays = parsed.daysOfMonth.filter(d => d >= startDay).sort((a, b) => a - b);
+      // Strict matching: if desired day doesn't exist in current month, try next valid month
+      let currentCheck = new Date(startUtc);
+      // Safety limit to prevent infinite loops (e.g. searching for day 32)
+      const MAX_MONTHS_LOOKAHEAD = 48; // 4 years
       
-      if (matchingDays.length > 0) {
-        // Use first matching day in current month
-        const firstOccurrence = new Date(startUtc);
-        firstOccurrence.setUTCDate(Math.min(matchingDays[0], lastDayThisMonth));
-        return firstOccurrence;
-      } else {
-        // No matching day in current month, use first day of next month
-        const firstOccurrence = new Date(startUtc);
-        firstOccurrence.setUTCMonth(firstOccurrence.getUTCMonth() + parsed.interval);
-        const lastDay = new Date(Date.UTC(
-          firstOccurrence.getUTCFullYear(),
-          firstOccurrence.getUTCMonth() + 1,
-          0
-        )).getUTCDate();
-        firstOccurrence.setUTCDate(Math.min(parsed.daysOfMonth[0], lastDay));
-        return firstOccurrence;
+      // Start with current month
+      // Reset to 1st of month to allow checking all days cleanly if we moved months
+      // But for the very first check, we must be >= startUtc
+      
+      let monthsChecked = 0;
+      
+      while (monthsChecked < MAX_MONTHS_LOOKAHEAD) {
+        const currentYear = currentCheck.getUTCFullYear();
+        const currentMonth = currentCheck.getUTCMonth();
+        const lastDayThisMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
+        
+        // Potential valid days in this month
+        // Must be valid dates (<= lastDayThisMonth)
+        // Must be in parsed.daysOfMonth
+        // If it's the start month, must be >= startUtc's day
+        
+        let validDays = parsed.daysOfMonth.filter(d => d <= lastDayThisMonth);
+        
+        // If we are strictly in the start month (same year/month as startUtc)
+        if (currentYear === startUtc.getUTCFullYear() && currentMonth === startUtc.getUTCMonth()) {
+           validDays = validDays.filter(d => d >= startUtc.getUTCDate());
+        }
+        
+        validDays.sort((a, b) => a - b);
+        
+        if (validDays.length > 0) {
+          // Found a match in this month
+          currentCheck.setUTCDate(validDays[0]);
+          return currentCheck;
+        }
+        
+        // Move to next interval month
+        // Reset to 1st of that month to ensure valid date math
+        // But we must move from the 'base' month alignment if we want strictly regular intervals?
+        // Actually, simple iterative jump is safest for "find next valid".
+        
+        // Reset to 1st of current month first to avoid overflow when adding months
+        currentCheck.setUTCDate(1); 
+        currentCheck.setUTCMonth(currentCheck.getUTCMonth() + parsed.interval);
+        monthsChecked++;
       }
+      
+      // If loop finishes without match, return startUtc as fallback (or null?)
+      // Fallback to startUtc matches old behavior
+      return startUtc;
     }
 
     // For daily, yearly, or weekly without specific days
@@ -217,32 +242,89 @@ export class RecurrencePatternService {
           const currentDay = currentDate.getUTCDate();
           const currentMonth = currentDate.getUTCMonth();
           const currentYear = currentDate.getUTCFullYear();
+          const lastDayThisMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
           
-          // Find next matching day in current month
-          const matchingDays = parsed.daysOfMonth.filter(d => d > currentDay).sort((a, b) => a - b);
+          // 1. Try to find a later day in the CURRENT month
+          // Filter days > currentDay AND days that effectively exist in this month
+          const remainingDays = parsed.daysOfMonth
+            .filter(d => d > currentDay && d <= lastDayThisMonth)
+            .sort((a, b) => a - b);
           
-          if (matchingDays.length > 0) {
-            // Use next matching day in current month
-            const lastDayOfMonth = new Date(Date.UTC(
-              currentYear,
-              currentMonth + 1,
-              0
-            )).getUTCDate();
-            nextDate.setUTCDate(Math.min(matchingDays[0], lastDayOfMonth));
-          } else {
-            // Move to next month and use first matching day
-            nextDate.setUTCMonth(currentMonth + parsed.interval);
-            const lastDayOfMonth = new Date(Date.UTC(
-              nextDate.getUTCFullYear(),
-              nextDate.getUTCMonth() + 1,
-              0
-            )).getUTCDate();
-            const firstMatchingDay = Math.min(parsed.daysOfMonth[0], lastDayOfMonth);
-            nextDate.setUTCDate(firstMatchingDay);
+          if (remainingDays.length > 0) {
+            nextDate.setUTCDate(remainingDays[0]);
+            return nextDate;
           }
+
+          // 2. If no more days in this month, jump by interval and find first valid day
+          // Strict skipping: if target month has no valid day, keep jumping by interval
+          
+          let monthsAdded = 0;
+          const MAX_LOOPS = 48; // Safety break
+          
+          // Start looking from next interval
+          let foundNext = false;
+          let checkDate = new Date(nextDate);
+          
+          // Reset to 1st to ensure clean month addition
+          checkDate.setUTCDate(1); 
+          
+          while (!foundNext && monthsAdded < MAX_LOOPS) {
+             // Jump to next interval month
+             checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
+             monthsAdded++;
+             
+             const cYear = checkDate.getUTCFullYear();
+             const cMonth = checkDate.getUTCMonth();
+             const cLastDay = new Date(Date.UTC(cYear, cMonth + 1, 0)).getUTCDate();
+             
+             // Find first day in daysOfMonth that exists in this month
+             const validDays = parsed.daysOfMonth
+               .filter(d => d <= cLastDay)
+               .sort((a, b) => a - b);
+               
+             if (validDays.length > 0) {
+               checkDate.setUTCDate(validDays[0]);
+               nextDate.setTime(checkDate.getTime());
+               foundNext = true;
+             }
+             // If not found, loop continues to next interval month
+          }
+          
+          // If we exhausted loops (very rare edge case like day 32), just return simple addition
+          if (!foundNext) {
+             nextDate.setUTCMonth(nextDate.getUTCMonth() + parsed.interval);
+          }
+          
         } else {
           // Same day of month, next interval months
-          nextDate.setUTCMonth(nextDate.getUTCMonth() + parsed.interval);
+          // Strict check for simple monthly (e.g. created on 31st, interval 1)
+          
+          let checkDate = new Date(nextDate);
+          let targetDay = checkDate.getUTCDate(); // e.g. 31
+          
+          let monthsAdded = 0;
+          let foundNext = false;
+          const MAX_LOOPS = 48;
+          
+          // Start with next interval
+          checkDate.setUTCDate(1); // Reset to 1st
+          
+          while (!foundNext && monthsAdded < MAX_LOOPS) {
+            checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
+            monthsAdded++;
+            
+            const cLastDay = new Date(Date.UTC(checkDate.getUTCFullYear(), checkDate.getUTCMonth() + 1, 0)).getUTCDate();
+            
+            if (targetDay <= cLastDay) {
+              checkDate.setUTCDate(targetDay);
+              nextDate.setTime(checkDate.getTime());
+              foundNext = true;
+            }
+          }
+          
+          if (!foundNext) {
+             nextDate.setUTCMonth(nextDate.getUTCMonth() + parsed.interval);
+          }
         }
         break;
 
