@@ -392,22 +392,32 @@ export class RecurringAppointmentService {
     const parentStart = new Date(parent.start_time);
     const generationStart = parentStart > startDate ? parentStart : startDate;
 
+    // Use the parent's time-of-day as the anchor to avoid midnight shifts
+    const parentStartTime = new Date(parent.start_time);
+    const generationStartWithTime = new Date(generationStart);
+    generationStartWithTime.setUTCHours(
+      parentStartTime.getUTCHours(),
+      parentStartTime.getUTCMinutes(),
+      parentStartTime.getUTCSeconds(),
+      parentStartTime.getUTCMilliseconds()
+    );
+
     // Check what's already stored in this range
     const { data: existing } = await supabase
       .from('appointments')
       .select('start_time')
       .eq('parent_appointment_id', parentId)
-      .gte('start_time', generationStart.toISOString())
+      .gte('start_time', generationStartWithTime.toISOString())
       .lte('start_time', endDate.toISOString());
 
     const existingDates = new Set(
       existing?.map(apt => new Date(apt.start_time).toISOString().split('T')[0]) || []
     );
 
-    // Generate dates for range
+    // Generate dates for range using the anchored time
     const dates = this.patternService.generateDates(
       parent.recurrence_pattern,
-      generationStart,
+      generationStartWithTime,
       endDate
     );
 
