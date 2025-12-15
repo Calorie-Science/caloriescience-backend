@@ -236,7 +236,8 @@ export class RecurringAppointmentService {
     const dates = this.patternService.generateDates(
       data.recurrencePattern,
       startDate,
-      endDate
+      endDate,
+      data.timezone
     );
 
     // Skip the first date (it's the parent)
@@ -428,7 +429,8 @@ export class RecurringAppointmentService {
     const dates = this.patternService.generateDates(
       parent.recurrence_pattern,
       generationStartWithTime,
-      endDate
+      endDate,
+      parent.timezone
     );
 
     // Filter out existing dates and parent date

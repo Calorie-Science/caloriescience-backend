@@ -48,12 +48,61 @@ export class RecurrencePatternService {
   }
 
   /**
+   * Helper to get local date parts
+   */
+  private getLocalParts(date: Date, timezone?: string) {
+    if (!timezone || timezone === 'UTC') {
+      return {
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth(),
+        day: date.getUTCDate(),
+        weekday: date.getUTCDay()
+      };
+    }
+
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        weekday: 'short',
+        hour12: false
+      }).formatToParts(date);
+
+      const partMap: any = {};
+      parts.forEach(p => partMap[p.type] = p.value);
+
+      // Weekday map: Sun=0 ... Sat=6
+      const weekdayMap: {[key: string]: number} = {
+        'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
+      };
+
+      return {
+        year: parseInt(partMap.year),
+        month: parseInt(partMap.month) - 1, // 0-11
+        day: parseInt(partMap.day),
+        weekday: weekdayMap[partMap.weekday]
+      };
+    } catch (e) {
+      // Fallback to UTC if timezone invalid
+      return {
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth(),
+        day: date.getUTCDate(),
+        weekday: date.getUTCDay()
+      };
+    }
+  }
+
+  /**
    * Generate dates based on recurrence pattern
    */
   generateDates(
     pattern: RecurrencePattern,
     startDate: Date,
-    endDate?: Date
+    endDate?: Date,
+    timezone?: string
   ): Date[] {
     const parsed = this.parseRecurrencePattern(pattern);
     const dates: Date[] = [];
@@ -61,7 +110,7 @@ export class RecurrencePatternService {
     const maxOccurrences = parsed.occurrenceCount || Infinity;
 
     // Find the first occurrence on or after the requested start date
-    let currentDate = this.findFirstOccurrenceOnOrAfter(pattern, startDate);
+    let currentDate = this.findFirstOccurrenceOnOrAfter(pattern, startDate, timezone);
     let occurrenceCount = 0;
 
     while (currentDate <= maxDate && occurrenceCount < maxOccurrences) {
@@ -69,7 +118,7 @@ export class RecurrencePatternService {
       occurrenceCount++;
 
       // Calculate next date based on pattern
-      currentDate = this.getNextDate(currentDate, parsed);
+      currentDate = this.getNextDate(currentDate, parsed, timezone);
     }
 
     return dates;
@@ -103,10 +152,11 @@ export class RecurrencePatternService {
   /**
    * Find first occurrence date on or after startDate
    */
-  private findFirstOccurrenceOnOrAfter(pattern: RecurrencePattern, startDate: Date): Date {
+  private findFirstOccurrenceOnOrAfter(pattern: RecurrencePattern, startDate: Date, timezone?: string): Date {
     const parsed = this.parseRecurrencePattern(pattern);
 
-    // Work in UTC to avoid timezone-induced day shifts
+    // Work in UTC to avoid timezone-induced day shifts (base calculation)
+    // But verify against Local Parts if timezone provided
     const toUTC = (d: Date) =>
       new Date(Date.UTC(
         d.getUTCFullYear(),
@@ -196,8 +246,8 @@ export class RecurrencePatternService {
   /**
    * Get next date based on pattern
    */
-  private getNextDate(currentDate: Date, parsed: ParsedPattern): Date {
-    // Work in UTC to avoid timezone shifts
+  private getNextDate(currentDate: Date, parsed: ParsedPattern, timezone?: string): Date {
+    // Work in UTC to avoid timezone shifts (copy)
     const nextDate = new Date(Date.UTC(
       currentDate.getUTCFullYear(),
       currentDate.getUTCMonth(),
@@ -221,7 +271,8 @@ export class RecurrencePatternService {
           while (!found && daysToAdd <= 7 * parsed.interval) {
             const testDate = new Date(currentDate);
             testDate.setUTCDate(testDate.getUTCDate() + daysToAdd);
-            if (parsed.daysOfWeek.includes(testDate.getUTCDay())) {
+            const local = this.getLocalParts(testDate, timezone);
+            if (parsed.daysOfWeek.includes(local.weekday)) {
               nextDate.setTime(testDate.getTime());
               found = true;
             } else {
@@ -239,9 +290,13 @@ export class RecurrencePatternService {
 
       case 'monthly':
         if (parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
-          const currentDay = currentDate.getUTCDate();
-          const currentMonth = currentDate.getUTCMonth();
-          const currentYear = currentDate.getUTCFullYear();
+          const local = this.getLocalParts(currentDate, timezone);
+          const currentDay = local.day;
+          
+          // Note: using UTC month end for safety approx, assuming local month length ~ UTC month length
+          // Ideally should use Local Month End
+          const currentYear = local.year;
+          const currentMonth = local.month;
           const lastDayThisMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
           
           // 1. Try to find a later day in the CURRENT month
@@ -251,7 +306,9 @@ export class RecurrencePatternService {
             .sort((a, b) => a - b);
           
           if (remainingDays.length > 0) {
-            nextDate.setUTCDate(remainingDays[0]);
+            // Found next day in same month
+            const diff = remainingDays[0] - currentDay;
+            nextDate.setUTCDate(nextDate.getUTCDate() + diff);
             return nextDate;
           }
 
@@ -273,8 +330,9 @@ export class RecurrencePatternService {
              checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
              monthsAdded++;
              
-             const cYear = checkDate.getUTCFullYear();
-             const cMonth = checkDate.getUTCMonth();
+             const cLocal = this.getLocalParts(checkDate, timezone);
+             const cYear = cLocal.year;
+             const cMonth = cLocal.month;
              const cLastDay = new Date(Date.UTC(cYear, cMonth + 1, 0)).getUTCDate();
              
              // Find first day in daysOfMonth that exists in this month
@@ -283,7 +341,11 @@ export class RecurrencePatternService {
                .sort((a, b) => a - b);
                
              if (validDays.length > 0) {
-               checkDate.setUTCDate(validDays[0]);
+               // Found valid day in target month
+               // Set checkDate to that day
+               const diff = validDays[0] - cLocal.day;
+               checkDate.setUTCDate(checkDate.getUTCDate() + diff);
+               
                nextDate.setTime(checkDate.getTime());
                foundNext = true;
              }
@@ -300,7 +362,8 @@ export class RecurrencePatternService {
           // Strict check for simple monthly (e.g. created on 31st, interval 1)
           
           let checkDate = new Date(nextDate);
-          let targetDay = checkDate.getUTCDate(); // e.g. 31
+          const startLocal = this.getLocalParts(checkDate, timezone);
+          let targetDay = startLocal.day; // e.g. 31
           
           let monthsAdded = 0;
           let foundNext = false;
@@ -313,10 +376,15 @@ export class RecurrencePatternService {
             checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
             monthsAdded++;
             
-            const cLastDay = new Date(Date.UTC(checkDate.getUTCFullYear(), checkDate.getUTCMonth() + 1, 0)).getUTCDate();
+            const cLocal = this.getLocalParts(checkDate, timezone);
+            const cYear = cLocal.year;
+            const cMonth = cLocal.month;
+            const cLastDay = new Date(Date.UTC(cYear, cMonth + 1, 0)).getUTCDate();
             
             if (targetDay <= cLastDay) {
-              checkDate.setUTCDate(targetDay);
+               const diff = targetDay - cLocal.day;
+               checkDate.setUTCDate(checkDate.getUTCDate() + diff);
+               
               nextDate.setTime(checkDate.getTime());
               foundNext = true;
             }
@@ -327,6 +395,7 @@ export class RecurrencePatternService {
           }
         }
         break;
+
 
       case 'yearly':
         nextDate.setUTCFullYear(nextDate.getUTCFullYear() + parsed.interval);
