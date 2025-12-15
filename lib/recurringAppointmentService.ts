@@ -333,6 +333,16 @@ export class RecurringAppointmentService {
         continue;
       }
 
+      // Clamp generation end to the parent's recurrence end date (inclusive)
+      let effectiveEndDate = endDate;
+      if (parentEndDate) {
+        const parentEndOfDay = new Date(parentEndDate);
+        parentEndOfDay.setUTCHours(23, 59, 59, 999);
+        if (parentEndOfDay < effectiveEndDate) {
+          effectiveEndDate = parentEndOfDay;
+        }
+      }
+
       // Generate instances for this parent in the requested range
       try {
         // Never generate before the parent starts
@@ -340,7 +350,7 @@ export class RecurringAppointmentService {
         await this.generateAndStoreMissingInstances(
           parent.id,
           effectiveStartDate,
-          endDate
+          effectiveEndDate
         );
       } catch (error) {
         console.error(`Error generating instances for parent ${parent.id}:`, error);

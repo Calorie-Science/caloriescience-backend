@@ -32,6 +32,11 @@ export class RecurrencePatternService {
       daysOfMonth = [(pattern as any).dayOfMonth];
     }
 
+    // Normalize daysOfMonth: sort and dedupe to avoid skips
+    if (daysOfMonth && daysOfMonth.length > 0) {
+      daysOfMonth = Array.from(new Set(daysOfMonth)).sort((a, b) => a - b);
+    }
+
     return {
       type: pattern.type,
       interval: pattern.interval || 1,
@@ -133,12 +138,17 @@ export class RecurrencePatternService {
     if (parsed.type === 'monthly' && parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
       // Find the first matching day of month on or after startDate
       const startDay = startUtc.getUTCDate();
+      const lastDayThisMonth = new Date(Date.UTC(
+        startUtc.getUTCFullYear(),
+        startUtc.getUTCMonth() + 1,
+        0
+      )).getUTCDate();
       const matchingDays = parsed.daysOfMonth.filter(d => d >= startDay).sort((a, b) => a - b);
       
       if (matchingDays.length > 0) {
         // Use first matching day in current month
         const firstOccurrence = new Date(startUtc);
-        firstOccurrence.setUTCDate(matchingDays[0]);
+        firstOccurrence.setUTCDate(Math.min(matchingDays[0], lastDayThisMonth));
         return firstOccurrence;
       } else {
         // No matching day in current month, use first day of next month
@@ -213,7 +223,12 @@ export class RecurrencePatternService {
           
           if (matchingDays.length > 0) {
             // Use next matching day in current month
-            nextDate.setUTCDate(matchingDays[0]);
+            const lastDayOfMonth = new Date(Date.UTC(
+              currentYear,
+              currentMonth + 1,
+              0
+            )).getUTCDate();
+            nextDate.setUTCDate(Math.min(matchingDays[0], lastDayOfMonth));
           } else {
             // Move to next month and use first matching day
             nextDate.setUTCMonth(currentMonth + parsed.interval);
