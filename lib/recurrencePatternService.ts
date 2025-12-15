@@ -55,7 +55,8 @@ export class RecurrencePatternService {
     const maxDate = endDate || parsed.endDate || new Date('2099-12-31');
     const maxOccurrences = parsed.occurrenceCount || Infinity;
 
-    let currentDate = new Date(startDate);
+    // Find the first occurrence on or after the requested start date
+    let currentDate = this.findFirstOccurrenceOnOrAfter(pattern, startDate);
     let occurrenceCount = 0;
 
     while (currentDate <= maxDate && occurrenceCount < maxOccurrences) {
@@ -81,7 +82,7 @@ export class RecurrencePatternService {
     const endOfMonth = new Date(year, month, 0, 23, 59, 59);
 
     // Find the first occurrence date (could be before this month)
-    const firstDate = this.findFirstOccurrence(pattern, startOfMonth);
+    const firstDate = this.findFirstOccurrenceOnOrAfter(pattern, startOfMonth);
     
     // Generate all dates from first occurrence to end of month
     const allDates = this.generateDates(pattern, firstDate, endOfMonth);
@@ -95,24 +96,24 @@ export class RecurrencePatternService {
   }
 
   /**
-   * Find first occurrence date (could be before startDate)
+   * Find first occurrence date on or after startDate
    */
-  private findFirstOccurrence(pattern: RecurrencePattern, startDate: Date): Date {
+  private findFirstOccurrenceOnOrAfter(pattern: RecurrencePattern, startDate: Date): Date {
     const parsed = this.parseRecurrencePattern(pattern);
-    const startTime = startDate.getTime();
-    const startDayOfWeek = startDate.getDay();
-    const startDayOfMonth = startDate.getDate();
 
-    // For weekly patterns with specific days, find the first matching day
+    // For weekly patterns with specific days, find the first matching day on/after startDate
     if (parsed.type === 'weekly' && parsed.daysOfWeek && parsed.daysOfWeek.length > 0) {
-      // Find the first matching day of week on or before startDate
       let current = new Date(startDate);
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < 7 * parsed.interval; i++) {
         if (parsed.daysOfWeek.includes(current.getDay())) {
           return current;
         }
-        current.setDate(current.getDate() - 1);
+        current.setDate(current.getDate() + 1);
       }
+      // Fallback: add interval weeks
+      const fallback = new Date(startDate);
+      fallback.setDate(fallback.getDate() + 7 * parsed.interval);
+      return fallback;
     }
 
     // For monthly patterns with specific days of month
