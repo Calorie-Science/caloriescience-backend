@@ -229,7 +229,8 @@ export class RecurrencePatternService {
         // Actually, simple iterative jump is safest for "find next valid".
         
         // Reset to 1st of current month first to avoid overflow when adding months
-        currentCheck.setUTCDate(1); 
+        // Use 15th to be safe in the middle of month for timezone stability
+        currentCheck.setUTCDate(15); 
         currentCheck.setUTCMonth(currentCheck.getUTCMonth() + parsed.interval);
         monthsChecked++;
       }
@@ -322,8 +323,8 @@ export class RecurrencePatternService {
           let foundNext = false;
           let checkDate = new Date(nextDate);
           
-          // Reset to 1st to ensure clean month addition
-          checkDate.setUTCDate(1); 
+          // Reset to 15th to ensure clean month addition (middle of month)
+          checkDate.setUTCDate(15); 
           
           while (!foundNext && monthsAdded < MAX_LOOPS) {
              // Jump to next interval month
@@ -370,7 +371,7 @@ export class RecurrencePatternService {
           const MAX_LOOPS = 48;
           
           // Start with next interval
-          checkDate.setUTCDate(1); // Reset to 1st
+          checkDate.setUTCDate(15); // Reset to 15th
           
           while (!foundNext && monthsAdded < MAX_LOOPS) {
             checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
