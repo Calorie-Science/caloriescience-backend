@@ -3,6 +3,8 @@
  * Handles parsing recurrence patterns and generating dates
  */
 
+import { DateTime } from 'luxon';
+
 export interface RecurrencePattern {
   type: 'daily' | 'weekly' | 'monthly' | 'yearly';
   interval: number; // Every N days/weeks/months/years
@@ -48,77 +50,35 @@ export class RecurrencePatternService {
   }
 
   /**
-   * Helper to get local date parts
-   */
-  private getLocalParts(date: Date, timezone?: string) {
-    if (!timezone || timezone === 'UTC') {
-      return {
-        year: date.getUTCFullYear(),
-        month: date.getUTCMonth(),
-        day: date.getUTCDate(),
-        weekday: date.getUTCDay()
-      };
-    }
-
-    try {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: 'numeric',
-        day: 'numeric',
-        weekday: 'short',
-        hour12: false
-      }).formatToParts(date);
-
-      const partMap: any = {};
-      parts.forEach(p => partMap[p.type] = p.value);
-
-      // Weekday map: Sun=0 ... Sat=6
-      const weekdayMap: {[key: string]: number} = {
-        'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
-      };
-
-      return {
-        year: parseInt(partMap.year),
-        month: parseInt(partMap.month) - 1, // 0-11
-        day: parseInt(partMap.day),
-        weekday: weekdayMap[partMap.weekday]
-      };
-    } catch (e) {
-      // Fallback to UTC if timezone invalid
-      return {
-        year: date.getUTCFullYear(),
-        month: date.getUTCMonth(),
-        day: date.getUTCDate(),
-        weekday: date.getUTCDay()
-      };
-    }
-  }
-
-  /**
    * Generate dates based on recurrence pattern
    */
   generateDates(
     pattern: RecurrencePattern,
     startDate: Date,
     endDate?: Date,
-    timezone?: string
+    timezone: string = 'UTC'
   ): Date[] {
     const parsed = this.parseRecurrencePattern(pattern);
     const dates: Date[] = [];
-    const maxDate = endDate || parsed.endDate || new Date('2099-12-31');
+    const maxDate = endDate ? DateTime.fromJSDate(endDate).toUTC() : 
+                    parsed.endDate ? DateTime.fromJSDate(parsed.endDate).toUTC() : 
+                    DateTime.fromISO('2099-12-31').toUTC();
     const maxOccurrences = parsed.occurrenceCount || Infinity;
 
-    // Find the first occurrence on or after the requested start date
-    let currentDate = this.findFirstOccurrenceOnOrAfter(pattern, startDate, timezone);
+    // Start iteration using Luxon DateTime in the target timezone
+    // This preserves wall-clock time (e.g. 10:00 AM stays 10:00 AM)
+    let currentDt = this.findFirstOccurrenceOnOrAfter(pattern, startDate, timezone);
     let occurrenceCount = 0;
 
-    while (currentDate <= maxDate && occurrenceCount < maxOccurrences) {
-      dates.push(new Date(currentDate));
+    // Convert maxDate to millis for safe comparison
+    const maxTime = maxDate.toMillis();
+
+    while (currentDt.toUTC().toMillis() <= maxTime && occurrenceCount < maxOccurrences) {
+      dates.push(currentDt.toJSDate());
       occurrenceCount++;
 
       // Calculate next date based on pattern
-      currentDate = this.getNextDate(currentDate, parsed, timezone);
+      currentDt = this.getNextDate(currentDt, parsed, timezone);
     }
 
     return dates;
@@ -130,280 +90,168 @@ export class RecurrencePatternService {
   generateDatesForMonth(
     pattern: RecurrencePattern,
     month: number, // 1-12
-    year: number
+    year: number,
+    timezone: string = 'UTC'
   ): Date[] {
-    const startOfMonth = new Date(year, month - 1, 1);
-    const endOfMonth = new Date(year, month, 0, 23, 59, 59);
+    const startOfMonth = DateTime.fromObject({ year, month, day: 1 }, { zone: timezone }).startOf('day').toJSDate();
+    const endOfMonth = DateTime.fromObject({ year, month, day: 1 }, { zone: timezone }).endOf('month').endOf('day').toJSDate();
 
     // Find the first occurrence date (could be before this month)
-    const firstDate = this.findFirstOccurrenceOnOrAfter(pattern, startOfMonth);
+    const firstDate = this.findFirstOccurrenceOnOrAfter(pattern, new RecurrencePatternService().parseRecurrencePattern(pattern).type === 'monthly' ? startOfMonth : startOfMonth, timezone).toJSDate();
     
     // Generate all dates from first occurrence to end of month
-    const allDates = this.generateDates(pattern, firstDate, endOfMonth);
+    const allDates = this.generateDates(pattern, firstDate, endOfMonth, timezone);
 
     // Filter to only dates in the requested month
     return allDates.filter(date => {
-      const dateMonth = date.getMonth() + 1;
-      const dateYear = date.getFullYear();
-      return dateMonth === month && dateYear === year;
+      const dt = DateTime.fromJSDate(date).setZone(timezone);
+      return dt.month === month && dt.year === year;
     });
   }
 
   /**
    * Find first occurrence date on or after startDate
    */
-  private findFirstOccurrenceOnOrAfter(pattern: RecurrencePattern, startDate: Date, timezone?: string): Date {
+  private findFirstOccurrenceOnOrAfter(pattern: RecurrencePattern, startDate: Date, timezone: string = 'UTC'): DateTime {
     const parsed = this.parseRecurrencePattern(pattern);
-
-    // Work in UTC to avoid timezone-induced day shifts (base calculation)
-    // But verify against Local Parts if timezone provided
-    const toUTC = (d: Date) =>
-      new Date(Date.UTC(
-        d.getUTCFullYear(),
-        d.getUTCMonth(),
-        d.getUTCDate(),
-        d.getUTCHours(),
-        d.getUTCMinutes(),
-        d.getUTCSeconds(),
-        d.getUTCMilliseconds()
-      ));
-    const startUtc = toUTC(startDate);
-
-    // For weekly patterns with specific days, find the first matching day on/after startDate
+    
+    // Convert input JS Date (UTC instant) to Luxon DateTime in Target Zone
+    const startDt = DateTime.fromJSDate(startDate).setZone(timezone);
+    
+    // For weekly patterns
     if (parsed.type === 'weekly' && parsed.daysOfWeek && parsed.daysOfWeek.length > 0) {
-      let current = new Date(startUtc);
+      let current = startDt;
+      // Luxon weekday: 1=Mon ... 7=Sun.
+      // Input daysOfWeek: 0=Sun ... 6=Sat.
+      // Map input (0-6) to Luxon (1-7): 0->7, 1->1, 2->2 ... 6->6.
+      const targetLuxonWeekdays = parsed.daysOfWeek.map(d => d === 0 ? 7 : d);
+      
       for (let i = 0; i < 7 * parsed.interval; i++) {
-        if (parsed.daysOfWeek.includes(current.getUTCDay())) {
+        if (targetLuxonWeekdays.includes(current.weekday)) {
           return current;
         }
-        current.setUTCDate(current.getUTCDate() + 1);
+        current = current.plus({ days: 1 });
       }
-      // Fallback: add interval weeks
-      const fallback = new Date(startUtc);
-      fallback.setUTCDate(fallback.getUTCDate() + 7 * parsed.interval);
-      return fallback;
+      // Fallback
+      return startDt.plus({ weeks: parsed.interval });
     }
 
-    // For monthly patterns with specific days of month
+    // For monthly patterns
     if (parsed.type === 'monthly' && parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
-      // Find the first matching day of month on or after startDate
-      // Strict matching: if desired day doesn't exist in current month, try next valid month
-      let currentCheck = new Date(startUtc);
-      // Safety limit to prevent infinite loops (e.g. searching for day 32)
-      const MAX_MONTHS_LOOKAHEAD = 48; // 4 years
+      // Logic: Start at startDt. Check if day is valid. If not, scan forward.
+      // Strict skipping: if month doesn't have the day, skip month.
       
-      // Start with current month
-      // Reset to 1st of month to allow checking all days cleanly if we moved months
-      // But for the very first check, we must be >= startUtc
-      
+      let currentCheck = startDt;
+      const MAX_MONTHS_LOOKAHEAD = 48;
       let monthsChecked = 0;
       
+      // If we start on a day > max daysOfMonth, we might need to jump immediately?
+      // No, check current month first.
+      
       while (monthsChecked < MAX_MONTHS_LOOKAHEAD) {
-        const currentYear = currentCheck.getUTCFullYear();
-        const currentMonth = currentCheck.getUTCMonth();
-        const lastDayThisMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
+        const daysInMonth = currentCheck.daysInMonth || 30; // Safety fallback
         
-        // Potential valid days in this month
-        // Must be valid dates (<= lastDayThisMonth)
-        // Must be in parsed.daysOfMonth
-        // If it's the start month, must be >= startUtc's day
+        // Find valid days in this month
+        // Must be <= daysInMonth
+        // If it's the start month (same year/month), must be >= startDt.day
+        // BUT strict comparison: year/month match.
         
-        let validDays = parsed.daysOfMonth.filter(d => d <= lastDayThisMonth);
+        const isStartMonth = currentCheck.hasSame(startDt, 'month') && currentCheck.hasSame(startDt, 'year');
         
-        // If we are strictly in the start month (same year/month as startUtc)
-        if (currentYear === startUtc.getUTCFullYear() && currentMonth === startUtc.getUTCMonth()) {
-           validDays = validDays.filter(d => d >= startUtc.getUTCDate());
+        let validDays = parsed.daysOfMonth.filter(d => d <= daysInMonth);
+        if (isStartMonth) {
+          validDays = validDays.filter(d => d >= startDt.day);
         }
-        
         validDays.sort((a, b) => a - b);
         
         if (validDays.length > 0) {
-          // Found a match in this month
-          currentCheck.setUTCDate(validDays[0]);
-          return currentCheck;
+          // Found a match!
+          // Construct date: keep year/month, set day to validDays[0]
+          // Preserve TIME from startDt (wall clock time)
+          const result = currentCheck.set({ day: validDays[0] });
+          if (result.isValid) return result;
         }
         
-        // Move to next interval month
-        // Reset to 1st of that month to ensure valid date math
-        // But we must move from the 'base' month alignment if we want strictly regular intervals?
-        // Actually, simple iterative jump is safest for "find next valid".
-        
-        // Reset to 1st of current month first to avoid overflow when adding months
-        // Use 15th to be safe in the middle of month for timezone stability
-        currentCheck.setUTCDate(15); 
-        currentCheck.setUTCMonth(currentCheck.getUTCMonth() + parsed.interval);
+        // Move to next month (interval)
+        // Reset to day 1 to be safe for month arithmetic
+        currentCheck = currentCheck.set({ day: 1 }).plus({ months: parsed.interval });
         monthsChecked++;
       }
-      
-      // If loop finishes without match, return startUtc as fallback (or null?)
-      // Fallback to startUtc matches old behavior
-      return startUtc;
+      return startDt;
     }
-
-    // For daily, yearly, or weekly without specific days
-    return startUtc;
+    
+    // For daily/yearly
+    return startDt;
   }
 
   /**
    * Get next date based on pattern
    */
-  private getNextDate(currentDate: Date, parsed: ParsedPattern, timezone?: string): Date {
-    // Work in UTC to avoid timezone shifts (copy)
-    const nextDate = new Date(Date.UTC(
-      currentDate.getUTCFullYear(),
-      currentDate.getUTCMonth(),
-      currentDate.getUTCDate(),
-      currentDate.getUTCHours(),
-      currentDate.getUTCMinutes(),
-      currentDate.getUTCSeconds(),
-      currentDate.getUTCMilliseconds()
-    ));
-
+  private getNextDate(currentDt: DateTime, parsed: ParsedPattern, timezone: string = 'UTC'): DateTime {
+    // CurrentDt is already in Target Zone (Luxon)
+    
     switch (parsed.type) {
       case 'daily':
-        nextDate.setUTCDate(nextDate.getUTCDate() + parsed.interval);
-        break;
+        return currentDt.plus({ days: parsed.interval });
 
       case 'weekly':
         if (parsed.daysOfWeek && parsed.daysOfWeek.length > 0) {
-          // Find next matching day of week
-          let daysToAdd = 1;
-          let found = false;
-          while (!found && daysToAdd <= 7 * parsed.interval) {
-            const testDate = new Date(currentDate);
-            testDate.setUTCDate(testDate.getUTCDate() + daysToAdd);
-            const local = this.getLocalParts(testDate, timezone);
-            if (parsed.daysOfWeek.includes(local.weekday)) {
-              nextDate.setTime(testDate.getTime());
-              found = true;
-            } else {
-              daysToAdd++;
+          const targetLuxonWeekdays = parsed.daysOfWeek.map(d => d === 0 ? 7 : d);
+          let next = currentDt.plus({ days: 1 });
+          let daysAdded = 1;
+          
+          while (daysAdded <= 7 * parsed.interval) {
+            if (targetLuxonWeekdays.includes(next.weekday)) {
+              return next;
             }
+            next = next.plus({ days: 1 });
+            daysAdded++;
           }
-          if (!found) {
-            // Fallback: add interval weeks
-            nextDate.setUTCDate(nextDate.getUTCDate() + 7 * parsed.interval);
-          }
-        } else {
-          nextDate.setUTCDate(nextDate.getUTCDate() + 7 * parsed.interval);
+          return currentDt.plus({ weeks: parsed.interval });
         }
-        break;
+        return currentDt.plus({ weeks: parsed.interval });
 
       case 'monthly':
         if (parsed.daysOfMonth && parsed.daysOfMonth.length > 0) {
-          const local = this.getLocalParts(currentDate, timezone);
-          const currentDay = local.day;
+          // 1. Try later days in current month
+          const currentDay = currentDt.day;
+          const daysInMonth = currentDt.daysInMonth || 30;
           
-          // Note: using UTC month end for safety approx, assuming local month length ~ UTC month length
-          // Ideally should use Local Month End
-          const currentYear = local.year;
-          const currentMonth = local.month;
-          const lastDayThisMonth = new Date(Date.UTC(currentYear, currentMonth + 1, 0)).getUTCDate();
-          
-          // 1. Try to find a later day in the CURRENT month
-          // Filter days > currentDay AND days that effectively exist in this month
           const remainingDays = parsed.daysOfMonth
-            .filter(d => d > currentDay && d <= lastDayThisMonth)
+            .filter(d => d > currentDay && d <= daysInMonth)
             .sort((a, b) => a - b);
-          
+            
           if (remainingDays.length > 0) {
-            // Found next day in same month
-            const diff = remainingDays[0] - currentDay;
-            nextDate.setUTCDate(nextDate.getUTCDate() + diff);
-            return nextDate;
+            return currentDt.set({ day: remainingDays[0] });
           }
-
-          // 2. If no more days in this month, jump by interval and find first valid day
-          // Strict skipping: if target month has no valid day, keep jumping by interval
           
+          // 2. Scan next months
+          let nextCheck = currentDt.set({ day: 1 }).plus({ months: parsed.interval });
           let monthsAdded = 0;
-          const MAX_LOOPS = 48; // Safety break
-          
-          // Start looking from next interval
-          let foundNext = false;
-          let checkDate = new Date(nextDate);
-          
-          // Reset to 15th to ensure clean month addition (middle of month)
-          checkDate.setUTCDate(15); 
-          
-          while (!foundNext && monthsAdded < MAX_LOOPS) {
-             // Jump to next interval month
-             checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
-             monthsAdded++;
-             
-             const cLocal = this.getLocalParts(checkDate, timezone);
-             const cYear = cLocal.year;
-             const cMonth = cLocal.month;
-             const cLastDay = new Date(Date.UTC(cYear, cMonth + 1, 0)).getUTCDate();
-             
-             // Find first day in daysOfMonth that exists in this month
-             const validDays = parsed.daysOfMonth
-               .filter(d => d <= cLastDay)
-               .sort((a, b) => a - b);
-               
-             if (validDays.length > 0) {
-               // Found valid day in target month
-               // Set checkDate to that day
-               const diff = validDays[0] - cLocal.day;
-               checkDate.setUTCDate(checkDate.getUTCDate() + diff);
-               
-               nextDate.setTime(checkDate.getTime());
-               foundNext = true;
-             }
-             // If not found, loop continues to next interval month
-          }
-          
-          // If we exhausted loops (very rare edge case like day 32), just return simple addition
-          if (!foundNext) {
-             nextDate.setUTCMonth(nextDate.getUTCMonth() + parsed.interval);
-          }
-          
-        } else {
-          // Same day of month, next interval months
-          // Strict check for simple monthly (e.g. created on 31st, interval 1)
-          
-          let checkDate = new Date(nextDate);
-          const startLocal = this.getLocalParts(checkDate, timezone);
-          let targetDay = startLocal.day; // e.g. 31
-          
-          let monthsAdded = 0;
-          let foundNext = false;
           const MAX_LOOPS = 48;
           
-          // Start with next interval
-          checkDate.setUTCDate(15); // Reset to 15th
-          
-          while (!foundNext && monthsAdded < MAX_LOOPS) {
-            checkDate.setUTCMonth(checkDate.getUTCMonth() + parsed.interval);
-            monthsAdded++;
-            
-            const cLocal = this.getLocalParts(checkDate, timezone);
-            const cYear = cLocal.year;
-            const cMonth = cLocal.month;
-            const cLastDay = new Date(Date.UTC(cYear, cMonth + 1, 0)).getUTCDate();
-            
-            if (targetDay <= cLastDay) {
-               const diff = targetDay - cLocal.day;
-               checkDate.setUTCDate(checkDate.getUTCDate() + diff);
-               
-              nextDate.setTime(checkDate.getTime());
-              foundNext = true;
+          while (monthsAdded < MAX_LOOPS) {
+            const dim = nextCheck.daysInMonth || 30;
+            const validDays = parsed.daysOfMonth
+              .filter(d => d <= dim)
+              .sort((a, b) => a - b);
+              
+            if (validDays.length > 0) {
+              return nextCheck.set({ day: validDays[0] });
             }
+            
+            nextCheck = nextCheck.plus({ months: parsed.interval });
+            monthsAdded++;
           }
-          
-          if (!foundNext) {
-             nextDate.setUTCMonth(nextDate.getUTCMonth() + parsed.interval);
-          }
+          // Fallback
+          return currentDt.plus({ months: parsed.interval });
         }
-        break;
-
+        return currentDt.plus({ months: parsed.interval });
 
       case 'yearly':
-        nextDate.setUTCFullYear(nextDate.getUTCFullYear() + parsed.interval);
-        break;
+        return currentDt.plus({ years: parsed.interval });
     }
-
-    return nextDate;
+    return currentDt.plus({ days: parsed.interval });
   }
 
   /**
@@ -437,13 +285,7 @@ export class RecurrencePatternService {
     // Days of week (for weekly)
     if (parsed.type === 'weekly' && parsed.daysOfWeek && parsed.daysOfWeek.length > 0) {
       const dayMap: { [key: number]: string } = {
-        0: 'SU',
-        1: 'MO',
-        2: 'TU',
-        3: 'WE',
-        4: 'TH',
-        5: 'FR',
-        6: 'SA'
+        0: 'SU', 1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA'
       };
       const days = parsed.daysOfWeek.map(d => dayMap[d]).join(',');
       parts.push(`BYDAY=${days}`);
