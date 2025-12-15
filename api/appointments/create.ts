@@ -1,5 +1,6 @@
 
 
+import { DateTime } from 'luxon';
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../../lib/auth';
 import { googleCalendarService } from '../../lib/googleCalendarService';
@@ -26,8 +27,9 @@ const createAppointmentSchema = Joi.object({
   nutritionistId: Joi.string().uuid().optional(),
   title: Joi.string().required().max(255),
   description: Joi.string().optional().max(2000),
-  startTime: Joi.string().isoDate().required(),
-  endTime: Joi.string().isoDate().required(),
+  date: Joi.string().isoDate().optional(),
+  startTime: Joi.string().required(),
+  endTime: Joi.string().required(),
   timezone: Joi.string().optional().default('UTC'),
   location: Joi.string().optional().max(500),
   meetingLink: Joi.string().uri().optional().max(500),
@@ -111,8 +113,77 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
     }
 
     // Validate times
-    const startTime = new Date(value.startTime);
-    const endTime = new Date(value.endTime);
+    let startTime: Date;
+    let endTime: Date;
+
+    if (value.date) {
+      // Logic for separate date and time (HH:mm or h:mm a)
+      const timezone = value.timezone || 'UTC';
+      const dateStr = value.date.split('T')[0]; // Ensure YYYY-MM-DD
+
+      // Helper to parse time string
+      const parseTime = (timeStr: string) => {
+        // Try 24-hour format (HH:mm)
+        let dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd HH:mm', { zone: timezone });
+        if (dt.isValid) return dt;
+        
+        // Try 12-hour format (h:mm a or hh:mm a)
+        dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd h:mm a', { zone: timezone });
+        if (dt.isValid) return dt;
+
+        dt = DateTime.fromFormat(`${dateStr} ${timeStr}`, 'yyyy-MM-dd hh:mm a', { zone: timezone });
+        if (dt.isValid) return dt;
+
+        return null;
+      };
+
+      const startDt = parseTime(value.startTime);
+      const endDt = parseTime(value.endTime);
+
+      if (!startDt || !startDt.isValid) {
+         return res.status(400).json({
+          error: 'Validation error',
+          message: `Invalid startTime format: '${value.startTime}'. Use 'HH:mm' (24h) or 'h:mm a' (12h).`
+        });
+      }
+
+      if (!endDt || !endDt.isValid) {
+         return res.status(400).json({
+          error: 'Validation error',
+          message: `Invalid endTime format: '${value.endTime}'. Use 'HH:mm' (24h) or 'h:mm a' (12h).`
+        });
+      }
+
+      // Convert to UTC JS Dates for internal usage (services expect ISO strings or Dates)
+      // Actually, services might expect ISO strings in value object, but here we construct Dates.
+      startTime = startDt.toJSDate();
+      endTime = endDt.toJSDate();
+      
+      // Update value object with ISO strings so services downstream (which read value.startTime) work correctly
+      value.startTime = startDt.toUTC().toISO();
+      value.endTime = endDt.toUTC().toISO();
+
+    } else {
+      // Legacy/Standard ISO logic
+      // We removed .isoDate() from Joi, so we must check it here if date is missing
+      const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+      // Basic ISO check (simplistic) or try parsing with Date
+      if (isNaN(Date.parse(value.startTime))) {
+         return res.status(400).json({
+          error: 'Validation error',
+          message: 'startTime must be a valid ISO date string when date field is not provided'
+        });
+      }
+      if (isNaN(Date.parse(value.endTime))) {
+         return res.status(400).json({
+          error: 'Validation error',
+          message: 'endTime must be a valid ISO date string when date field is not provided'
+        });
+      }
+      
+      startTime = new Date(value.startTime);
+      endTime = new Date(value.endTime);
+    }
 
     if (endTime <= startTime) {
       return res.status(400).json({
