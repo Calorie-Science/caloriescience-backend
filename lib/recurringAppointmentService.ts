@@ -335,9 +335,11 @@ export class RecurringAppointmentService {
 
       // Generate instances for this parent in the requested range
       try {
+        // Never generate before the parent starts
+        const effectiveStartDate = parentStartDate > startDate ? parentStartDate : startDate;
         await this.generateAndStoreMissingInstances(
           parent.id,
-          startDate,
+          effectiveStartDate,
           endDate
         );
       } catch (error) {
@@ -386,12 +388,16 @@ export class RecurringAppointmentService {
       return [];
     }
 
+    // Clamp generation start so we never generate before the parent starts
+    const parentStart = new Date(parent.start_time);
+    const generationStart = parentStart > startDate ? parentStart : startDate;
+
     // Check what's already stored in this range
     const { data: existing } = await supabase
       .from('appointments')
       .select('start_time')
       .eq('parent_appointment_id', parentId)
-      .gte('start_time', startDate.toISOString())
+      .gte('start_time', generationStart.toISOString())
       .lte('start_time', endDate.toISOString());
 
     const existingDates = new Set(
@@ -401,7 +407,7 @@ export class RecurringAppointmentService {
     // Generate dates for range
     const dates = this.patternService.generateDates(
       parent.recurrence_pattern,
-      startDate,
+      generationStart,
       endDate
     );
 
