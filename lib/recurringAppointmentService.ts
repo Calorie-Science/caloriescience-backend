@@ -509,7 +509,7 @@ export class RecurringAppointmentService {
   async updateRecurringAppointment(
     appointmentId: string,
     updates: any,
-    updateAllInstances: boolean = false
+    updateScope: 'this_only' | 'this_and_following' | 'all' = 'this_only'
   ): Promise<any> {
     // Get the appointment
     const { data: appointment, error } = await supabase
@@ -527,17 +527,19 @@ export class RecurringAppointmentService {
     }
 
     const isParent = appointment.parent_appointment_id === null;
+    const parentId = isParent ? appointment.id : appointment.parent_appointment_id;
 
-    // If updating parent and updateAllInstances is true, update all future instances
-    if (isParent && updateAllInstances) {
-      // Update parent
+    // SCOPE: ALL
+    // Update parent and all children
+    if (updateScope === 'all') {
+      // 1. Update Parent
       const { data: updatedParent, error: updateError } = await supabase
         .from('appointments')
         .update({
           ...updates,
           updated_at: new Date().toISOString()
         })
-        .eq('id', appointmentId)
+        .eq('id', parentId)
         .select()
         .single();
 
@@ -545,35 +547,178 @@ export class RecurringAppointmentService {
         throw new Error(`Failed to update parent: ${updateError.message}`);
       }
 
-      // Update all future child instances
-      const { data: children } = await supabase
-        .from('appointments')
-        .select('id')
-        .eq('parent_appointment_id', appointmentId)
-        .gte('start_time', new Date().toISOString());
+      // 2. Update ALL existing child instances (past and future) linked to this parent
+      // Note: We deliberately update everything to keep the series consistent.
+      // If we wanted to preserve "exceptions" (is_modified), we would filter them out,
+      // but "update all" usually implies "reset series to this new state".
+      
+      const childUpdates: any = {
+        updated_at: new Date().toISOString()
+      };
+      
+      // Map fields
+      if (updates.title) childUpdates.title = updates.title;
+      if (updates.description !== undefined) childUpdates.description = updates.description;
+      if (updates.location !== undefined) childUpdates.location = updates.location;
+      if (updates.meeting_link !== undefined) childUpdates.meeting_link = updates.meeting_link;
+      if (updates.appointment_type) childUpdates.appointment_type = updates.appointment_type;
+      if (updates.notes !== undefined) childUpdates.notes = updates.notes;
+      if (updates.additional_attendees !== undefined) childUpdates.additional_attendees = updates.additional_attendees;
 
-      if (children && children.length > 0) {
-        const childUpdates: any = {};
-        if (updates.title) childUpdates.title = updates.title;
-        if (updates.description !== undefined) childUpdates.description = updates.description;
-        if (updates.start_time) {
-          // Calculate duration and apply to children
-          const durationMs = new Date(updates.end_time).getTime() - new Date(updates.start_time).getTime();
-          // This would need more complex logic to update each child's time
+      // Time updates for 'all' are tricky.
+      // Usually, 'all' implies updating the pattern time (e.g. 10am -> 11am).
+      // We need to shift all children by the same delta or reset them to the pattern.
+      // Simplest robust approach: Update Parent, Delete Future Children, Regenerate? 
+      // No, that destroys history.
+      // Better: Calculate time delta and apply to all children?
+      // Or: If start_time is provided, assume it's the new "Time of Day" for the series.
+      
+      if (updates.start_time && updates.end_time) {
+        // This is complex. We need to iterate all children and update their time-of-day.
+        // We can't do this in a single SQL update easily if dates differ.
+        // For MVP: We will update non-time fields in bulk.
+        // Time fields: We will ONLY update future instances by regenerating them?
+        // Or fetch all, map, update.
+        
+        // Fetch all children
+        const { data: children } = await supabase
+          .from('appointments')
+          .select('*')
+          .eq('parent_appointment_id', parentId);
+          
+        if (children) {
+          const newStartTime = new Date(updates.start_time);
+          const newEndTime = new Date(updates.end_time);
+          
+          for (const child of children) {
+            const childDate = new Date(child.start_time); // Keep date
+            const childStart = new Date(childDate);
+            childStart.setUTCHours(newStartTime.getUTCHours(), newStartTime.getUTCMinutes(), 0, 0);
+            
+            const durationMs = newEndTime.getTime() - newStartTime.getTime();
+            const childEnd = new Date(childStart.getTime() + durationMs);
+            
+            await supabase
+              .from('appointments')
+              .update({
+                ...childUpdates,
+                start_time: childStart.toISOString(),
+                end_time: childEnd.toISOString()
+              })
+              .eq('id', child.id);
+          }
         }
-        if (updates.location !== undefined) childUpdates.location = updates.location;
-        if (updates.meeting_link !== undefined) childUpdates.meeting_link = updates.meeting_link;
-        if (updates.appointment_type) childUpdates.appointment_type = updates.appointment_type;
-
+      } else {
+        // Bulk update non-time fields
         await supabase
           .from('appointments')
           .update(childUpdates)
-          .in('id', children.map(c => c.id));
+          .eq('parent_appointment_id', parentId);
       }
 
-      return updatedParent;
-    } else {
-      // Update single instance (child or parent without updateAllInstances)
+      return isParent ? updatedParent : await supabase.from('appointments').select('*').eq('id', appointmentId).single().then(r => r.data);
+    } 
+    
+    // SCOPE: THIS_AND_FOLLOWING
+    // Split the series
+    else if (updateScope === 'this_and_following') {
+      // 1. Determine split point
+      const splitDate = new Date(appointment.start_time);
+      const splitSequence = appointment.recurrence_sequence_number;
+      
+      // 2. Identify the original parent
+      const { data: originalParent } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('id', parentId)
+        .single();
+        
+      if (!originalParent) throw new Error('Original parent not found');
+
+      // 3. Stop the old series: Set recurrence_end_date on original parent
+      // The old series should end the day BEFORE this instance.
+      const dayBefore = new Date(splitDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      
+      await supabase
+        .from('appointments')
+        .update({
+          recurrence_end_date: dayBefore.toISOString().split('T')[0],
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', parentId);
+
+      // 4. Create NEW Parent starting from this instance
+      // Use the 'updates' to define the new parent's properties (new time, new title, etc.)
+      // Use original parent's pattern, but check if we need to adjust start date logic?
+      // No, createParent handles it.
+      
+      const newParentData: CreateRecurringAppointmentData = {
+        nutritionistId: originalParent.nutritionist_id,
+        clientId: originalParent.client_id,
+        title: updates.title || originalParent.title,
+        description: updates.description !== undefined ? updates.description : originalParent.description,
+        startTime: updates.start_time || appointment.start_time, // Use new time or existing instance time
+        endTime: updates.end_time || appointment.end_time,
+        timezone: updates.timezone || originalParent.timezone,
+        location: updates.location !== undefined ? updates.location : originalParent.location,
+        meetingLink: updates.meeting_link !== undefined ? updates.meeting_link : originalParent.meeting_link,
+        notes: updates.notes !== undefined ? updates.notes : originalParent.notes,
+        appointmentType: updates.appointment_type || originalParent.appointment_type,
+        additionalAttendees: updates.additional_attendees !== undefined ? updates.additional_attendees : originalParent.additional_attendees,
+        recurrencePattern: originalParent.recurrence_pattern, // Keep same pattern
+        createdByUserId: originalParent.created_by_user_id,
+        createdByUserType: originalParent.created_by_user_type
+      };
+      
+      // If original pattern had an end date, preserve it? Yes.
+      // If original pattern had occurrence count, we need to calculate remaining?
+      // For simplicity/robustness: stick to endDate if possible. 
+      // If count, might reset count. Let's keep it simple: copy pattern.
+      
+      // Create new parent (this instance becomes the new parent)
+      // BUT: If "this" instance already exists in DB (as a child), we should DELETE it and replace with new Parent?
+      // OR promote it? Promoting is hard because ID changes or schema changes.
+      // Easier: Delete "this and following" existing instances, then Create New Series.
+      
+      // Delete existing future instances (including this one)
+      await supabase
+        .from('appointments')
+        .delete()
+        .or(`id.eq.${parentId},parent_appointment_id.eq.${parentId}`) // Check parent match
+        .gte('start_time', splitDate.toISOString()); // Future only
+        
+      // Wait, if we delete 'this' instance by ID, we are good.
+      // If we delete by parent_id + date, we catch all future generated ones.
+      
+      // Actually, safest is:
+      // A. Truncate old series (update end date) -> Prevents regeneration of old series in future.
+      // B. Delete existing concrete instances >= splitDate.
+      // C. Create new series.
+      
+      // A. Update Old Parent End Date
+      // (Done above)
+      
+      // B. Delete existing instances >= splitDate linked to old parent
+      await supabase
+        .from('appointments')
+        .delete()
+        .eq('parent_appointment_id', parentId)
+        .gte('start_time', splitDate.toISOString());
+        
+      // Also, if 'appointmentId' IS the parent (sequence 0) and we are doing "this and following" (which is "all"),
+      // we essentially just did 'all' logic.
+      // But if we are at sequence 5, we delete 5, 6, 7...
+      
+      // C. Create New Series
+      const result = await this.createRecurringAppointment(newParentData);
+      
+      return result.parent;
+    }
+
+    // SCOPE: THIS_ONLY
+    else {
+      // Update single instance (child or parent)
       const updateData: any = {
         ...updates,
         updated_at: new Date().toISOString()

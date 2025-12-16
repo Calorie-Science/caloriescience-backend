@@ -153,12 +153,16 @@ async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelR
             isChild: apt.parent_appointment_id !== null,
             parentAppointmentId: apt.parent_appointment_id,
             sequenceNumber: apt.recurrence_sequence_number,
+            // Prefer child's data if modified, else fallback to parent
             recurrencePattern: apt.recurrence_pattern || (apt.parent_appointment?.recurrence_pattern),
             recurrenceStatus: apt.recurrence_status,
             recurrenceEndDate: apt.recurrence_end_date || apt.parent_appointment?.recurrence_end_date,
             recurrenceOccurrenceCount: apt.recurrence_occurrence_count || apt.parent_appointment?.recurrence_occurrence_count,
             isModified: apt.is_modified || false,
             originalTemplateData: apt.original_template_data,
+            // DO NOT override child fields with parent fields in the main object
+            // The main object (apt) already comes from the DB row for that specific instance.
+            // Just ensure we aren't confusing the frontend with parent metadata that might look like active data.
             parentAppointment: apt.parent_appointment || null
           } : null
         }));
