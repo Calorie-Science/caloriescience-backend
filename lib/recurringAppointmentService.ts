@@ -532,11 +532,55 @@ export class RecurringAppointmentService {
     // SCOPE: ALL
     // Update parent and all children
     if (updateScope === 'all') {
+      
+      // Determine what fields to update on Parent
+      // CRITICAL: If 'startTime' is updated from a child instance (e.g. Jan 14),
+      // we must NOT simply overwrite Parent's startTime (Dec 16) with Jan 14,
+      // as that would move the entire series start to Jan 14.
+      // Instead, we only want to update the TIME component of the Parent's start_time.
+      
+      const parentUpdates = { ...updates };
+      
+      if (parentUpdates.start_time && parentUpdates.end_time) {
+        // Fetch current parent to get its original date
+        const { data: currentParent } = await supabase
+          .from('appointments')
+          .select('start_time, end_time, timezone')
+          .eq('id', parentId)
+          .single();
+          
+        if (currentParent) {
+          const newStart = new Date(parentUpdates.start_time);
+          const newEnd = new Date(parentUpdates.end_time);
+          const originalStart = new Date(currentParent.start_time);
+          const originalEnd = new Date(currentParent.end_time);
+          
+          // Construct new Parent start_time: Original Date + New Time
+          // We use the timezone to ensure we are setting the correct wall-clock time
+          // Or we can just use UTC hours if we assume the payload is already correct UTC for the target day.
+          // Best way: Use setHours/Minutes/Seconds in UTC.
+          
+          const updatedParentStart = new Date(originalStart);
+          updatedParentStart.setUTCHours(
+            newStart.getUTCHours(),
+            newStart.getUTCMinutes(),
+            newStart.getUTCSeconds(),
+            newStart.getUTCMilliseconds()
+          );
+          
+          const duration = newEnd.getTime() - newStart.getTime();
+          const updatedParentEnd = new Date(updatedParentStart.getTime() + duration);
+          
+          parentUpdates.start_time = updatedParentStart.toISOString();
+          parentUpdates.end_time = updatedParentEnd.toISOString();
+        }
+      }
+
       // 1. Update Parent
       const { data: updatedParent, error: updateError } = await supabase
         .from('appointments')
         .update({
-          ...updates,
+          ...parentUpdates, // Use the adjusted updates
           updated_at: new Date().toISOString()
         })
         .eq('id', parentId)
@@ -548,15 +592,12 @@ export class RecurringAppointmentService {
       }
 
       // 2. Update ALL existing child instances (past and future) linked to this parent
-      // Note: We deliberately update everything to keep the series consistent.
-      // If we wanted to preserve "exceptions" (is_modified), we would filter them out,
-      // but "update all" usually implies "reset series to this new state".
       
       const childUpdates: any = {
         updated_at: new Date().toISOString()
       };
       
-      // Map fields
+      // Map fields (excluding time for now)
       if (updates.title) childUpdates.title = updates.title;
       if (updates.description !== undefined) childUpdates.description = updates.description;
       if (updates.location !== undefined) childUpdates.location = updates.location;
@@ -565,37 +606,32 @@ export class RecurringAppointmentService {
       if (updates.notes !== undefined) childUpdates.notes = updates.notes;
       if (updates.additional_attendees !== undefined) childUpdates.additional_attendees = updates.additional_attendees;
 
-      // Time updates for 'all' are tricky.
-      // Usually, 'all' implies updating the pattern time (e.g. 10am -> 11am).
-      // We need to shift all children by the same delta or reset them to the pattern.
-      // Simplest robust approach: Update Parent, Delete Future Children, Regenerate? 
-      // No, that destroys history.
-      // Better: Calculate time delta and apply to all children?
-      // Or: If start_time is provided, assume it's the new "Time of Day" for the series.
-      
       if (updates.start_time && updates.end_time) {
-        // This is complex. We need to iterate all children and update their time-of-day.
-        // We can't do this in a single SQL update easily if dates differ.
-        // For MVP: We will update non-time fields in bulk.
-        // Time fields: We will ONLY update future instances by regenerating them?
-        // Or fetch all, map, update.
-        
-        // Fetch all children
+        // Update Time for all children
         const { data: children } = await supabase
           .from('appointments')
           .select('*')
           .eq('parent_appointment_id', parentId);
           
-        if (children) {
+        if (children && children.length > 0) {
           const newStartTime = new Date(updates.start_time);
           const newEndTime = new Date(updates.end_time);
+          const durationMs = newEndTime.getTime() - newStartTime.getTime();
           
+          // Batch update might be inefficient if we do one by one, 
+          // but we need to preserve each child's specific date.
           for (const child of children) {
-            const childDate = new Date(child.start_time); // Keep date
+            const childDate = new Date(child.start_time); 
             const childStart = new Date(childDate);
-            childStart.setUTCHours(newStartTime.getUTCHours(), newStartTime.getUTCMinutes(), 0, 0);
             
-            const durationMs = newEndTime.getTime() - newStartTime.getTime();
+            // Apply new time to child's date
+            childStart.setUTCHours(
+              newStartTime.getUTCHours(), 
+              newStartTime.getUTCMinutes(), 
+              newStartTime.getUTCSeconds(), 
+              newStartTime.getUTCMilliseconds()
+            );
+            
             const childEnd = new Date(childStart.getTime() + durationMs);
             
             await supabase
